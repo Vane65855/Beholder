@@ -21,7 +21,7 @@
       <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.1" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="LiveChartsCore.SkiaSharpView.Avalonia" Version="2.1.0-dev-247" />
   </ItemGroup>
 
@@ -34,5 +34,9 @@
      Safe to suppress on Windows. Remove when Avalonia updates the reference. -->
   <ItemGroup>
     <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-xrw6-gwf8-vvr9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.92.0" />
   </ItemGroup>
 </Project>
