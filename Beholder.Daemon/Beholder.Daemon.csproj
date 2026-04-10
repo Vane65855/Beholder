@@ -15,6 +15,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Beholder.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Beholder.Core\Beholder.Core.csproj" />
     <ProjectReference Include="..\Beholder.Protocol\Beholder.Protocol.csproj" />
     <ProjectReference Include="..\Beholder.Daemon.GeoIp\Beholder.Daemon.GeoIp.csproj" />
