@@ -89,7 +89,6 @@ process on the machine. This runbook is the end-to-end verification.
 - **Many flow lines still show raw IPs**: expected. Background services (Windows Update, telemetry, Edge WebView, etc.) cache DNS results across daemon restarts. Their flows are real, but the DNS event fired before the daemon was running so the IP→hostname mapping was never observed.
 - **`ipconfig /flushdns` is required for fresh visibility**: expected. The OS resolver caches DNS answers for the record's TTL; cached answers do not re-fire the DNS Client ETW provider. If you want to see hostnames for a domain you already visited, flush the cache first.
 - **A hostname sometimes flips between two names for the same CDN IP**: expected and correct. Multiple domains can legitimately resolve to the same CDN edge IP; the cache uses last-write-wins, so whichever query happened most recently is what you see on the next flow line.
-- **Debug-level `DNS ETW:` lines flood the console**: expected while the Phase 2.2 diagnostic log is in place. The log records every raw DNS-provider event at Debug level so the operator can verify event ID 3008 and the `QueryName`/`QueryResults` payload field names match the current Windows build. A follow-up pass removes this log once the fields are verified on target hardware.
 
 ## Related
 

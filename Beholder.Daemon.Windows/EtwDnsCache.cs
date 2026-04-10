@@ -140,14 +140,6 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
 
     private void OnEtwEvent(TraceEvent data) {
         try {
-            // Phase 2.2 diagnostic: log every DNS-provider event we receive at Debug so
-            // the operator can confirm the event ID and payload field names match the
-            // current Windows build. Removed in a follow-up pass once event-ID 3008 +
-            // QueryName/QueryResults are verified on the target machine.
-            _logger.LogDebug(
-                "DNS ETW: {EventName} ID={Id} Task={Task} Opcode={Opcode}",
-                data.EventName, (int)data.ID, data.TaskName, data.OpcodeName);
-
             if ((int)data.ID != DnsQueryCompletedEventId) return;
 
             var queryName = data.PayloadByName("QueryName") as string;
