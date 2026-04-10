@@ -24,6 +24,29 @@ public sealed class SqliteFirewallRuleStoreTests : IDisposable {
     }
 
     [Fact]
+    public void Constructor_NullConnectionFactory_ThrowsArgumentNullException() {
+        Assert.Throws<ArgumentNullException>(() => new SqliteFirewallRuleStore(null!));
+    }
+
+    [Fact]
+    public async Task GetByProcessAndDirectionAsync_NullProcessPath_ThrowsArgumentNullException() {
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => _store.GetByProcessAndDirectionAsync(null!, Direction.Outbound, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task UpsertAsync_NullRule_ThrowsArgumentNullException() {
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => _store.UpsertAsync(null!, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RemoveAsync_NullProcessPath_ThrowsArgumentNullException() {
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => _store.RemoveAsync(null!, Direction.Outbound, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task UpsertAsync_NewRule_InsertsAndReturnsWithId() {
         var rule = MakeRule();
 
@@ -39,16 +62,23 @@ public sealed class SqliteFirewallRuleStoreTests : IDisposable {
     }
 
     [Fact]
-    public async Task UpsertAsync_ExistingRule_UpdatesActionAndTimestamp() {
-        var initial = MakeRule(action: FirewallAction.Allow, updatedAt: DefaultTimestamp);
+    public async Task UpsertAsync_ExistingRule_UpdatesActionSourceAndTimestamp() {
+        var initial = MakeRule(
+            action: FirewallAction.Allow,
+            source: RuleSource.Manual,
+            updatedAt: DefaultTimestamp);
         var first = await _store.UpsertAsync(initial, CancellationToken.None);
 
         var laterTimestamp = DefaultTimestamp.AddHours(2);
-        var updated = MakeRule(action: FirewallAction.Block, updatedAt: laterTimestamp);
+        var updated = MakeRule(
+            action: FirewallAction.Block,
+            source: RuleSource.Default,
+            updatedAt: laterTimestamp);
         var second = await _store.UpsertAsync(updated, CancellationToken.None);
 
         Assert.Equal(first.Id, second.Id);
         Assert.Equal(FirewallAction.Block, second.Action);
+        Assert.Equal(RuleSource.Default, second.Source);
         Assert.Equal(laterTimestamp, second.UpdatedAt);
     }
 
@@ -96,6 +126,22 @@ public sealed class SqliteFirewallRuleStoreTests : IDisposable {
 
         Assert.NotNull(rules);
         Assert.Empty(rules);
+    }
+
+    [Fact]
+    public async Task ListAllAsync_ReturnsRulesOrderedByIdAscending() {
+        var first = await _store.UpsertAsync(MakeRule(processPath: "/usr/bin/curl"), CancellationToken.None);
+        var second = await _store.UpsertAsync(MakeRule(processPath: "/usr/bin/wget"), CancellationToken.None);
+        var third = await _store.UpsertAsync(MakeRule(processPath: "/usr/bin/ssh"), CancellationToken.None);
+
+        var rules = await _store.ListAllAsync(CancellationToken.None);
+
+        Assert.Equal(3, rules.Count);
+        Assert.Equal(first.Id, rules[0].Id);
+        Assert.Equal(second.Id, rules[1].Id);
+        Assert.Equal(third.Id, rules[2].Id);
+        Assert.True(rules[0].Id < rules[1].Id);
+        Assert.True(rules[1].Id < rules[2].Id);
     }
 
     [Fact]

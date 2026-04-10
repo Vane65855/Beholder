@@ -24,6 +24,23 @@ public sealed class SqliteProcessRegistryTests : IDisposable {
     }
 
     [Fact]
+    public void Constructor_NullConnectionFactory_ThrowsArgumentNullException() {
+        Assert.Throws<ArgumentNullException>(() => new SqliteProcessRegistry(null!));
+    }
+
+    [Fact]
+    public async Task GetByPathAsync_NullPath_ThrowsArgumentNullException() {
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => _registry.GetByPathAsync(null!, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RegisterAsync_NullInfo_ThrowsArgumentNullException() {
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => _registry.RegisterAsync(null!, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task RegisterAsync_NewProcess_Inserts() {
         var info = MakeProcessInfo();
 
@@ -40,25 +57,36 @@ public sealed class SqliteProcessRegistryTests : IDisposable {
     }
 
     [Fact]
-    public async Task RegisterAsync_ExistingProcess_UpdatesLastSeenAndSha256() {
+    public async Task RegisterAsync_ExistingProcess_UpdatesAllMutableColumns() {
         var firstTime = new DateTimeOffset(2026, 4, 1, 0, 0, 0, TimeSpan.Zero);
         var laterTime = new DateTimeOffset(2026, 4, 10, 0, 0, 0, TimeSpan.Zero);
+        var laterHashedAt = new DateTimeOffset(2026, 4, 10, 1, 0, 0, TimeSpan.Zero);
         var newHash = new byte[32];
         Array.Fill(newHash, (byte)0x01);
 
         await _registry.RegisterAsync(
-            MakeProcessInfo(sha256: null, lastSeen: firstTime),
+            MakeProcessInfo(
+                displayName: "curl",
+                sha256: null,
+                lastSeen: firstTime,
+                lastHashedAt: null),
             CancellationToken.None
         );
         await _registry.RegisterAsync(
-            MakeProcessInfo(sha256: newHash, lastSeen: laterTime),
+            MakeProcessInfo(
+                displayName: "curl-updated",
+                sha256: newHash,
+                lastSeen: laterTime,
+                lastHashedAt: laterHashedAt),
             CancellationToken.None
         );
 
         var fetched = await _registry.GetByPathAsync("/usr/bin/curl", CancellationToken.None);
         Assert.NotNull(fetched);
+        Assert.Equal("curl-updated", fetched.DisplayName);
         Assert.Equal(newHash, fetched.Sha256);
         Assert.Equal(laterTime, fetched.LastSeen);
+        Assert.Equal(laterHashedAt, fetched.LastHashedAt);
     }
 
     [Fact]

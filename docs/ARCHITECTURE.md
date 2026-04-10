@@ -130,9 +130,9 @@ All persistent state lives in a single SQLite database file.
 CREATE TABLE event_log (
     seq         INTEGER PRIMARY KEY AUTOINCREMENT,
     ts_unix_ns  INTEGER NOT NULL,
-    kind        TEXT    NOT NULL,   -- 'counter', 'new_process', 'hash_changed',
-                                   -- 'chain_error', 'fw_rule_created',
-                                   -- 'fw_rule_changed', 'fw_rule_removed'
+    kind        TEXT    NOT NULL,   -- 'Counter', 'NewProcess', 'HashChanged',
+                                   -- 'ChainError', 'FirewallRuleCreated',
+                                   -- 'FirewallRuleChanged', 'FirewallRuleRemoved'
     payload     BLOB    NOT NULL,  -- canonical serialized event
     prev_hash   BLOB    NOT NULL,  -- SHA-256 of previous row's row_hash (32 bytes)
     row_hash    BLOB    NOT NULL   -- SHA-256(seq || ts || kind || payload || prev_hash)
@@ -157,9 +157,9 @@ CREATE TABLE checkpoint (
 CREATE TABLE firewall_rules (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     process_path TEXT    NOT NULL,
-    direction    TEXT    NOT NULL,  -- 'in' or 'out'
-    action       TEXT    NOT NULL,  -- 'allow' or 'block'
-    source       TEXT    NOT NULL,  -- 'manual', 'default', 'remote'
+    direction    TEXT    NOT NULL,  -- 'Inbound' or 'Outbound'
+    action       TEXT    NOT NULL,  -- 'Allow' or 'Block'
+    source       TEXT    NOT NULL,  -- 'Manual', 'Default', 'Remote'
     created_at   INTEGER NOT NULL,
     updated_at   INTEGER NOT NULL,
     UNIQUE(process_path, direction)

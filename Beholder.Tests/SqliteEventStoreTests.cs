@@ -27,6 +27,18 @@ public sealed class SqliteEventStoreTests : IDisposable {
     }
 
     [Fact]
+    public void Constructor_NullConnectionFactory_ThrowsArgumentNullException() {
+        Assert.Throws<ArgumentNullException>(
+            () => new SqliteEventStore(null!, TimeProvider.System));
+    }
+
+    [Fact]
+    public void Constructor_NullTimeProvider_ThrowsArgumentNullException() {
+        Assert.Throws<ArgumentNullException>(
+            () => new SqliteEventStore(_connectionFactory, null!));
+    }
+
+    [Fact]
     public async Task AppendAsync_SingleEvent_InsertsRowWithValidChain() {
         var payload = new byte[] { 0x01, 0x02, 0x03 };
 
@@ -116,9 +128,26 @@ public sealed class SqliteEventStoreTests : IDisposable {
     }
 
     [Fact]
+    public async Task VerifyAsync_CorruptedPayload_ReturnsFailure() {
+        for (var i = 0; i < 3; i++) {
+            await _store.AppendAsync(EventKind.Counter, new byte[] { (byte)i }, CancellationToken.None);
+        }
+
+        CorruptColumn(seq: 1L, column: "payload");
+
+        var result = await _store.VerifyAsync(CancellationToken.None);
+
+        Assert.False(result.IsValid);
+        Assert.Equal(1L, result.FailedAtSeq);
+        Assert.Equal(1L, result.RowsVerified);
+        Assert.NotNull(result.ErrorMessage);
+        Assert.Contains("row_hash mismatch", result.ErrorMessage);
+    }
+
+    [Fact]
     public async Task AppendAsync_ConcurrentAppends_AreSerializedCorrectly() {
         var tasks = new List<Task>();
-        for (var i = 0; i < 10; i++) {
+        for (var i = 0; i < 100; i++) {
             var payload = new byte[] { (byte)i };
             tasks.Add(_store.AppendAsync(EventKind.Counter, payload, CancellationToken.None));
         }
@@ -126,11 +155,11 @@ public sealed class SqliteEventStoreTests : IDisposable {
 
         var verify = await _store.VerifyAsync(CancellationToken.None);
         Assert.True(verify.IsValid);
-        Assert.Equal(10L, verify.RowsVerified);
+        Assert.Equal(100L, verify.RowsVerified);
 
         var rows = ReadAllRows();
-        Assert.Equal(10, rows.Count);
-        for (var i = 0; i < 10; i++) {
+        Assert.Equal(100, rows.Count);
+        for (var i = 0; i < 100; i++) {
             Assert.Equal((long)i, rows[i].Seq);
         }
     }
@@ -170,12 +199,17 @@ public sealed class SqliteEventStoreTests : IDisposable {
     private void CorruptColumn(long seq, string column) {
         // Whitelist column names — this helper is only ever called from test code, but
         // string interpolation into SQL warrants a guard regardless.
-        if (column != "row_hash" && column != "prev_hash") {
+        if (column != "row_hash" && column != "prev_hash" && column != "payload") {
             throw new ArgumentException($"Unsupported column for corruption: {column}", nameof(column));
         }
 
-        var garbage = new byte[ChainHasher.HashSize];
-        Array.Fill(garbage, (byte)0xEE);
+        byte[] garbage;
+        if (column == "payload") {
+            garbage = new byte[] { 0xDE, 0xAD, 0xBE, 0xEF };
+        } else {
+            garbage = new byte[ChainHasher.HashSize];
+            Array.Fill(garbage, (byte)0xEE);
+        }
 
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();

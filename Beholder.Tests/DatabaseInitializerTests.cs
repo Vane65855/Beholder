@@ -95,10 +95,10 @@ public sealed class DatabaseInitializerTests : IDisposable {
     public void Initialize_FirewallRulesTable_HasUniqueConstraint() {
         new DatabaseInitializer(_databasePath).Initialize();
 
-        InsertFirewallRule(processPath: "/usr/bin/curl", direction: "out", action: "allow");
+        InsertFirewallRule(processPath: "/usr/bin/curl", direction: "Outbound", action: "Allow");
 
         var ex = Assert.Throws<SqliteException>(() =>
-            InsertFirewallRule(processPath: "/usr/bin/curl", direction: "out", action: "block"));
+            InsertFirewallRule(processPath: "/usr/bin/curl", direction: "Outbound", action: "Block"));
 
         Assert.Contains("UNIQUE", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -148,7 +148,7 @@ public sealed class DatabaseInitializerTests : IDisposable {
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO firewall_rules (process_path, direction, action, source, created_at, updated_at)
-            VALUES ($path, $dir, $action, 'manual', 0, 0);
+            VALUES ($path, $dir, $action, 'Manual', 0, 0);
             """;
         command.Parameters.AddWithValue("$path", processPath);
         command.Parameters.AddWithValue("$dir", direction);
