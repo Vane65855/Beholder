@@ -13,7 +13,7 @@ public class FirewallRuleTests {
             processPath: "/usr/bin/curl",
             direction: Direction.Outbound,
             action: FirewallAction.Block,
-            source: "manual",
+            source: RuleSource.Manual,
             createdAt: created,
             updatedAt: updated
         );
@@ -22,7 +22,7 @@ public class FirewallRuleTests {
         Assert.Equal("/usr/bin/curl", rule.ProcessPath);
         Assert.Equal(Direction.Outbound, rule.Direction);
         Assert.Equal(FirewallAction.Block, rule.Action);
-        Assert.Equal("manual", rule.Source);
+        Assert.Equal(RuleSource.Manual, rule.Source);
         Assert.Equal(created, rule.CreatedAt);
         Assert.Equal(updated, rule.UpdatedAt);
     }
@@ -34,20 +34,7 @@ public class FirewallRuleTests {
             processPath: null!,
             direction: Direction.Outbound,
             action: FirewallAction.Allow,
-            source: "manual",
-            createdAt: DateTimeOffset.UnixEpoch,
-            updatedAt: DateTimeOffset.UnixEpoch
-        ));
-    }
-
-    [Fact]
-    public void Constructor_WhitespaceSource_ThrowsArgumentException() {
-        Assert.Throws<ArgumentException>(() => new FirewallRule(
-            id: 0,
-            processPath: "/usr/bin/curl",
-            direction: Direction.Outbound,
-            action: FirewallAction.Allow,
-            source: "   ",
+            source: RuleSource.Manual,
             createdAt: DateTimeOffset.UnixEpoch,
             updatedAt: DateTimeOffset.UnixEpoch
         ));
@@ -60,9 +47,17 @@ public class FirewallRuleTests {
             processPath: "   ",
             direction: Direction.Outbound,
             action: FirewallAction.Allow,
-            source: "manual",
+            source: RuleSource.Manual,
             createdAt: DateTimeOffset.UnixEpoch,
             updatedAt: DateTimeOffset.UnixEpoch
         ));
+    }
+
+    [Fact]
+    public void AllRuleSourceValues_AreDefined() {
+        Assert.True(Enum.IsDefined(RuleSource.Manual));
+        Assert.True(Enum.IsDefined(RuleSource.Default));
+        Assert.True(Enum.IsDefined(RuleSource.Remote));
+        Assert.Equal(3, Enum.GetValues<RuleSource>().Length);
     }
 }

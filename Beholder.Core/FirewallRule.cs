@@ -18,8 +18,8 @@ public sealed record FirewallRule {
     /// <summary>Action the rule takes on a matched flow.</summary>
     public FirewallAction Action { get; }
 
-    /// <summary>Origin of the rule: typically "manual", "default", or "remote".</summary>
-    public string Source { get; }
+    /// <summary>Origin of the rule.</summary>
+    public RuleSource Source { get; }
 
     /// <summary>Wall-clock timestamp at which the rule was created.</summary>
     public DateTimeOffset CreatedAt { get; }
@@ -33,12 +33,11 @@ public sealed record FirewallRule {
         string processPath,
         Direction direction,
         FirewallAction action,
-        string source,
+        RuleSource source,
         DateTimeOffset createdAt,
         DateTimeOffset updatedAt
     ) {
         ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(source);
 
         Id = id;
         ProcessPath = processPath;
