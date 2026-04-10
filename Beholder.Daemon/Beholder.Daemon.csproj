@@ -7,6 +7,10 @@
     <UserSecretsId>dotnet-Beholder.Daemon-d7c6a9d7-e44c-495e-926a-a663334bd97c</UserSecretsId>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
+    <DefineConstants>$(DefineConstants);PLATFORM_WINDOWS</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Grpc.AspNetCore" Version="2.76.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.5" />
