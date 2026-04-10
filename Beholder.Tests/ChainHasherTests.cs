@@ -154,4 +154,56 @@ public class ChainHasherTests {
         Assert.False(ChainHasher.Verify(1, 200, EventKind.Counter, tamperedPayload1, hash0, hash1));
         Assert.True(ChainHasher.Verify(0, 100, EventKind.Counter, payload0, ChainHasher.ZeroPrevHash, hash0));
     }
+
+    [Fact]
+    public void ComputeRowHash_LargePayload_UsesArrayPoolPath() {
+        var payload = new byte[2048];
+        for (var i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xff);
+
+        var hash = ChainHasher.ComputeRowHash(Seq, Timestamp, Kind, payload, ChainHasher.ZeroPrevHash);
+
+        Assert.Equal(ChainHasher.HashSize, hash.Length);
+        Assert.True(ChainHasher.Verify(Seq, Timestamp, Kind, payload, ChainHasher.ZeroPrevHash, hash));
+    }
+
+    [Fact]
+    public void ComputeRowHash_BoundaryPayload_AtExactStackallocThreshold() {
+        // HeaderSize (20) + payload (972) + HashSize (32) = 1024, the inclusive threshold.
+        var payload = new byte[972];
+
+        var hash = ChainHasher.ComputeRowHash(Seq, Timestamp, Kind, payload, ChainHasher.ZeroPrevHash);
+
+        Assert.Equal(ChainHasher.HashSize, hash.Length);
+        Assert.True(ChainHasher.Verify(Seq, Timestamp, Kind, payload, ChainHasher.ZeroPrevHash, hash));
+    }
+
+    [Fact]
+    public void ComputeRowHash_EmptyPayload_Succeeds() {
+        var hash = ChainHasher.ComputeRowHash(Seq, Timestamp, Kind, ReadOnlySpan<byte>.Empty, ChainHasher.ZeroPrevHash);
+
+        Assert.Equal(ChainHasher.HashSize, hash.Length);
+    }
+
+    [Fact]
+    public void Verify_InvalidPrevHashLength_ThrowsArgumentException() {
+        var shortPrev = new byte[31];
+        var anyHash = new byte[ChainHasher.HashSize];
+
+        Assert.Throws<ArgumentException>(() =>
+            ChainHasher.Verify(Seq, Timestamp, Kind, BuildPayload(), shortPrev, anyHash));
+    }
+
+    [Fact]
+    public void ChainLink_TamperingRow1_BreaksDownstreamPrevHash() {
+        var payload0 = new byte[] { 0xAA };
+        var payload1 = new byte[] { 0xBB };
+
+        var hash0 = ChainHasher.ComputeRowHash(0, 100, EventKind.Counter, payload0, ChainHasher.ZeroPrevHash);
+        var hash1 = ChainHasher.ComputeRowHash(1, 200, EventKind.Counter, payload1, hash0);
+
+        var tampered1 = new byte[] { 0xDD };
+        var recomputed = ChainHasher.ComputeRowHash(1, 200, EventKind.Counter, tampered1, hash0);
+
+        Assert.NotEqual(hash1, recomputed);
+    }
 }

@@ -52,4 +52,17 @@ public class FirewallRuleTests {
             updatedAt: DateTimeOffset.UnixEpoch
         ));
     }
+
+    [Fact]
+    public void Constructor_WhitespaceProcessPath_ThrowsArgumentException() {
+        Assert.Throws<ArgumentException>(() => new FirewallRule(
+            id: 0,
+            processPath: "   ",
+            direction: Direction.Outbound,
+            action: FirewallAction.Allow,
+            source: "manual",
+            createdAt: DateTimeOffset.UnixEpoch,
+            updatedAt: DateTimeOffset.UnixEpoch
+        ));
+    }
 }

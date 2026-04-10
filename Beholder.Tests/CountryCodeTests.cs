@@ -64,4 +64,13 @@ public class CountryCodeTests {
 
         Assert.Equal("FR", code.ToString());
     }
+
+    [Fact]
+    public void Default_Value_IsNullAndNotReal() {
+        var code = default(CountryCode);
+
+        Assert.Null(code.Value);
+        Assert.False(code.IsReal);
+        Assert.Equal("", code.ToString());
+    }
 }

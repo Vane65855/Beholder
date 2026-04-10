@@ -93,4 +93,49 @@ public class FlowEventTests {
 
         Assert.NotEqual(first, second);
     }
+
+    [Fact]
+    public void Constructor_NegativeBytesOut_ThrowsArgumentOutOfRangeException() {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new FlowEvent(
+            processId: 1,
+            processName: "curl",
+            processPath: "/usr/bin/curl",
+            remoteAddress: IPAddress.Loopback,
+            remotePort: 80,
+            bytesIn: 0,
+            bytesOut: -1,
+            country: CountryCode.Local,
+            timestamp: DateTimeOffset.UnixEpoch
+        ));
+    }
+
+    [Fact]
+    public void Constructor_WhitespaceProcessName_ThrowsArgumentException() {
+        Assert.Throws<ArgumentException>(() => new FlowEvent(
+            processId: 1,
+            processName: "   ",
+            processPath: "/usr/bin/curl",
+            remoteAddress: IPAddress.Loopback,
+            remotePort: 80,
+            bytesIn: 0,
+            bytesOut: 0,
+            country: CountryCode.Local,
+            timestamp: DateTimeOffset.UnixEpoch
+        ));
+    }
+
+    [Fact]
+    public void Constructor_WhitespaceProcessPath_ThrowsArgumentException() {
+        Assert.Throws<ArgumentException>(() => new FlowEvent(
+            processId: 1,
+            processName: "curl",
+            processPath: "   ",
+            remoteAddress: IPAddress.Loopback,
+            remotePort: 80,
+            bytesIn: 0,
+            bytesOut: 0,
+            country: CountryCode.Local,
+            timestamp: DateTimeOffset.UnixEpoch
+        ));
+    }
 }

@@ -22,4 +22,24 @@ public class ChainVerificationResultTests {
         Assert.Equal(42, result.FailedAtSeq);
         Assert.Equal("hash mismatch", result.ErrorMessage);
     }
+
+    [Fact]
+    public void Success_NegativeRowsVerified_ThrowsArgumentOutOfRangeException() {
+        Assert.Throws<ArgumentOutOfRangeException>(() => ChainVerificationResult.Success(-1));
+    }
+
+    [Fact]
+    public void Failure_NegativeRowsVerified_ThrowsArgumentOutOfRangeException() {
+        Assert.Throws<ArgumentOutOfRangeException>(() => ChainVerificationResult.Failure(-1, 0, "x"));
+    }
+
+    [Fact]
+    public void Failure_NullErrorMessage_ThrowsArgumentNullException() {
+        Assert.Throws<ArgumentNullException>(() => ChainVerificationResult.Failure(0, 0, null!));
+    }
+
+    [Fact]
+    public void Failure_WhitespaceErrorMessage_ThrowsArgumentException() {
+        Assert.Throws<ArgumentException>(() => ChainVerificationResult.Failure(0, 0, "   "));
+    }
 }

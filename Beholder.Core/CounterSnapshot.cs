@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+
 namespace Beholder.Core;
 
 /// <summary>
@@ -60,7 +62,7 @@ public sealed record CounterSnapshot {
         DeltaBytesIn = deltaBytesIn;
         DeltaBytesOut = deltaBytesOut;
         ActiveConnectionCount = activeConnectionCount;
-        BytesOutByCountry = bytesOutByCountry;
+        BytesOutByCountry = new ReadOnlyDictionary<CountryCode, long>(new Dictionary<CountryCode, long>(bytesOutByCountry));
         Timestamp = timestamp;
     }
 }

@@ -21,10 +21,30 @@ public class ProcessInfoTests {
 
         Assert.Equal("/usr/bin/curl", info.Path);
         Assert.Equal("curl", info.DisplayName);
-        Assert.Same(sha, info.Sha256);
+        Assert.Equal(sha, info.Sha256);
         Assert.Equal(firstSeen, info.FirstSeen);
         Assert.Equal(lastSeen, info.LastSeen);
         Assert.Equal(lastHashed, info.LastHashedAt);
+    }
+
+    [Fact]
+    public void Constructor_DefensiveCopiesSha256_MutatingOriginalDoesNotAffectInstance() {
+        var sha = new byte[32];
+        sha[0] = 0xAA;
+
+        var info = new ProcessInfo(
+            path: "/usr/bin/curl",
+            displayName: "curl",
+            sha256: sha,
+            firstSeen: DateTimeOffset.UnixEpoch,
+            lastSeen: DateTimeOffset.UnixEpoch,
+            lastHashedAt: DateTimeOffset.UnixEpoch
+        );
+
+        sha[0] = 0xFF;
+
+        Assert.NotNull(info.Sha256);
+        Assert.Equal(0xAA, info.Sha256![0]);
     }
 
     [Fact]

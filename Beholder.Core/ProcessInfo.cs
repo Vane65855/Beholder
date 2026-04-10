@@ -37,7 +37,7 @@ public sealed record ProcessInfo {
 
         Path = path;
         DisplayName = displayName;
-        Sha256 = sha256;
+        Sha256 = sha256?.ToArray();
         FirstSeen = firstSeen;
         LastSeen = lastSeen;
         LastHashedAt = lastHashedAt;

@@ -22,18 +22,4 @@ public interface IEventStore {
     /// — running it twice produces identical results.
     /// </summary>
     Task<ChainVerificationResult> VerifyAsync(CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Returns the most recent alerts in newest-first order, capped at
-    /// <paramref name="limit"/> entries. Used by the UI's <c>GetSnapshot</c> RPC to
-    /// populate the alert list on connect.
-    /// </summary>
-    Task<IReadOnlyList<Alert>> GetAlertsAsync(int limit, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Marks an alert as read by setting its <see cref="Alert.FirstViewedAt"/>.
-    /// Idempotent — if the alert is already marked read, the existing timestamp is
-    /// preserved and the call succeeds without modification.
-    /// </summary>
-    Task MarkAlertReadAsync(long seq, DateTimeOffset viewedAt, CancellationToken cancellationToken);
 }

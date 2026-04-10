@@ -61,4 +61,74 @@ public class CounterSnapshotTests {
             timestamp: DateTimeOffset.UnixEpoch
         ));
     }
+
+    [Fact]
+    public void Constructor_NegativeTotalBytesOut_ThrowsArgumentOutOfRangeException() {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new CounterSnapshot(
+            processName: "firefox.exe",
+            processPath: "/opt/firefox/firefox",
+            totalBytesIn: 0,
+            totalBytesOut: -1,
+            deltaBytesIn: 0,
+            deltaBytesOut: 0,
+            activeConnectionCount: 0,
+            bytesOutByCountry: new Dictionary<CountryCode, long>(),
+            timestamp: DateTimeOffset.UnixEpoch
+        ));
+    }
+
+    [Fact]
+    public void Constructor_NegativeDeltaBytesIn_ThrowsArgumentOutOfRangeException() {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new CounterSnapshot(
+            processName: "firefox.exe",
+            processPath: "/opt/firefox/firefox",
+            totalBytesIn: 0,
+            totalBytesOut: 0,
+            deltaBytesIn: -1,
+            deltaBytesOut: 0,
+            activeConnectionCount: 0,
+            bytesOutByCountry: new Dictionary<CountryCode, long>(),
+            timestamp: DateTimeOffset.UnixEpoch
+        ));
+    }
+
+    [Fact]
+    public void Constructor_NegativeDeltaBytesOut_ThrowsArgumentOutOfRangeException() {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new CounterSnapshot(
+            processName: "firefox.exe",
+            processPath: "/opt/firefox/firefox",
+            totalBytesIn: 0,
+            totalBytesOut: 0,
+            deltaBytesIn: 0,
+            deltaBytesOut: -1,
+            activeConnectionCount: 0,
+            bytesOutByCountry: new Dictionary<CountryCode, long>(),
+            timestamp: DateTimeOffset.UnixEpoch
+        ));
+    }
+
+    [Fact]
+    public void Constructor_DefensiveCopiesDictionary_MutatingOriginalDoesNotAffectSnapshot() {
+        var byCountry = new Dictionary<CountryCode, long> {
+            [CountryCode.FromAlpha2("US")] = 100,
+        };
+
+        var snapshot = new CounterSnapshot(
+            processName: "x",
+            processPath: "/x",
+            totalBytesIn: 0,
+            totalBytesOut: 0,
+            deltaBytesIn: 0,
+            deltaBytesOut: 0,
+            activeConnectionCount: 0,
+            bytesOutByCountry: byCountry,
+            timestamp: DateTimeOffset.UnixEpoch
+        );
+
+        byCountry[CountryCode.FromAlpha2("US")] = 999;
+        byCountry[CountryCode.FromAlpha2("DE")] = 1;
+
+        Assert.Equal(100, snapshot.BytesOutByCountry[CountryCode.FromAlpha2("US")]);
+        Assert.False(snapshot.BytesOutByCountry.ContainsKey(CountryCode.FromAlpha2("DE")));
+    }
 }

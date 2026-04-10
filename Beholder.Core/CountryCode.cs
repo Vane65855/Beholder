@@ -29,7 +29,7 @@ public readonly record struct CountryCode {
     public static CountryCode Unknown { get; } = new("??", validated: false);
 
     /// <summary>True when this code is a real country code, not a synthetic sentinel.</summary>
-    public bool IsReal => Value != Local.Value && Value != Unknown.Value;
+    public bool IsReal => Value is { } v && v != Local.Value && v != Unknown.Value;
 
     /// <summary>
     /// Creates a country code from an ISO 3166-1 alpha-2 string. Input is validated for
@@ -38,5 +38,5 @@ public readonly record struct CountryCode {
     public static CountryCode FromAlpha2(string code) => new(code, validated: true);
 
     /// <inheritdoc />
-    public override string ToString() => Value;
+    public override string ToString() => Value ?? "";
 }
