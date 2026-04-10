@@ -1,0 +1,12 @@
+<Solution>
+  <Project Path="Beholder.Core/Beholder.Core.csproj" />
+  <Project Path="Beholder.Daemon.GeoIp/Beholder.Daemon.GeoIp.csproj" />
+  <Project Path="Beholder.Daemon.Linux/Beholder.Daemon.Linux.csproj" />
+  <Project Path="Beholder.Daemon.Uplink/Beholder.Daemon.Uplink.csproj" />
+  <Project Path="Beholder.Daemon.Windows/Beholder.Daemon.Windows.csproj" />
+  <Project Path="Beholder.Daemon/Beholder.Daemon.csproj" />
+  <Project Path="Beholder.Protocol/Beholder.Protocol.csproj" />
+  <Project Path="Beholder.Tests.UplinkStub/Beholder.Tests.UplinkStub.csproj" />
+  <Project Path="Beholder.Tests/Beholder.Tests.csproj" />
+  <Project Path="Beholder.Ui/Beholder.Ui.csproj" />
+</Solution>
