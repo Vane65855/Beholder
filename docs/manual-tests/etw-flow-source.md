@@ -29,10 +29,14 @@ verification.
    ```
    dotnet run --project Beholder.Daemon
    ```
-   Expect an `info:` log line:
+   Expect `info:` log lines showing both ETW sessions and the pipeline starting:
    ```
+   info: Beholder.Daemon.Windows.EtwDnsCache[0]
+         DNS ETW trace session started
    info: Beholder.Daemon.Windows.EtwFlowSource[0]
          ETW kernel network trace session started
+   info: Beholder.Daemon.Pipeline.FlowEventPipeline[0]
+         Flow event pipeline started
    ```
    If you see `ETW session creation failed — ensure the daemon is running as Administrator`, the terminal is not elevated. Go back to step 2.
 
@@ -42,19 +46,25 @@ verification.
    ```
    or just open a browser.
 
-5. Watch the daemon's terminal. Within a second or two you should see `info:` log lines like:
+5. Watch the daemon's terminal. Within a second or two you should see aggregated `Counter` lines, one per active process per second:
    ```
-   info: Beholder.Daemon.Worker[0]
-         Flow curl (12345) 93.184.216.34:443 in=0 out=517
-   info: Beholder.Daemon.Worker[0]
-         Flow curl (12345) 93.184.216.34:443 in=1472 out=0
+   info: Beholder.Daemon.Pipeline.FlowEventPipeline[0]
+         Counter curl.exe Δin=1472 Δout=517 total_in=1472 total_out=517 conns=1
+   info: Beholder.Daemon.Pipeline.FlowEventPipeline[0]
+         Counter firefox.exe Δin=12453 Δout=891 total_in=847291 total_out=42891 conns=3
    ```
-   One line per TCP/UDP send or receive, split by direction. Bytes appear in exactly one of `in` / `out` per event.
+   `Δin` / `Δout` are the bytes observed during the last 1-second tick; `total_in` / `total_out` are the running totals since the daemon started; `conns` is the number of distinct `(remote IP, remote port)` endpoints the process touched during the tick.
 
-6. Stop the daemon with Ctrl+C. Expect:
+6. Stop the daemon with Ctrl+C. Expect the pipeline and both ETW sessions to stop cleanly:
    ```
+   info: Beholder.Daemon.Pipeline.FlowEventPipeline[0]
+         Flow event pipeline stopping
+   info: Beholder.Daemon.Pipeline.FlowEventPipeline[0]
+         Flow event pipeline stopped
    info: Beholder.Daemon.Windows.EtwFlowSource[0]
          ETW kernel network trace session stopped
+   info: Beholder.Daemon.Windows.EtwDnsCache[0]
+         DNS ETW trace session stopped
    ```
 
 7. Verify clean shutdown: immediately restart the daemon from the same elevated terminal:
@@ -67,13 +77,16 @@ verification.
 
 ## What success looks like
 
-- FlowEvent log lines appear within ~2 seconds of generating traffic.
-- Each line has a real process name (not "unknown"), a valid remote IP, a port, and a nonzero byte count in exactly one direction.
-- Country in logs is not checked — GeoIP happens later in the pipeline. `EtwFlowSource` always emits `CountryCode.Unknown`.
+- `Counter` lines appear within ~2 seconds of generating traffic.
+- You see **one line per active process per second**, not dozens per second — roughly `N` lines per tick where `N` is the number of processes that moved bytes in that second.
+- Each `Counter` line has a real process name, nonzero Δ or total bytes, and a connection count.
+- A process with no activity in a given second produces no line that second — the Accumulator omits inactive processes from the batch by design.
+- Country is not shown in the Counter log template. GeoIP still runs in the Accumulator (per-country bytes-out is carried inside `CounterSnapshot.BytesOutByCountry`), but surfacing it is a UI-phase concern.
 - Shutdown is silent (no stack traces), and restart works with no orphaned-session errors.
 
 ## Known non-issues
 
-- **Many events with process name "System" or "unknown"**: expected. Windows emits kernel network events for SMB, DNS resolver service, Windows Update, and other system components. These are real traffic, not a bug.
-- **IPv6 addresses appearing for local traffic**: expected. Windows prefers IPv6 for localhost on modern builds.
-- **No events from loopback pings**: expected. ICMP is not a TCP/UDP protocol and the kernel network ETW provider does not emit loopback ICMP through the `TcpIp`/`UdpIp` kernel events that `EtwFlowSource` subscribes to.
+- **Counter lines for "System" or other kernel-attributed processes**: expected. Windows emits kernel network events for SMB, DNS resolver service, Windows Update, and other system components. These are real traffic, not a bug.
+- **IPv6 connection counts for loopback-heavy processes**: expected. Windows prefers IPv6 for localhost on modern builds, so `conns=` reflects IPv6 endpoints.
+- **No Counter lines from loopback pings**: expected. ICMP is not a TCP/UDP protocol and the kernel network ETW provider does not emit loopback ICMP through the `TcpIp`/`UdpIp` kernel events that `EtwFlowSource` subscribes to.
+- **The `Δin` / `Δout` template uses the Greek delta character**: expected. Structured log templates tolerate Unicode literally. If your terminal font lacks coverage you may see a fallback glyph; this is cosmetic.

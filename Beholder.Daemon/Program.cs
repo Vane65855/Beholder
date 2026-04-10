@@ -1,5 +1,6 @@
 using Beholder.Core;
 using Beholder.Daemon;
+using Beholder.Daemon.Pipeline;
 #if PLATFORM_WINDOWS
 using Beholder.Daemon.Windows;
 #endif
@@ -12,6 +13,8 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<EtwDnsCache>();
     builder.Services.AddSingleton<IDnsCache>(sp => sp.GetRequiredService<EtwDnsCache>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<EtwDnsCache>());
+    builder.Services.AddSingleton(TimeProvider.System);
+    builder.Services.AddHostedService<FlowEventPipeline>();
 }
 #endif
 

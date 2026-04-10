@@ -36,12 +36,14 @@ process on the machine. This runbook is the end-to-end verification.
    ```
    dotnet run --project Beholder.Daemon
    ```
-   Expect two `info:` log lines (order may vary slightly):
+   Expect three `info:` startup log lines (order may vary slightly):
    ```
    info: Beholder.Daemon.Windows.EtwDnsCache[0]
          DNS ETW trace session started
    info: Beholder.Daemon.Windows.EtwFlowSource[0]
          ETW kernel network trace session started
+   info: Beholder.Daemon.Pipeline.FlowEventPipeline[0]
+         Flow event pipeline started
    ```
    If you see `DNS ETW session creation failed — ensure the daemon is running as Administrator`, the terminal is not elevated. Go back to step 2.
 
@@ -51,44 +53,40 @@ process on the machine. This runbook is the end-to-end verification.
    ```
    `example.org` is chosen deliberately over `example.com` because `.com` is likely already cached from the flow-source runbook or normal browsing. You can substitute any domain the test machine has not hit in the last few minutes.
 
-6. Watch the daemon's terminal. Within a second or two, flow lines should include the hostname:
+6. Watch the daemon's terminal. Within a second or two, aggregated `Counter` lines should appear for any process that generated traffic:
    ```
-   info: Beholder.Daemon.Worker[0]
-         Flow curl (12345) example.org (93.184.216.34):443 in=0 out=517
-   info: Beholder.Daemon.Worker[0]
-         Flow curl (12345) example.org (93.184.216.34):443 in=1472 out=0
+   info: Beholder.Daemon.Pipeline.FlowEventPipeline[0]
+         Counter curl.exe Δin=1472 Δout=517 total_in=1472 total_out=517 conns=1
    ```
-   Cache misses still show the raw IP in the old format:
-   ```
-   info: Beholder.Daemon.Worker[0]
-         Flow SearchApp (8824) 23.55.245.124:443 in=0 out=517
-   ```
+   **Phase 2.4 note**: the daemon no longer logs per-flow lines with hostnames. `EtwDnsCache` still populates the in-memory IP→hostname map whenever the DNS Client ETW provider fires, but nothing currently consumes it — the UI (Phase 6+) will surface hostnames per connection. For now, this runbook verifies only that the DNS trace session starts and stops cleanly alongside the rest of the pipeline.
 
-7. Stop the daemon with Ctrl+C. Expect both stop lines:
+7. Stop the daemon with Ctrl+C. Expect the pipeline and both trace sessions to stop cleanly:
    ```
-   info: Beholder.Daemon.Windows.EtwDnsCache[0]
-         DNS ETW trace session stopped
+   info: Beholder.Daemon.Pipeline.FlowEventPipeline[0]
+         Flow event pipeline stopped
    info: Beholder.Daemon.Windows.EtwFlowSource[0]
          ETW kernel network trace session stopped
+   info: Beholder.Daemon.Windows.EtwDnsCache[0]
+         DNS ETW trace session stopped
    ```
 
 8. Verify clean restart: immediately restart the daemon from the same elevated terminal:
    ```
    dotnet run --project Beholder.Daemon
    ```
-   Both "session started" lines should reappear with no errors. `EtwDnsCache` sweeps any orphaned `Beholder-DnsTrace` session on startup, so a prior crash does not require a reboot or a manual `logman stop`.
+   All three "started" lines should reappear with no errors. `EtwDnsCache` sweeps any orphaned `Beholder-DnsTrace` session on startup, so a prior crash does not require a reboot or a manual `logman stop`.
 
 ## What success looks like
 
-- At least some `Flow` lines include a hostname in the `{Hostname} ({Remote}):{Port}` format.
-- The hostname matches the domain the user actually typed (not a generic CDN reverse-DNS name).
-- Restarting the daemon is silent — no "session already exists" error on `Beholder-DnsTrace`.
+- Both `DNS ETW trace session started` and `ETW kernel network trace session started` log lines appear on startup, followed by `Flow event pipeline started`.
+- All three stop lines appear cleanly on Ctrl+C.
+- Restarting the daemon is silent — no "session already exists" errors on `Beholder-DnsTrace` or the NT Kernel Logger.
+- **Hostname verification is not possible from log output in Phase 2.4.** `EtwDnsCache` is populated but unconsumed by the logging pipeline. End-to-end hostname verification is deferred to the Phase 6 UI, which will read `IDnsCache.Resolve` per connection.
 
 ## Known non-issues
 
-- **Many flow lines still show raw IPs**: expected. Background services (Windows Update, telemetry, Edge WebView, etc.) cache DNS results across daemon restarts. Their flows are real, but the DNS event fired before the daemon was running so the IP→hostname mapping was never observed.
-- **`ipconfig /flushdns` is required for fresh visibility**: expected. The OS resolver caches DNS answers for the record's TTL; cached answers do not re-fire the DNS Client ETW provider. If you want to see hostnames for a domain you already visited, flush the cache first.
-- **A hostname sometimes flips between two names for the same CDN IP**: expected and correct. Multiple domains can legitimately resolve to the same CDN edge IP; the cache uses last-write-wins, so whichever query happened most recently is what you see on the next flow line.
+- **No hostnames in the Counter log lines**: expected. `CounterSnapshot` is a per-process aggregate across many flow events that may have touched different remote endpoints; there is no single hostname to attach. Hostnames are a per-connection concern that the UI will display, not a per-process summary concern.
+- **`ipconfig /flushdns` is still required for a fresh population run**: expected. The OS resolver caches DNS answers for the record's TTL; cached answers do not re-fire the DNS Client ETW provider. Flushing forces the next resolution to go through the DNS client and emit the ETW event that populates the cache.
 
 ## Related
 
