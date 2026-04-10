@@ -2,7 +2,11 @@ using Beholder.Core;
 
 namespace Beholder.Daemon;
 
-public sealed class Worker(ILogger<Worker> logger, IFlowSource? flowSource = null) : BackgroundService {
+public sealed class Worker(
+    ILogger<Worker> logger,
+    IFlowSource? flowSource = null,
+    IDnsCache? dnsCache = null
+) : BackgroundService {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
         if (flowSource is null) {
             logger.LogWarning("No IFlowSource registered — running in heartbeat-only mode");
@@ -30,13 +34,26 @@ public sealed class Worker(ILogger<Worker> logger, IFlowSource? flowSource = nul
     }
 
     private void LogFlowEvent(FlowEvent flowEvent) {
-        logger.LogInformation(
-            "Flow {Process} ({Pid}) {Remote}:{Port} in={BytesIn} out={BytesOut}",
-            flowEvent.ProcessName,
-            flowEvent.ProcessId,
-            flowEvent.RemoteAddress,
-            flowEvent.RemotePort,
-            flowEvent.BytesIn,
-            flowEvent.BytesOut);
+        var hostname = dnsCache?.Resolve(flowEvent.RemoteAddress);
+        if (hostname is null) {
+            logger.LogInformation(
+                "Flow {Process} ({Pid}) {Remote}:{Port} in={BytesIn} out={BytesOut}",
+                flowEvent.ProcessName,
+                flowEvent.ProcessId,
+                flowEvent.RemoteAddress,
+                flowEvent.RemotePort,
+                flowEvent.BytesIn,
+                flowEvent.BytesOut);
+        } else {
+            logger.LogInformation(
+                "Flow {Process} ({Pid}) {Hostname} ({Remote}):{Port} in={BytesIn} out={BytesOut}",
+                flowEvent.ProcessName,
+                flowEvent.ProcessId,
+                hostname,
+                flowEvent.RemoteAddress,
+                flowEvent.RemotePort,
+                flowEvent.BytesIn,
+                flowEvent.BytesOut);
+        }
     }
 }
