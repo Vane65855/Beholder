@@ -15,4 +15,9 @@
     </PackageReference>
   </ItemGroup>
 
+  <ItemGroup>
+    <Protobuf Include="Protos/beholder_local.proto" GrpcServices="Both" />
+    <Protobuf Include="Protos/beholder_uplink.proto" GrpcServices="Both" />
+  </ItemGroup>
+
 </Project>

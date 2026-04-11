@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package beholder.uplink;
+
+option csharp_namespace = "Beholder.Protocol.Uplink";
+
+// Enum ordinals mirror Beholder.Core for the same cast-through round-trip
+// reason documented in beholder_local.proto. The enums are duplicated here
+// rather than imported so the two wire surfaces can evolve independently.
+
+enum Direction {
+  INBOUND = 0;
+  OUTBOUND = 1;
+}
+
+enum FirewallAction {
+  ALLOW = 0;
+  BLOCK = 1;
+}
+
+enum AlertKind {
+  ALERT_KIND_UNKNOWN = 0;
+  NEW_PROCESS = 1;
+  HASH_CHANGED = 2;
+  CHAIN_ERROR = 3;
+}
+
+// ---- Auth ----
+
+// Sent by the daemon as the first UplinkMessage on a newly-opened stream.
+// The aggregator replies with AggregatorCommand { auth_response = ... }.
+message AuthRequest {
+  string sensor_id = 1;
+  string jwt_token = 2;
+  repeated string capabilities = 3;
+}
+
+message AuthResponse {
+  bool accepted = 1;
+  int64 server_time_unix_ns = 2;
+  string error_message = 3;  // "" when accepted = true
+}
+
+// ---- Telemetry (daemon → aggregator) ----
+
+// Mirrors Beholder.Core.CounterSnapshot for the uplink wire. Kept separate
+// from beholder.local.CounterSnapshot because the two surfaces may diverge
+// independently.
+message UplinkCounterSnapshot {
+  string process_name = 1;
+  string process_path = 2;
+  int64 total_bytes_in = 3;
+  int64 total_bytes_out = 4;
+  int64 delta_bytes_in = 5;
+  int64 delta_bytes_out = 6;
+  int32 active_connection_count = 7;
+  map<string, int64> bytes_out_by_country = 8;
+  int64 timestamp_unix_ns = 9;
+}
+
+message CounterBatchUpload {
+  string sensor_id = 1;
+  repeated UplinkCounterSnapshot snapshots = 2;
+}
+
+message AlertUpload {
+  string sensor_id = 1;
+  int64 seq = 2;
+  AlertKind kind = 3;
+  string process_path = 4;
+  string summary = 5;
+  int64 timestamp_unix_ns = 6;
+}
+
+message Heartbeat {
+  int64 timestamp_unix_ns = 1;
+}
+
+// ---- Commands (aggregator → daemon) ----
+
+message FirewallCommand {
+  enum Kind {
+    APPLY = 0;
+    REMOVE = 1;
+  }
+  string command_id = 1;
+  Kind kind = 2;
+  string process_path = 3;
+  Direction direction = 4;
+  FirewallAction action = 5;  // ignored when kind = REMOVE
+}
+
+message AckResponse {
+  string command_id = 1;
+  bool success = 2;
+  string error_message = 3;
+}
+
+// ---- Bidirectional message envelopes ----
+
+// Everything the daemon sends upstream, multiplexed over a single stream.
+message UplinkMessage {
+  oneof payload {
+    AuthRequest auth = 1;
+    CounterBatchUpload counter_batch = 2;
+    AlertUpload alert = 3;
+    Heartbeat heartbeat = 4;
+    AckResponse command_ack = 5;
+  }
+}
+
+// Everything the aggregator sends downstream, multiplexed over the same
+// stream in the reverse direction.
+message AggregatorCommand {
+  oneof payload {
+    AuthResponse auth_response = 1;
+    FirewallCommand firewall_command = 2;
+    Heartbeat heartbeat = 3;
+  }
+}
+
+// ---- Service ----
+
+service BeholderUplink {
+  // Single bidirectional stream per connected daemon. The daemon opens the
+  // stream with an AuthRequest and must receive an accepted AuthResponse
+  // before any other UplinkMessage is accepted. Aggregator commands flow
+  // on the reverse direction; daemon sends AckResponse for each.
+  rpc Stream(stream UplinkMessage) returns (stream AggregatorCommand);
+}

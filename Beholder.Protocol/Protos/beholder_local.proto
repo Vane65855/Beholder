@@ -1,0 +1,155 @@
+syntax = "proto3";
+
+package beholder.local;
+
+option csharp_namespace = "Beholder.Protocol.Local";
+
+// Enum ordinals deliberately mirror the Beholder.Core C# enums one-for-one so
+// that wire values can round-trip by cast in the Phase 4.2 converters. This
+// means Direction/FirewallAction/RuleSource do not follow the proto3
+// "*_UNSPECIFIED = 0" convention — their zero slot is a real value.
+
+enum Direction {
+  INBOUND = 0;
+  OUTBOUND = 1;
+}
+
+enum FirewallAction {
+  ALLOW = 0;
+  BLOCK = 1;
+}
+
+enum RuleSource {
+  MANUAL = 0;
+  DEFAULT = 1;
+  REMOTE = 2;
+}
+
+enum AlertKind {
+  ALERT_KIND_UNKNOWN = 0;
+  NEW_PROCESS = 1;
+  HASH_CHANGED = 2;
+  CHAIN_ERROR = 3;
+}
+
+// ---- Value messages ----
+
+// Mirrors Beholder.Core.CounterSnapshot. Timestamps are Unix nanoseconds
+// to avoid depending on google/protobuf/timestamp.proto. Country codes on
+// the wire are the alpha-2 string (real codes), "??" (Unknown), or "--"
+// (Local) — no dedicated message wrapper.
+message CounterSnapshot {
+  string process_name = 1;
+  string process_path = 2;
+  int64 total_bytes_in = 3;
+  int64 total_bytes_out = 4;
+  int64 delta_bytes_in = 5;
+  int64 delta_bytes_out = 6;
+  int32 active_connection_count = 7;
+  map<string, int64> bytes_out_by_country = 8;
+  int64 timestamp_unix_ns = 9;
+}
+
+// Mirrors Beholder.Core.FirewallRule.
+message FirewallRule {
+  int32 id = 1;
+  string process_path = 2;
+  Direction direction = 3;
+  FirewallAction action = 4;
+  RuleSource source = 5;
+  int64 created_at_unix_ns = 6;
+  int64 updated_at_unix_ns = 7;
+}
+
+// Mirrors Beholder.Core.Alert. first_viewed_at_unix_ns is 0 when the alert
+// is still unread; a sentinel is used instead of a proto3 `optional` wrapper
+// to keep the wire format flat. The Phase 4.2 converter maps 0 back to
+// DateTimeOffset? null.
+message Alert {
+  int64 seq = 1;
+  AlertKind kind = 2;
+  string process_path = 3;
+  string summary = 4;
+  int64 timestamp_unix_ns = 5;
+  int64 first_viewed_at_unix_ns = 6;
+}
+
+// ---- Streaming: Subscribe ----
+
+message SubscribeRequest {}
+
+// A single event pushed from the daemon to a subscribed UI client over the
+// server-streaming Subscribe RPC. The oneof ensures the UI handles each
+// variant explicitly and new variants are additive (Open/Closed).
+message DaemonEvent {
+  oneof payload {
+    CounterBatch counter_batch = 1;
+    FirewallRuleChange rule_change = 2;
+    AlertEvent alert = 3;
+  }
+}
+
+message CounterBatch {
+  repeated CounterSnapshot snapshots = 1;
+  int64 tick_timestamp_unix_ns = 2;
+}
+
+message FirewallRuleChange {
+  enum ChangeKind {
+    CREATED = 0;
+    CHANGED = 1;
+    REMOVED = 2;
+  }
+  ChangeKind change = 1;
+  FirewallRule rule = 2;
+}
+
+message AlertEvent {
+  Alert alert = 1;
+}
+
+// ---- Unary RPCs ----
+
+message GetSnapshotRequest {}
+
+message GetSnapshotResponse {
+  repeated CounterSnapshot snapshots = 1;
+  repeated FirewallRule firewall_rules = 2;
+  repeated Alert recent_alerts = 3;
+}
+
+message ApplyFirewallRuleRequest {
+  string process_path = 1;
+  Direction direction = 2;
+  FirewallAction action = 3;
+  RuleSource source = 4;
+}
+
+message ApplyFirewallRuleResponse {
+  FirewallRule rule = 1;
+}
+
+message MarkAlertReadRequest {
+  int64 seq = 1;
+}
+
+message MarkAlertReadResponse {}
+
+message VerifyChainRequest {}
+
+message VerifyChainResponse {
+  bool is_valid = 1;
+  int64 rows_verified = 2;
+  int64 failed_at_seq = 3;      // 0 when is_valid = true
+  string error_message = 4;     // "" when is_valid = true
+}
+
+// ---- Service ----
+
+service BeholderLocal {
+  rpc Subscribe(SubscribeRequest) returns (stream DaemonEvent);
+  rpc GetSnapshot(GetSnapshotRequest) returns (GetSnapshotResponse);
+  rpc ApplyFirewallRule(ApplyFirewallRuleRequest) returns (ApplyFirewallRuleResponse);
+  rpc MarkAlertRead(MarkAlertReadRequest) returns (MarkAlertReadResponse);
+  rpc VerifyChain(VerifyChainRequest) returns (VerifyChainResponse);
+}
