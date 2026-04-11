@@ -265,3 +265,5 @@ These patterns are explicitly forbidden. If you find yourself reaching for one, 
 | Mutable static state | Thread-unsafe, test-hostile | Injected services with scoped lifetime |
 | `goto` | Unstructured flow | Restructure the logic |
 | Nested ternaries | Unreadable | `if`/`else` or `switch` expression |
+
+**Exception to `dynamic`**: permitted only inside types decorated `[SupportedOSPlatform("windows")]` (or the Linux equivalent) for COM / IDispatch interop where strongly-typed bindings would require generated RCWs or hand-written `IDispatch.Invoke` reflection. Examples: `HNetCfg.FwPolicy2`, WMI, Task Scheduler.

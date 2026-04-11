@@ -163,7 +163,7 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
     // "type: <code>" prefix ("type:  1 93.184.216.34"). For CNAME records the entry
     // is a hostname, which we skip. The parser is deliberately lenient: it tries the
     // whole segment first, then falls back to the last whitespace-separated token.
-    private static IEnumerable<IPAddress> ExtractAddresses(string queryResults) {
+    internal static IEnumerable<IPAddress> ExtractAddresses(string queryResults) {
         var segments = queryResults.Split(
             ';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         foreach (var raw in segments) {

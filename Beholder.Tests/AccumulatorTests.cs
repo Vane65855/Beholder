@@ -119,6 +119,51 @@ public class AccumulatorTests {
     }
 
     [Fact]
+    public async Task BytesOutByCountry_ResetsEachTick() {
+        await using var fixture = Fixture.Start();
+
+        var us = CountryCode.FromAlpha2("US");
+        var de = CountryCode.FromAlpha2("DE");
+
+        var firstBatch = await fixture.DriveTickAsync(BuildFlow(bytesOut: 100, country: us));
+        var firstSnapshot = Assert.Single(firstBatch);
+        Assert.Equal(100, firstSnapshot.BytesOutByCountry[us]);
+
+        var secondBatch = await fixture.DriveTickAsync(BuildFlow(bytesOut: 50, country: de));
+        var secondSnapshot = Assert.Single(secondBatch);
+        Assert.Equal(50, secondSnapshot.BytesOutByCountry[de]);
+        Assert.False(secondSnapshot.BytesOutByCountry.ContainsKey(us));
+    }
+
+    [Fact]
+    public async Task TotalBytesIn_AccumulatesAcrossTicks() {
+        await using var fixture = Fixture.Start();
+
+        var firstBatch = await fixture.DriveTickAsync(BuildFlow(bytesIn: 100));
+        var firstSnapshot = Assert.Single(firstBatch);
+        Assert.Equal(100, firstSnapshot.DeltaBytesIn);
+        Assert.Equal(100, firstSnapshot.TotalBytesIn);
+
+        var secondBatch = await fixture.DriveTickAsync(BuildFlow(bytesIn: 50));
+        var secondSnapshot = Assert.Single(secondBatch);
+        Assert.Equal(50, secondSnapshot.DeltaBytesIn);
+        Assert.Equal(150, secondSnapshot.TotalBytesIn);
+    }
+
+    [Fact]
+    public async Task MixedInboundOutbound_SingleTick_AggregatesBoth() {
+        await using var fixture = Fixture.Start();
+
+        var batch = await fixture.DriveTickAsync(
+            BuildFlow(bytesIn: 100),
+            BuildFlow(bytesOut: 200));
+
+        var snapshot = Assert.Single(batch);
+        Assert.Equal(100, snapshot.DeltaBytesIn);
+        Assert.Equal(200, snapshot.DeltaBytesOut);
+    }
+
+    [Fact]
     public async Task EmptyTick_ProducesNoBatch() {
         await using var fixture = Fixture.Start();
 

@@ -14,6 +14,7 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<IDnsCache>(sp => sp.GetRequiredService<EtwDnsCache>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<EtwDnsCache>());
     builder.Services.AddSingleton(TimeProvider.System);
+    builder.Services.AddSingleton<IFirewallController, WfpFirewallController>();
     builder.Services.AddHostedService<FlowEventPipeline>();
 }
 #endif

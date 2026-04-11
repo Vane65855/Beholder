@@ -8,6 +8,10 @@
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
+    <DefineConstants>$(DefineConstants);PLATFORM_WINDOWS</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
@@ -27,6 +31,10 @@
     <ProjectReference Include="..\Beholder.Daemon\Beholder.Daemon.csproj" />
     <ProjectReference Include="..\Beholder.Daemon.Uplink\Beholder.Daemon.Uplink.csproj" />
     <ProjectReference Include="..\Beholder.Tests.UplinkStub\Beholder.Tests.UplinkStub.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <ProjectReference Include="..\Beholder.Daemon.Windows\Beholder.Daemon.Windows.csproj" />
   </ItemGroup>
 
 </Project>

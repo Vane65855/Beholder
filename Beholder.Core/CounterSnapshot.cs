@@ -29,7 +29,7 @@ public sealed record CounterSnapshot {
     /// <summary>Number of distinct active connections held by this process.</summary>
     public int ActiveConnectionCount { get; }
 
-    /// <summary>Cumulative outbound bytes broken down by destination country.</summary>
+    /// <summary>Outbound bytes by destination country for this tick.</summary>
     public IReadOnlyDictionary<CountryCode, long> BytesOutByCountry { get; }
 
     /// <summary>Wall-clock timestamp of the tick that produced this snapshot.</summary>

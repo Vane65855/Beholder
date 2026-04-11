@@ -67,6 +67,8 @@ internal sealed class Accumulator {
             }
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             // Expected on shutdown.
+        } finally {
+            FlushTick(_timeProvider.GetUtcNow());
         }
         _logger.LogInformation("Accumulator loop stopped");
     }
@@ -149,7 +151,7 @@ internal sealed class Accumulator {
                 deltaBytesIn: DeltaBytesIn,
                 deltaBytesOut: DeltaBytesOut,
                 activeConnectionCount: _activeConnections.Count,
-                bytesOutByCountry: new Dictionary<CountryCode, long>(_bytesOutByCountry),
+                bytesOutByCountry: _bytesOutByCountry,
                 timestamp: timestamp);
         }
 
