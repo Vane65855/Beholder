@@ -2,15 +2,30 @@ using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.GeoIp;
 using Beholder.Daemon.Pipeline;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 #if PLATFORM_WINDOWS
+using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Windows;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 #endif
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddSingleton(TimeProvider.System);
 
 #if PLATFORM_WINDOWS
 if (OperatingSystem.IsWindows()) {
+    builder.WebHost.ConfigureKestrel(options => {
+        options.ListenLocalhost(50051, listenOptions => {
+            listenOptions.Protocols = HttpProtocols.Http2;
+        });
+    });
+
+    builder.Services.AddGrpc();
+
     builder.Services.AddSingleton<EtwFlowSource>();
     builder.Services.AddSingleton<IGeoIpResolver>(sp => {
         var logger = sp.GetRequiredService<ILogger<DbIpProvider>>();
@@ -30,13 +45,28 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<EtwDnsCache>();
     builder.Services.AddSingleton<IDnsCache>(sp => sp.GetRequiredService<EtwDnsCache>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<EtwDnsCache>());
-    builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<IFirewallController, WfpFirewallController>();
-    builder.Services.AddHostedService<FlowEventPipeline>();
+
+    // Broadcast service must be registered BEFORE the pipeline so its StartAsync
+    // runs first and subscribes to ISnapshotBatchSource.OnSnapshotBatch before
+    // the pipeline publishes its first tick.
+    builder.Services.AddSingleton<BroadcastService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<BroadcastService>());
+
+    builder.Services.AddSingleton<FlowEventPipeline>();
+    builder.Services.AddSingleton<ISnapshotBatchSource>(sp => sp.GetRequiredService<FlowEventPipeline>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<FlowEventPipeline>());
 }
 #endif
 
 builder.Services.AddHostedService<Worker>();
 
-var host = builder.Build();
-host.Run();
+var app = builder.Build();
+
+#if PLATFORM_WINDOWS
+if (OperatingSystem.IsWindows()) {
+    app.MapGrpcService<BeholderLocalService>();
+}
+#endif
+
+app.Run();

@@ -16,7 +16,7 @@ namespace Beholder.Daemon.Pipeline;
 /// and emits per-second snapshot batches, which this service logs at
 /// Information level.
 /// </summary>
-internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable {
+internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISnapshotBatchSource {
     private const int ChannelCapacity = 10_000;
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5);
 
@@ -30,6 +30,12 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable {
     private bool _subscribedToFlowSource;
     private bool _subscribedToAccumulator;
     private bool _disposed;
+
+    /// <summary>
+    /// Fires on every accumulator tick with the snapshot batch. Handlers run
+    /// on the accumulator loop thread and must not block.
+    /// </summary>
+    public event Action<IReadOnlyList<CounterSnapshot>>? OnSnapshotBatch;
 
     public FlowEventPipeline(
         IFlowSource flowSource,
@@ -170,5 +176,6 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable {
                 snapshot.TotalBytesOut,
                 snapshot.ActiveConnectionCount);
         }
+        OnSnapshotBatch?.Invoke(snapshots);
     }
 }

@@ -16,8 +16,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Beholder.Core\Beholder.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Protobuf Include="Protos/beholder_local.proto" GrpcServices="Both" />
     <Protobuf Include="Protos/beholder_uplink.proto" GrpcServices="Both" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Beholder.Daemon" />
+    <InternalsVisibleTo Include="Beholder.Tests" />
   </ItemGroup>
 
 </Project>
