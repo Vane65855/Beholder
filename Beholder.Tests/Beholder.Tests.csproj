@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="TestData\beholder-test.mmdb" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -29,6 +30,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Beholder.Core\Beholder.Core.csproj" />
     <ProjectReference Include="..\Beholder.Daemon\Beholder.Daemon.csproj" />
+    <ProjectReference Include="..\Beholder.Daemon.GeoIp\Beholder.Daemon.GeoIp.csproj" />
     <ProjectReference Include="..\Beholder.Daemon.Uplink\Beholder.Daemon.Uplink.csproj" />
     <ProjectReference Include="..\Beholder.Tests.UplinkStub\Beholder.Tests.UplinkStub.csproj" />
   </ItemGroup>
