@@ -6,6 +6,9 @@
 # dotenv files
 .env
 
+# Debug logs
+beholder-debug.log
+
 # User-specific files
 *.rsuser
 *.suo

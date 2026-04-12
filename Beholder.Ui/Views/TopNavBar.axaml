@@ -1,6 +1,8 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Beholder.Ui.ViewModels"
+             xmlns:views="using:Beholder.Ui.Views"
+             xmlns:chrome="using:Avalonia.Controls.Chrome"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="44"
@@ -8,9 +10,11 @@
              x:DataType="vm:MainWindowViewModel"
              Background="{DynamicResource BackgroundNavBar}">
 
-    <Border BorderBrush="{DynamicResource BorderSubtle}"
-            BorderThickness="0,0,0,1">
-        <Grid ColumnDefinitions="Auto,*,Auto" Margin="16,8">
+    <Border Background="Transparent"
+            BorderBrush="{DynamicResource BorderSubtle}"
+            BorderThickness="0,0,0,1"
+            chrome:WindowDecorationProperties.ElementRole="TitleBar">
+        <Grid ColumnDefinitions="Auto,*,Auto,*,Auto" Margin="16,8,0,8">
 
             <!-- Brand block -->
             <StackPanel Grid.Column="0" Orientation="Horizontal"
@@ -35,53 +39,55 @@
             </StackPanel>
 
             <!-- Tab buttons -->
-            <StackPanel Grid.Column="1" Orientation="Horizontal"
+            <StackPanel Grid.Column="2" Orientation="Horizontal"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center" Spacing="4">
 
                 <Button Command="{Binding SwitchTabCommand}"
                         CommandParameter="{x:Static vm:TabKind.Traffic}"
                         Classes="navTab"
+                        chrome:WindowDecorationProperties.ElementRole="User"
                         Classes.active="{Binding IsTrafficActive}">
-                    <TextBlock Text="TRAFFIC" LetterSpacing="1.5" />
+                    <TextBlock Text="{Binding TrafficLabel}" LetterSpacing="1.5" />
                 </Button>
 
                 <Button Command="{Binding SwitchTabCommand}"
                         CommandParameter="{x:Static vm:TabKind.Firewall}"
                         Classes="navTab"
+                        chrome:WindowDecorationProperties.ElementRole="User"
                         Classes.active="{Binding IsFirewallActive}">
-                    <TextBlock Text="FIREWALL" LetterSpacing="1.5" />
+                    <TextBlock Text="{Binding FirewallLabel}" LetterSpacing="1.5" />
                 </Button>
 
                 <Button Command="{Binding SwitchTabCommand}"
                         CommandParameter="{x:Static vm:TabKind.Alerts}"
                         Classes="navTab"
+                        chrome:WindowDecorationProperties.ElementRole="User"
                         Classes.active="{Binding IsAlertsActive}">
-                    <TextBlock Text="ALERTS" LetterSpacing="1.5" />
+                    <TextBlock Text="{Binding AlertsLabel}" LetterSpacing="1.5" />
                 </Button>
 
                 <Button Command="{Binding SwitchTabCommand}"
                         CommandParameter="{x:Static vm:TabKind.Map}"
                         Classes="navTab"
+                        chrome:WindowDecorationProperties.ElementRole="User"
                         Classes.active="{Binding IsMapActive}">
-                    <TextBlock Text="MAP" LetterSpacing="1.5" />
+                    <TextBlock Text="{Binding MapLabel}" LetterSpacing="1.5" />
                 </Button>
 
                 <Button Command="{Binding SwitchTabCommand}"
                         CommandParameter="{x:Static vm:TabKind.Scanner}"
                         Classes="navTab"
+                        chrome:WindowDecorationProperties.ElementRole="User"
                         Classes.active="{Binding IsScannerActive}">
-                    <TextBlock Text="SCANNER" LetterSpacing="1.5" />
+                    <TextBlock Text="{Binding ScannerLabel}" LetterSpacing="1.5" />
                 </Button>
             </StackPanel>
 
-            <!-- Time range (placeholder) -->
-            <TextBlock Grid.Column="2"
-                       Text="LAST 24 HOURS"
-                       Foreground="{DynamicResource TextMuted}"
-                       FontSize="11"
-                       LetterSpacing="1.5"
-                       VerticalAlignment="Center" />
+            <!-- Window chrome buttons -->
+            <views:WindowControls Grid.Column="4"
+                                  VerticalAlignment="Stretch"
+                                  Margin="0,-8,0,-8" />
         </Grid>
     </Border>
 
@@ -89,12 +95,14 @@
         <Style Selector="Button.navTab">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="MinWidth" Value="116" />
             <Setter Property="Padding" Value="12,6" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="FontWeight" Value="Medium" />
             <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="Button.navTab:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />

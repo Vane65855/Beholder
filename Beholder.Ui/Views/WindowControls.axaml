@@ -1,0 +1,84 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:chrome="using:Avalonia.Controls.Chrome"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="138" d:DesignHeight="40"
+             x:Class="Beholder.Ui.Views.WindowControls">
+
+    <StackPanel Orientation="Horizontal" VerticalAlignment="Stretch">
+        <!-- Minimize -->
+        <Button Classes="chromeButton" Click="OnMinimize"
+                chrome:WindowDecorationProperties.ElementRole="User">
+            <Path Data="M 0,0 H 10"
+                  Stroke="{DynamicResource TextPrimary}"
+                  StrokeThickness="1"
+                  Width="10" Height="1"
+                  Stretch="None"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center" />
+        </Button>
+
+        <!-- Maximize / Restore -->
+        <Button Classes="chromeButton" Click="OnMaximizeRestore"
+                chrome:WindowDecorationProperties.ElementRole="User">
+            <Panel>
+                <Path x:Name="MaximizePath"
+                      Data="M 0,0 H 10 V 10 H 0 Z"
+                      Stroke="{DynamicResource TextPrimary}"
+                      StrokeThickness="1"
+                      Fill="Transparent"
+                      Width="10" Height="10"
+                      Stretch="None"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center" />
+                <Path x:Name="RestorePath"
+                      Data="M 2,0 H 10 V 8 H 8 M 0,2 H 8 V 10 H 0 Z"
+                      Stroke="{DynamicResource TextPrimary}"
+                      StrokeThickness="1"
+                      Fill="Transparent"
+                      Width="10" Height="10"
+                      Stretch="None"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center"
+                      IsVisible="False" />
+            </Panel>
+        </Button>
+
+        <!-- Close -->
+        <Button Classes="chromeButton closeButton" Click="OnClose"
+                chrome:WindowDecorationProperties.ElementRole="User">
+            <Path Data="M 0,0 L 10,10 M 10,0 L 0,10"
+                  Stroke="{DynamicResource TextPrimary}"
+                  StrokeThickness="1"
+                  Width="10" Height="10"
+                  Stretch="None"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center" />
+        </Button>
+    </StackPanel>
+
+    <UserControl.Styles>
+        <Style Selector="Button.chromeButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.chromeButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+        </Style>
+
+        <Style Selector="Button.closeButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SeverityDanger}" />
+        </Style>
+        <Style Selector="Button.closeButton:pointerover Path">
+            <Setter Property="Stroke" Value="{DynamicResource TextOnAccent}" />
+        </Style>
+    </UserControl.Styles>
+</UserControl>

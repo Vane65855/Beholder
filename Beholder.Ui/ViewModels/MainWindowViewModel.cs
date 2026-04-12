@@ -22,6 +22,12 @@ internal partial class MainWindowViewModel : ViewModelBase {
     public bool IsMapActive => ActiveTab == TabKind.Map;
     public bool IsScannerActive => ActiveTab == TabKind.Scanner;
 
+    public string TrafficLabel => ActiveTab == TabKind.Traffic ? "[ TRAFFIC ]" : "TRAFFIC";
+    public string FirewallLabel => ActiveTab == TabKind.Firewall ? "[ FIREWALL ]" : "FIREWALL";
+    public string AlertsLabel => ActiveTab == TabKind.Alerts ? "[ ALERTS ]" : "ALERTS";
+    public string MapLabel => ActiveTab == TabKind.Map ? "[ MAP ]" : "MAP";
+    public string ScannerLabel => ActiveTab == TabKind.Scanner ? "[ SCANNER ]" : "SCANNER";
+
     public MainWindowViewModel() {
         ActiveTabContent = _trafficTab;
     }
@@ -41,6 +47,12 @@ internal partial class MainWindowViewModel : ViewModelBase {
         OnPropertyChanged(nameof(IsAlertsActive));
         OnPropertyChanged(nameof(IsMapActive));
         OnPropertyChanged(nameof(IsScannerActive));
+
+        OnPropertyChanged(nameof(TrafficLabel));
+        OnPropertyChanged(nameof(FirewallLabel));
+        OnPropertyChanged(nameof(AlertsLabel));
+        OnPropertyChanged(nameof(MapLabel));
+        OnPropertyChanged(nameof(ScannerLabel));
     }
 
     [RelayCommand]
