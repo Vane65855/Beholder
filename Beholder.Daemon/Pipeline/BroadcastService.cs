@@ -100,7 +100,7 @@ internal sealed class BroadcastService : IHostedService, IDisposable {
             new BoundedChannelOptions(_subscriberChannelCapacity) {
                 FullMode = BoundedChannelFullMode.DropOldest,
                 SingleReader = true,
-                SingleWriter = true,
+                SingleWriter = false,
             });
         _subscribers.TryAdd(subscriberId, channel);
         _logger.LogInformation("Broadcast subscriber {Id} added", subscriberId);
@@ -114,6 +114,18 @@ internal sealed class BroadcastService : IHostedService, IDisposable {
             _subscribers.TryRemove(subscriberId, out _);
             channel.Writer.TryComplete();
             _logger.LogInformation("Broadcast subscriber {Id} removed", subscriberId);
+        }
+    }
+
+    public void BroadcastRuleChange(FirewallRule rule, Local.FirewallRuleChange.Types.ChangeKind kind) {
+        ArgumentNullException.ThrowIfNull(rule);
+        var change = new Local.FirewallRuleChange {
+            Change = kind,
+            Rule = rule.ToProto(),
+        };
+        var daemonEvent = new Local.DaemonEvent { RuleChange = change };
+        foreach (var (_, channel) in _subscribers) {
+            channel.Writer.TryWrite(daemonEvent);
         }
     }
 
