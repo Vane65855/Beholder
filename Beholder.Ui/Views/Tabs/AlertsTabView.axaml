@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Beholder.Ui.ViewModels"
+             x:Class="Beholder.Ui.Views.Tabs.AlertsTabView"
+             x:DataType="vm:AlertsTabViewModel"
+             Background="{DynamicResource BackgroundRoot}">
+    <TextBlock Text="Alerts tab content"
+               Foreground="{DynamicResource TextMuted}"
+               FontSize="14"
+               HorizontalAlignment="Center"
+               VerticalAlignment="Center" />
+</UserControl>

@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Beholder.Ui.ViewModels"
+             x:Class="Beholder.Ui.Views.Tabs.MapTabView"
+             x:DataType="vm:MapTabViewModel"
+             Background="{DynamicResource BackgroundRoot}">
+    <TextBlock Text="Map tab content (deferred)"
+               Foreground="{DynamicResource TextMuted}"
+               FontSize="14"
+               HorizontalAlignment="Center"
+               VerticalAlignment="Center" />
+</UserControl>

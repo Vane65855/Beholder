@@ -1,0 +1,112 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Beholder.Ui.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="44"
+             x:Class="Beholder.Ui.Views.TopNavBar"
+             x:DataType="vm:MainWindowViewModel"
+             Background="{DynamicResource BackgroundNavBar}">
+
+    <Border BorderBrush="{DynamicResource BorderSubtle}"
+            BorderThickness="0,0,0,1">
+        <Grid ColumnDefinitions="Auto,*,Auto" Margin="16,8">
+
+            <!-- Brand block -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal"
+                        VerticalAlignment="Center" Spacing="6">
+                <TextBlock Text="BEHOLDER NMT"
+                           Foreground="{DynamicResource AccentPrimary}"
+                           FontWeight="SemiBold" FontSize="14"
+                           LetterSpacing="2"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="v0.1.0"
+                           Foreground="{DynamicResource TextMuted}"
+                           FontSize="11"
+                           VerticalAlignment="Center" />
+                <TextBlock Text=" ·  daemon:"
+                           Foreground="{DynamicResource TextSecondary}"
+                           FontSize="11"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="offline"
+                           Foreground="{DynamicResource StatusOffline}"
+                           FontSize="11"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+
+            <!-- Tab buttons -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center" Spacing="4">
+
+                <Button Command="{Binding SwitchTabCommand}"
+                        CommandParameter="{x:Static vm:TabKind.Traffic}"
+                        Classes="navTab"
+                        Classes.active="{Binding IsTrafficActive}">
+                    <TextBlock Text="TRAFFIC" LetterSpacing="1.5" />
+                </Button>
+
+                <Button Command="{Binding SwitchTabCommand}"
+                        CommandParameter="{x:Static vm:TabKind.Firewall}"
+                        Classes="navTab"
+                        Classes.active="{Binding IsFirewallActive}">
+                    <TextBlock Text="FIREWALL" LetterSpacing="1.5" />
+                </Button>
+
+                <Button Command="{Binding SwitchTabCommand}"
+                        CommandParameter="{x:Static vm:TabKind.Alerts}"
+                        Classes="navTab"
+                        Classes.active="{Binding IsAlertsActive}">
+                    <TextBlock Text="ALERTS" LetterSpacing="1.5" />
+                </Button>
+
+                <Button Command="{Binding SwitchTabCommand}"
+                        CommandParameter="{x:Static vm:TabKind.Map}"
+                        Classes="navTab"
+                        Classes.active="{Binding IsMapActive}">
+                    <TextBlock Text="MAP" LetterSpacing="1.5" />
+                </Button>
+
+                <Button Command="{Binding SwitchTabCommand}"
+                        CommandParameter="{x:Static vm:TabKind.Scanner}"
+                        Classes="navTab"
+                        Classes.active="{Binding IsScannerActive}">
+                    <TextBlock Text="SCANNER" LetterSpacing="1.5" />
+                </Button>
+            </StackPanel>
+
+            <!-- Time range (placeholder) -->
+            <TextBlock Grid.Column="2"
+                       Text="LAST 24 HOURS"
+                       Foreground="{DynamicResource TextMuted}"
+                       FontSize="11"
+                       LetterSpacing="1.5"
+                       VerticalAlignment="Center" />
+        </Grid>
+    </Border>
+
+    <UserControl.Styles>
+        <Style Selector="Button.navTab">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="Medium" />
+            <Setter Property="CornerRadius" Value="0" />
+        </Style>
+        <Style Selector="Button.navTab:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button.navTab.active">
+            <Setter Property="Foreground" Value="{DynamicResource AccentPrimary}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentPrimary}" />
+            <Setter Property="BorderThickness" Value="0,0,0,2" />
+        </Style>
+        <Style Selector="Button.navTab.active /template/ ContentPresenter">
+            <Setter Property="Foreground" Value="{DynamicResource AccentPrimary}" />
+        </Style>
+    </UserControl.Styles>
+</UserControl>

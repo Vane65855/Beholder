@@ -1,0 +1,136 @@
+<!-- Light theme: values TBD — currently mirrors dark theme so views compile against either. -->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ── Backgrounds ─────────────────────────────────────────────── -->
+    <Color x:Key="BackgroundRootColor">#0B0E14</Color>
+    <SolidColorBrush x:Key="BackgroundRoot" Color="{StaticResource BackgroundRootColor}" />
+
+    <Color x:Key="BackgroundPanelColor">#0D1117</Color>
+    <SolidColorBrush x:Key="BackgroundPanel" Color="{StaticResource BackgroundPanelColor}" />
+
+    <Color x:Key="BackgroundElevatedColor">#111820</Color>
+    <SolidColorBrush x:Key="BackgroundElevated" Color="{StaticResource BackgroundElevatedColor}" />
+
+    <Color x:Key="BackgroundHoverColor">#141D26</Color>
+    <SolidColorBrush x:Key="BackgroundHover" Color="{StaticResource BackgroundHoverColor}" />
+
+    <Color x:Key="BackgroundSelectedColor">#0C2A2E</Color>
+    <SolidColorBrush x:Key="BackgroundSelected" Color="{StaticResource BackgroundSelectedColor}" />
+
+    <Color x:Key="BackgroundNavBarColor">#080B10</Color>
+    <SolidColorBrush x:Key="BackgroundNavBar" Color="{StaticResource BackgroundNavBarColor}" />
+
+    <!-- ── Text ────────────────────────────────────────────────────── -->
+    <Color x:Key="TextPrimaryColor">#D4D8DE</Color>
+    <SolidColorBrush x:Key="TextPrimary" Color="{StaticResource TextPrimaryColor}" />
+
+    <Color x:Key="TextSecondaryColor">#8B949E</Color>
+    <SolidColorBrush x:Key="TextSecondary" Color="{StaticResource TextSecondaryColor}" />
+
+    <Color x:Key="TextMutedColor">#5A6370</Color>
+    <SolidColorBrush x:Key="TextMuted" Color="{StaticResource TextMutedColor}" />
+
+    <Color x:Key="TextOnAccentColor">#E6EDF3</Color>
+    <SolidColorBrush x:Key="TextOnAccent" Color="{StaticResource TextOnAccentColor}" />
+
+    <!-- ── Borders & Dividers ──────────────────────────────────────── -->
+    <Color x:Key="BorderSubtleColor">#1C2530</Color>
+    <SolidColorBrush x:Key="BorderSubtle" Color="{StaticResource BorderSubtleColor}" />
+
+    <Color x:Key="BorderStrongColor">#2D3640</Color>
+    <SolidColorBrush x:Key="BorderStrong" Color="{StaticResource BorderStrongColor}" />
+
+    <Color x:Key="DividerHorizontalColor">#1C2530</Color>
+    <SolidColorBrush x:Key="DividerHorizontal" Color="{StaticResource DividerHorizontalColor}" />
+
+    <!-- ── Accent ──────────────────────────────────────────────────── -->
+    <Color x:Key="AccentPrimaryColor">#00BCD4</Color>
+    <SolidColorBrush x:Key="AccentPrimary" Color="{StaticResource AccentPrimaryColor}" />
+
+    <Color x:Key="AccentHoverColor">#26D9EC</Color>
+    <SolidColorBrush x:Key="AccentHover" Color="{StaticResource AccentHoverColor}" />
+
+    <!-- ── Severity ────────────────────────────────────────────────── -->
+    <Color x:Key="SeveritySuccessColor">#2EA043</Color>
+    <SolidColorBrush x:Key="SeveritySuccess" Color="{StaticResource SeveritySuccessColor}" />
+
+    <Color x:Key="SeverityWarnColor">#D4A017</Color>
+    <SolidColorBrush x:Key="SeverityWarn" Color="{StaticResource SeverityWarnColor}" />
+
+    <Color x:Key="SeverityDangerColor">#DA3633</Color>
+    <SolidColorBrush x:Key="SeverityDanger" Color="{StaticResource SeverityDangerColor}" />
+
+    <Color x:Key="SeverityInfoColor">#5A6370</Color>
+    <SolidColorBrush x:Key="SeverityInfo" Color="{StaticResource SeverityInfoColor}" />
+
+    <!-- ── Status ──────────────────────────────────────────────────── -->
+    <Color x:Key="StatusOnlineColor">#2EA043</Color>
+    <SolidColorBrush x:Key="StatusOnline" Color="{StaticResource StatusOnlineColor}" />
+
+    <Color x:Key="StatusOfflineColor">#DA3633</Color>
+    <SolidColorBrush x:Key="StatusOffline" Color="{StaticResource StatusOfflineColor}" />
+
+    <!-- ── Data Visualization ──────────────────────────────────────── -->
+    <Color x:Key="ChartOutboundFillColor">#4D00BCD4</Color>
+    <SolidColorBrush x:Key="ChartOutboundFill" Color="{StaticResource ChartOutboundFillColor}" />
+
+    <Color x:Key="ChartOutboundStrokeColor">#00BCD4</Color>
+    <SolidColorBrush x:Key="ChartOutboundStroke" Color="{StaticResource ChartOutboundStrokeColor}" />
+
+    <Color x:Key="ChartInboundFillColor">#4DE8734A</Color>
+    <SolidColorBrush x:Key="ChartInboundFill" Color="{StaticResource ChartInboundFillColor}" />
+
+    <Color x:Key="ChartInboundStrokeColor">#E8734A</Color>
+    <SolidColorBrush x:Key="ChartInboundStroke" Color="{StaticResource ChartInboundStrokeColor}" />
+
+    <Color x:Key="ChartGridlineColor">#1C2530</Color>
+    <SolidColorBrush x:Key="ChartGridline" Color="{StaticResource ChartGridlineColor}" />
+
+    <Color x:Key="ChartAxisLabelColor">#5A6370</Color>
+    <SolidColorBrush x:Key="ChartAxisLabel" Color="{StaticResource ChartAxisLabelColor}" />
+
+    <Color x:Key="ChartSparklineFillColor">#3300BCD4</Color>
+    <SolidColorBrush x:Key="ChartSparklineFill" Color="{StaticResource ChartSparklineFillColor}" />
+
+    <Color x:Key="ChartSparklineStrokeColor">#00BCD4</Color>
+    <SolidColorBrush x:Key="ChartSparklineStroke" Color="{StaticResource ChartSparklineStrokeColor}" />
+
+    <!-- ── Per-Process Series ──────────────────────────────────────── -->
+    <Color x:Key="Series01Color">#00BCD4</Color>
+    <SolidColorBrush x:Key="Series01" Color="{StaticResource Series01Color}" />
+
+    <Color x:Key="Series02Color">#E8734A</Color>
+    <SolidColorBrush x:Key="Series02" Color="{StaticResource Series02Color}" />
+
+    <Color x:Key="Series03Color">#D4A017</Color>
+    <SolidColorBrush x:Key="Series03" Color="{StaticResource Series03Color}" />
+
+    <Color x:Key="Series04Color">#8B5CF6</Color>
+    <SolidColorBrush x:Key="Series04" Color="{StaticResource Series04Color}" />
+
+    <Color x:Key="Series05Color">#DA3633</Color>
+    <SolidColorBrush x:Key="Series05" Color="{StaticResource Series05Color}" />
+
+    <Color x:Key="Series06Color">#2EA043</Color>
+    <SolidColorBrush x:Key="Series06" Color="{StaticResource Series06Color}" />
+
+    <Color x:Key="Series07Color">#5A6370</Color>
+    <SolidColorBrush x:Key="Series07" Color="{StaticResource Series07Color}" />
+
+    <Color x:Key="Series08Color">#F778BA</Color>
+    <SolidColorBrush x:Key="Series08" Color="{StaticResource Series08Color}" />
+
+    <Color x:Key="Series09Color">#79C0FF</Color>
+    <SolidColorBrush x:Key="Series09" Color="{StaticResource Series09Color}" />
+
+    <Color x:Key="Series10Color">#A5D6A7</Color>
+    <SolidColorBrush x:Key="Series10" Color="{StaticResource Series10Color}" />
+
+    <Color x:Key="Series11Color">#CE93D8</Color>
+    <SolidColorBrush x:Key="Series11" Color="{StaticResource Series11Color}" />
+
+    <Color x:Key="Series12Color">#FFB74D</Color>
+    <SolidColorBrush x:Key="Series12" Color="{StaticResource Series12Color}" />
+
+</ResourceDictionary>
