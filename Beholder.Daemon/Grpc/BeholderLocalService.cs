@@ -163,11 +163,37 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         return new Local.ApplyFirewallRuleResponse { Rule = persistedRule.ToProto() };
     }
 
-    public override Task<Local.MarkAlertReadResponse> MarkAlertRead(
-        Local.MarkAlertReadRequest request, ServerCallContext context)
-        => throw new RpcException(new Status(StatusCode.Unimplemented, "MarkAlertRead lands in Phase 4.4"));
+    public override async Task<Local.MarkAlertReadResponse> MarkAlertRead(
+        Local.MarkAlertReadRequest request, ServerCallContext context
+    ) {
+        if (request.Seq <= 0)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "seq must be positive"));
 
-    public override Task<Local.VerifyChainResponse> VerifyChain(
-        Local.VerifyChainRequest request, ServerCallContext context)
-        => throw new RpcException(new Status(StatusCode.Unimplemented, "VerifyChain lands in Phase 4.5"));
+        var viewedAt = _timeProvider.GetUtcNow();
+
+        try {
+            await _alertStore.MarkAlertReadAsync(request.Seq, viewedAt, context.CancellationToken)
+                .ConfigureAwait(false);
+        } catch (Exception ex) {
+            _logger.LogError(ex, "Failed to mark alert {Seq} as read", request.Seq);
+            throw new RpcException(new Status(StatusCode.Internal,
+                $"Failed to mark alert as read: {ex.Message}"));
+        }
+
+        return new Local.MarkAlertReadResponse();
+    }
+
+    public override async Task<Local.VerifyChainResponse> VerifyChain(
+        Local.VerifyChainRequest request, ServerCallContext context
+    ) {
+        try {
+            var result = await _eventStore.VerifyAsync(context.CancellationToken)
+                .ConfigureAwait(false);
+            return result.ToProto();
+        } catch (Exception ex) {
+            _logger.LogError(ex, "Chain verification failed unexpectedly");
+            throw new RpcException(new Status(StatusCode.Internal,
+                $"Chain verification error: {ex.Message}"));
+        }
+    }
 }

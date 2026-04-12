@@ -94,4 +94,20 @@ internal static class ProtocolConverters {
             FirstViewedAtUnixNs = source.FirstViewedAt?.ToUnixTimeNanoseconds() ?? 0L,
         };
     }
+
+    /// <summary>
+    /// Maps a chain verification result onto its wire equivalent. A null
+    /// <see cref="Core.ChainVerificationResult.FailedAtSeq"/> becomes the
+    /// sentinel 0, and a null <see cref="Core.ChainVerificationResult.ErrorMessage"/>
+    /// becomes the empty string — proto3 has no native nullable primitives.
+    /// </summary>
+    public static Local.VerifyChainResponse ToProto(this Core.ChainVerificationResult source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Local.VerifyChainResponse {
+            IsValid = source.IsValid,
+            RowsVerified = source.RowsVerified,
+            FailedAtSeq = source.FailedAtSeq ?? 0,
+            ErrorMessage = source.ErrorMessage ?? "",
+        };
+    }
 }

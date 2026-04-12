@@ -1,0 +1,172 @@
+using System.Text.Json;
+using Beholder.Core;
+using Beholder.Daemon.Grpc;
+using Beholder.Daemon.Pipeline;
+using Beholder.Daemon.Storage;
+using Grpc.Core;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using Local = Beholder.Protocol.Local;
+
+namespace Beholder.Tests;
+
+public sealed class MarkAlertReadTests : IDisposable {
+    private static readonly DateTimeOffset FixedTimestamp =
+        new(2026, 4, 10, 12, 0, 0, TimeSpan.Zero);
+
+    private readonly string _tempDir;
+    private readonly string _databasePath;
+    private readonly ConnectionFactory _connectionFactory;
+    private readonly SqliteAlertStore _alertStore;
+    private readonly FakeTimeProvider _timeProvider;
+    private readonly BroadcastService _broadcaster;
+    private readonly BeholderLocalService _service;
+
+    public MarkAlertReadTests() {
+        _tempDir = Path.Combine(Path.GetTempPath(), "beholder-tests", Guid.NewGuid().ToString());
+        _databasePath = Path.Combine(_tempDir, "beholder.db");
+        new DatabaseInitializer(_databasePath).Initialize();
+
+        _connectionFactory = new ConnectionFactory(_databasePath);
+        _alertStore = new SqliteAlertStore(_connectionFactory, NullLogger<SqliteAlertStore>.Instance);
+        _timeProvider = new FakeTimeProvider(FixedTimestamp);
+        var eventStore = new SqliteEventStore(_connectionFactory, _timeProvider);
+        var firewallStore = new SqliteFirewallRuleStore(_connectionFactory);
+        var snapshotSource = new FakeSnapshotBatchSource();
+        _broadcaster = new BroadcastService(
+            snapshotSource, _timeProvider, NullLogger<BroadcastService>.Instance);
+        var pipeline = new FlowEventPipeline(
+            new FakeFlowSource(), _timeProvider,
+            NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
+
+        _service = new BeholderLocalService(
+            _broadcaster, pipeline, firewallStore, _alertStore,
+            new FakeFirewallController(), eventStore, _timeProvider,
+            NullLogger<BeholderLocalService>.Instance);
+    }
+
+    public void Dispose() {
+        _broadcaster.Dispose();
+        SqliteConnection.ClearAllPools();
+        if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true);
+    }
+
+    [Fact]
+    public async Task MarkAlertRead_ValidSeq_MarksRead() {
+        await InsertAlertRowAsync(1, "NewProcess", "/bin/a", "Test alert", FixedTimestamp);
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        await _service.MarkAlertRead(new Local.MarkAlertReadRequest { Seq = 1 }, context);
+
+        var alerts = await _alertStore.GetAlertsAsync(10, TestContext.Current.CancellationToken);
+        var alert = Assert.Single(alerts);
+        Assert.NotNull(alert.FirstViewedAt);
+        Assert.True(alert.IsRead);
+    }
+
+    [Fact]
+    public async Task MarkAlertRead_ZeroSeq_ReturnsInvalidArgument() {
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var ex = await Assert.ThrowsAsync<RpcException>(
+            () => _service.MarkAlertRead(new Local.MarkAlertReadRequest { Seq = 0 }, context));
+
+        Assert.Equal(StatusCode.InvalidArgument, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task MarkAlertRead_NegativeSeq_ReturnsInvalidArgument() {
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var ex = await Assert.ThrowsAsync<RpcException>(
+            () => _service.MarkAlertRead(new Local.MarkAlertReadRequest { Seq = -1 }, context));
+
+        Assert.Equal(StatusCode.InvalidArgument, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task MarkAlertRead_NonexistentSeq_ReturnsSuccess() {
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.MarkAlertRead(
+            new Local.MarkAlertReadRequest { Seq = 999 }, context);
+
+        Assert.NotNull(response);
+    }
+
+    [Fact]
+    public async Task MarkAlertRead_Idempotent_PreservesFirstViewedAt() {
+        await InsertAlertRowAsync(1, "NewProcess", "/bin/a", "Test alert", FixedTimestamp);
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        await _service.MarkAlertRead(new Local.MarkAlertReadRequest { Seq = 1 }, context);
+        _timeProvider.Advance(TimeSpan.FromHours(5));
+        await _service.MarkAlertRead(new Local.MarkAlertReadRequest { Seq = 1 }, context);
+
+        var alerts = await _alertStore.GetAlertsAsync(10, TestContext.Current.CancellationToken);
+        var alert = Assert.Single(alerts);
+        Assert.Equal(FixedTimestamp, alert.FirstViewedAt);
+    }
+
+    private async Task InsertAlertRowAsync(
+        long seq, string eventKind, string processPath,
+        string summary, DateTimeOffset timestamp
+    ) {
+        using var connection = _connectionFactory.CreateConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO event_log (seq, ts_unix_ns, kind, payload, prev_hash, row_hash)
+            VALUES ($seq, $ts, $kind, $payload, $zeros, $zeros);
+            """;
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new { processPath, summary });
+        command.Parameters.AddWithValue("$seq", seq);
+        command.Parameters.AddWithValue("$ts", timestamp.ToUnixTimeMilliseconds() * 1_000_000L);
+        command.Parameters.AddWithValue("$kind", eventKind);
+        command.Parameters.AddWithValue("$payload", payload);
+        command.Parameters.AddWithValue("$zeros", new byte[32]);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+    }
+
+    private sealed class FakeFirewallController : IFirewallController {
+        public Task AddRuleAsync(FirewallRule rule, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+        public Task RemoveRuleAsync(string processPath, Direction direction, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+        public Task<IReadOnlyList<FirewallRule>> ListRulesAsync(CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<FirewallRule>>(Array.Empty<FirewallRule>());
+    }
+
+    private sealed class FakeFlowSource : IFlowSource {
+#pragma warning disable CS0067 // Event is required by IFlowSource but not exercised in these tests
+        public event Action<FlowEvent>? OnFlowEvent;
+#pragma warning restore CS0067
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class FakeSnapshotBatchSource : ISnapshotBatchSource {
+        public event Action<IReadOnlyList<CounterSnapshot>>? OnSnapshotBatch;
+        public void Fire(IReadOnlyList<CounterSnapshot> batch) => OnSnapshotBatch?.Invoke(batch);
+    }
+
+    private sealed class FakeServerCallContext : ServerCallContext {
+        private readonly CancellationToken _cancellationToken;
+        public FakeServerCallContext(CancellationToken cancellationToken) => _cancellationToken = cancellationToken;
+        protected override string MethodCore => "/test";
+        protected override string HostCore => "localhost";
+        protected override string PeerCore => "test-peer";
+        protected override DateTime DeadlineCore => DateTime.MaxValue;
+        protected override Metadata RequestHeadersCore => new();
+        protected override CancellationToken CancellationTokenCore => _cancellationToken;
+        protected override Metadata ResponseTrailersCore => new();
+        protected override Status StatusCore { get; set; }
+        protected override WriteOptions? WriteOptionsCore { get; set; }
+        protected override AuthContext AuthContextCore =>
+            new(string.Empty, new Dictionary<string, List<AuthProperty>>());
+        protected override ContextPropagationToken CreatePropagationTokenCore(ContextPropagationOptions? options)
+            => throw new NotSupportedException();
+        protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders)
+            => Task.CompletedTask;
+    }
+}
