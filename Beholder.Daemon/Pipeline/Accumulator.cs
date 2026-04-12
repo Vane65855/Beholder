@@ -26,6 +26,7 @@ internal sealed class Accumulator {
     private readonly ILogger<Accumulator> _logger;
     private readonly Dictionary<string, ProcessAggregate> _aggregates = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _aggregatesLock = new(1, 1);
+    private TaskCompletionSource? _waitingForTick;
 
     public Accumulator(
         ChannelReader<FlowEvent> reader,
@@ -46,6 +47,12 @@ internal sealed class Accumulator {
     /// during the tick. Not fired when the tick would produce an empty batch.
     /// </summary>
     public event Action<IReadOnlyList<CounterSnapshot>>? OnSnapshotBatch;
+
+    /// <summary>Diagnostic. Test-only — installs a signal that fires once the loop has
+    /// registered its delay timer with the TimeProvider, guaranteeing a subsequent
+    /// <c>FakeTimeProvider.Advance</c> will fire it.</summary>
+    internal void SetWaitSignal(TaskCompletionSource signal)
+        => Interlocked.Exchange(ref _waitingForTick, signal);
 
     /// <summary>
     /// Runs the accumulator loop until <paramref name="cancellationToken"/> is signaled.
@@ -138,6 +145,9 @@ internal sealed class Accumulator {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var waitTask = _reader.WaitToReadAsync(linkedCts.Token).AsTask();
         var delayTask = Task.Delay(waitBudget, _timeProvider, linkedCts.Token);
+
+        // Signal that the delay timer is now registered with the TimeProvider.
+        Interlocked.Exchange(ref _waitingForTick, null)?.TrySetResult();
 
         var completed = await Task.WhenAny(waitTask, delayTask).ConfigureAwait(false);
         linkedCts.Cancel();

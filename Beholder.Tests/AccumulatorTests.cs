@@ -321,8 +321,14 @@ public class AccumulatorTests {
                 Assert.True(_channel.Writer.TryWrite(flowEvent));
             }
 
-            await Task.Yield();
-            await Task.Yield();
+            // Wait until the accumulator has entered WaitForEventOrTickAsync and
+            // registered a Task.Delay timer with the FakeTimeProvider. This closes
+            // the race where Advance fires before the timer exists, causing the
+            // timer to be created relative to the already-advanced clock.
+            var waitSignal = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            Accumulator.SetWaitSignal(waitSignal);
+            await waitSignal.Task.WaitAsync(TestTimeout);
 
             FakeTime.Advance(FlushInterval);
 
