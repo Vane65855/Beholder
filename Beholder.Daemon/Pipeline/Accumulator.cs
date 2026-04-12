@@ -13,8 +13,10 @@ namespace Beholder.Daemon.Pipeline;
 /// resets the per-tick delta state, and fires <see cref="OnSnapshotBatch"/>.
 ///
 /// The loop is single-consumer by design: both channel draining and tick flushing run
-/// from the same <see cref="RunAsync"/> task, so the aggregation dictionary is never
-/// touched from two threads at once and no lock is required.
+/// from the same <see cref="RunAsync"/> task. The aggregation dictionary is also
+/// readable from other threads via <see cref="GetCurrentSnapshotsAsync"/>, which is
+/// why all mutation and reads of <c>_aggregates</c> are serialized through a
+/// <see cref="SemaphoreSlim"/>.
 /// </summary>
 internal sealed class Accumulator {
     private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(1);
@@ -23,6 +25,7 @@ internal sealed class Accumulator {
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<Accumulator> _logger;
     private readonly Dictionary<string, ProcessAggregate> _aggregates = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim _aggregatesLock = new(1, 1);
 
     public Accumulator(
         ChannelReader<FlowEvent> reader,
@@ -54,11 +57,21 @@ internal sealed class Accumulator {
         _logger.LogInformation("Accumulator loop starting with {FlushInterval} flush interval", FlushInterval);
         try {
             while (!cancellationToken.IsCancellationRequested) {
-                while (_reader.TryRead(out var flowEvent)) RecordEvent(flowEvent);
+                await _aggregatesLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try {
+                    while (_reader.TryRead(out var flowEvent)) RecordEvent(flowEvent);
+                } finally {
+                    _aggregatesLock.Release();
+                }
 
                 var now = _timeProvider.GetUtcNow();
                 if (now >= nextFlush) {
-                    FlushTick(now);
+                    await _aggregatesLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try {
+                        FlushTick(now);
+                    } finally {
+                        _aggregatesLock.Release();
+                    }
                     nextFlush = now + FlushInterval;
                     continue;
                 }
@@ -68,7 +81,12 @@ internal sealed class Accumulator {
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             // Expected on shutdown.
         } finally {
-            FlushTick(_timeProvider.GetUtcNow());
+            await _aggregatesLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try {
+                FlushTick(_timeProvider.GetUtcNow());
+            } finally {
+                _aggregatesLock.Release();
+            }
         }
         _logger.LogInformation("Accumulator loop stopped");
     }
@@ -91,6 +109,29 @@ internal sealed class Accumulator {
         }
         if (batch is null) return;
         OnSnapshotBatch?.Invoke(batch);
+    }
+
+    /// <summary>
+    /// Snapshots every process the accumulator currently tracks, including those
+    /// without activity in the most recent tick. Unlike the tick flush, this does
+    /// not reset per-tick delta state — it is a read-only view intended for the
+    /// <c>GetSnapshot</c> RPC, not a replacement for the tick fan-out.
+    /// </summary>
+    public async Task<IReadOnlyList<CounterSnapshot>> GetCurrentSnapshotsAsync(
+        CancellationToken cancellationToken
+    ) {
+        await _aggregatesLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try {
+            if (_aggregates.Count == 0) return Array.Empty<CounterSnapshot>();
+            var now = _timeProvider.GetUtcNow();
+            var snapshots = new List<CounterSnapshot>(_aggregates.Count);
+            foreach (var aggregate in _aggregates.Values) {
+                snapshots.Add(aggregate.BuildSnapshot(now));
+            }
+            return snapshots;
+        } finally {
+            _aggregatesLock.Release();
+        }
     }
 
     private async Task WaitForEventOrTickAsync(TimeSpan waitBudget, CancellationToken cancellationToken) {

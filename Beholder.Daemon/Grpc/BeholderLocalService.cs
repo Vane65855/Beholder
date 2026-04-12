@@ -1,4 +1,7 @@
+using Beholder.Core;
 using Beholder.Daemon.Pipeline;
+using Beholder.Daemon.Storage;
+using Beholder.Protocol;
 using Grpc.Core;
 using Local = Beholder.Protocol.Local;
 
@@ -6,21 +9,35 @@ namespace Beholder.Daemon.Grpc;
 
 /// <summary>
 /// Server-side implementation of the <c>beholder.local.BeholderLocal</c> gRPC
-/// service. Only the streaming <see cref="Subscribe"/> RPC is wired in
-/// Phase 4.2; the four unary RPCs return <see cref="StatusCode.Unimplemented"/>
-/// and will be filled in by subsequent prompts.
+/// service. <see cref="Subscribe"/> streams live events; <see cref="GetSnapshot"/>
+/// returns the current state for initial UI population. The remaining unary
+/// RPCs return <see cref="StatusCode.Unimplemented"/> until later phases.
 /// </summary>
 internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBase {
+    private const int RecentAlertLimit = 100;
+
     private readonly BroadcastService _broadcaster;
+    private readonly FlowEventPipeline _pipeline;
+    private readonly SqliteFirewallRuleStore _firewallStore;
+    private readonly IAlertStore _alertStore;
     private readonly ILogger<BeholderLocalService> _logger;
 
     public BeholderLocalService(
         BroadcastService broadcaster,
+        FlowEventPipeline pipeline,
+        SqliteFirewallRuleStore firewallStore,
+        IAlertStore alertStore,
         ILogger<BeholderLocalService> logger
     ) {
         ArgumentNullException.ThrowIfNull(broadcaster);
+        ArgumentNullException.ThrowIfNull(pipeline);
+        ArgumentNullException.ThrowIfNull(firewallStore);
+        ArgumentNullException.ThrowIfNull(alertStore);
         ArgumentNullException.ThrowIfNull(logger);
         _broadcaster = broadcaster;
+        _pipeline = pipeline;
+        _firewallStore = firewallStore;
+        _alertStore = alertStore;
         _logger = logger;
     }
 
@@ -45,9 +62,20 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         }
     }
 
-    public override Task<Local.GetSnapshotResponse> GetSnapshot(
-        Local.GetSnapshotRequest request, ServerCallContext context)
-        => throw new RpcException(new Status(StatusCode.Unimplemented, "GetSnapshot lands in Phase 4.3"));
+    public override async Task<Local.GetSnapshotResponse> GetSnapshot(
+        Local.GetSnapshotRequest request, ServerCallContext context
+    ) {
+        var ct = context.CancellationToken;
+        var snapshots = await _pipeline.GetCurrentSnapshotsAsync(ct).ConfigureAwait(false);
+        var rules = await _firewallStore.ListAllAsync(ct).ConfigureAwait(false);
+        var alerts = await _alertStore.GetAlertsAsync(RecentAlertLimit, ct).ConfigureAwait(false);
+
+        var response = new Local.GetSnapshotResponse();
+        foreach (var snapshot in snapshots) response.Snapshots.Add(snapshot.ToProto());
+        foreach (var rule in rules) response.FirewallRules.Add(rule.ToProto());
+        foreach (var alert in alerts) response.RecentAlerts.Add(alert.ToProto());
+        return response;
+    }
 
     public override Task<Local.ApplyFirewallRuleResponse> ApplyFirewallRule(
         Local.ApplyFirewallRuleRequest request, ServerCallContext context)

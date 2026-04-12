@@ -93,6 +93,13 @@ public sealed class DatabaseInitializer {
                 last_hash_at  INTEGER
             );
             """);
+
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS alert_state (
+                seq                INTEGER PRIMARY KEY,
+                first_viewed_at_ns INTEGER NOT NULL
+            );
+            """);
     }
 
     private static void CreateIndexes(SqliteConnection connection) {

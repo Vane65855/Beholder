@@ -37,6 +37,14 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
     /// </summary>
     public event Action<IReadOnlyList<CounterSnapshot>>? OnSnapshotBatch;
 
+    /// <summary>
+    /// Returns a snapshot of every process the pipeline's accumulator currently
+    /// tracks. Safe to call from any thread. Used by the <c>GetSnapshot</c> RPC.
+    /// </summary>
+    public Task<IReadOnlyList<CounterSnapshot>> GetCurrentSnapshotsAsync(
+        CancellationToken cancellationToken
+    ) => _accumulator.GetCurrentSnapshotsAsync(cancellationToken);
+
     public FlowEventPipeline(
         IFlowSource flowSource,
         TimeProvider timeProvider,

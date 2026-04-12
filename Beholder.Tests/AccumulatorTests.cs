@@ -213,6 +213,48 @@ public class AccumulatorTests {
             logger: null!));
     }
 
+    [Fact]
+    public async Task GetCurrentSnapshotsAsync_EmptyAccumulator_ReturnsEmpty() {
+        await using var fixture = Fixture.Start();
+
+        var snapshots = await fixture.Accumulator.GetCurrentSnapshotsAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(snapshots);
+    }
+
+    [Fact]
+    public async Task GetCurrentSnapshotsAsync_AfterTick_ReturnsCurrentState() {
+        await using var fixture = Fixture.Start();
+
+        await fixture.DriveTickAsync(BuildFlow(bytesOut: 500));
+
+        var snapshots = await fixture.Accumulator.GetCurrentSnapshotsAsync(
+            TestContext.Current.CancellationToken);
+
+        var snapshot = Assert.Single(snapshots);
+        Assert.Equal(500, snapshot.TotalBytesOut);
+        Assert.Equal(0, snapshot.DeltaBytesOut);
+    }
+
+    [Fact]
+    public async Task GetCurrentSnapshotsAsync_IncludesInactiveProcesses() {
+        await using var fixture = Fixture.Start();
+
+        await fixture.DriveTickAsync(
+            BuildFlow(processName: "a.exe", processPath: @"C:\a.exe", bytesOut: 100));
+        await fixture.DriveTickAsync(
+            BuildFlow(processName: "b.exe", processPath: @"C:\b.exe", bytesOut: 200));
+
+        var snapshots = await fixture.Accumulator.GetCurrentSnapshotsAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, snapshots.Count);
+        var paths = snapshots.Select(s => s.ProcessPath).ToHashSet();
+        Assert.Contains(@"C:\a.exe", paths);
+        Assert.Contains(@"C:\b.exe", paths);
+    }
+
     private static FlowEvent BuildFlow(
         string processName = "curl.exe",
         string processPath = @"C:\Windows\System32\curl.exe",
@@ -240,11 +282,13 @@ public class AccumulatorTests {
         private readonly Task _runTask;
 
         public FakeTimeProvider FakeTime { get; }
+        public Accumulator Accumulator { get; }
         public List<IReadOnlyList<CounterSnapshot>> ReceivedBatches { get; } = new();
 
         private Fixture(Channel<FlowEvent> channel, FakeTimeProvider fakeTime, Accumulator accumulator) {
             _channel = channel;
             FakeTime = fakeTime;
+            Accumulator = accumulator;
             _cts = new CancellationTokenSource();
 
             accumulator.OnSnapshotBatch += batch => {

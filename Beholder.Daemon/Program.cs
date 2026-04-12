@@ -2,6 +2,7 @@ using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.GeoIp;
 using Beholder.Daemon.Pipeline;
+using Beholder.Daemon.Storage;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -15,6 +16,9 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton(TimeProvider.System);
+
+var databasePath = Path.Combine(AppContext.BaseDirectory, "data", "beholder.db");
+new DatabaseInitializer(databasePath).Initialize();
 
 #if PLATFORM_WINDOWS
 if (OperatingSystem.IsWindows()) {
@@ -46,6 +50,13 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<IDnsCache>(sp => sp.GetRequiredService<EtwDnsCache>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<EtwDnsCache>());
     builder.Services.AddSingleton<IFirewallController, WfpFirewallController>();
+
+    builder.Services.AddSingleton(new ConnectionFactory(databasePath));
+    builder.Services.AddSingleton<SqliteEventStore>();
+    builder.Services.AddSingleton<IEventStore>(sp => sp.GetRequiredService<SqliteEventStore>());
+    builder.Services.AddSingleton<SqliteFirewallRuleStore>();
+    builder.Services.AddSingleton<SqliteAlertStore>();
+    builder.Services.AddSingleton<IAlertStore>(sp => sp.GetRequiredService<SqliteAlertStore>());
 
     // Broadcast service must be registered BEFORE the pipeline so its StartAsync
     // runs first and subscribes to ISnapshotBatchSource.OnSnapshotBatch before
