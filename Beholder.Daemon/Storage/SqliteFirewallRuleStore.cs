@@ -10,7 +10,7 @@ namespace Beholder.Daemon.Storage;
 /// implemented by the platform projects. The daemon uses both: this store to remember
 /// rules across restarts, and the controller to apply them to the live firewall.
 /// </summary>
-internal sealed class SqliteFirewallRuleStore {
+internal sealed class SqliteFirewallRuleStore : IFirewallRuleStore {
     private readonly ConnectionFactory _connectionFactory;
 
     public SqliteFirewallRuleStore(ConnectionFactory connectionFactory) {

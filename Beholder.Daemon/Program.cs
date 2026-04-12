@@ -55,6 +55,7 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<SqliteEventStore>();
     builder.Services.AddSingleton<IEventStore>(sp => sp.GetRequiredService<SqliteEventStore>());
     builder.Services.AddSingleton<SqliteFirewallRuleStore>();
+    builder.Services.AddSingleton<IFirewallRuleStore>(sp => sp.GetRequiredService<SqliteFirewallRuleStore>());
     builder.Services.AddSingleton<SqliteAlertStore>();
     builder.Services.AddSingleton<IAlertStore>(sp => sp.GetRequiredService<SqliteAlertStore>());
 
@@ -67,6 +68,8 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<FlowEventPipeline>();
     builder.Services.AddSingleton<ISnapshotBatchSource>(sp => sp.GetRequiredService<FlowEventPipeline>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<FlowEventPipeline>());
+
+    builder.Services.AddSingleton<BeholderLocalService>();
 }
 #endif
 

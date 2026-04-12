@@ -175,7 +175,7 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
 
     private void OnSnapshotBatchReceived(IReadOnlyList<CounterSnapshot> snapshots) {
         foreach (var snapshot in snapshots) {
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Counter {Process} Δin={DeltaIn} Δout={DeltaOut} total_in={TotalIn} total_out={TotalOut} conns={Connections}",
                 snapshot.ProcessName,
                 snapshot.DeltaBytesIn,

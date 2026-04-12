@@ -2,6 +2,7 @@ using Beholder.Core;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Storage;
+using Beholder.Tests.TestDoubles;
 using Grpc.Core;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -215,26 +216,32 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
         if (!predicate()) throw new TimeoutException($"Timed out waiting for: {description}");
     }
 
-    private sealed class FakeFirewallController : IFirewallController {
-        public List<FirewallRule> AddedRules { get; } = new();
-        public List<(string ProcessPath, Direction Direction)> RemovedRules { get; } = new();
-        public Exception? AddRuleException { get; set; }
-        public Exception? RemoveRuleException { get; set; }
+    [Fact]
+    public async Task ApplyFirewallRule_PersistFails_RollsBackOsRule() {
+        var throwingStore = new ThrowingFirewallRuleStore();
+        var firewallController = new FakeFirewallController();
+        var pipeline = new FlowEventPipeline(
+            new FakeFlowSource(), _timeProvider,
+            NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
+        var alertStore = new SqliteAlertStore(
+            new ConnectionFactory(_databasePath), NullLogger<SqliteAlertStore>.Instance);
 
-        public Task AddRuleAsync(FirewallRule rule, CancellationToken cancellationToken) {
-            if (AddRuleException is not null) throw AddRuleException;
-            AddedRules.Add(rule);
-            return Task.CompletedTask;
-        }
+        var service = new BeholderLocalService(
+            _broadcaster, pipeline, throwingStore, alertStore,
+            firewallController, _eventStore, _timeProvider,
+            NullLogger<BeholderLocalService>.Instance);
 
-        public Task RemoveRuleAsync(string processPath, Direction direction, CancellationToken cancellationToken) {
-            if (RemoveRuleException is not null) throw RemoveRuleException;
-            RemovedRules.Add((processPath, direction));
-            return Task.CompletedTask;
-        }
+        var request = MakeRequest();
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
 
-        public Task<IReadOnlyList<FirewallRule>> ListRulesAsync(CancellationToken cancellationToken)
-            => Task.FromResult<IReadOnlyList<FirewallRule>>(Array.Empty<FirewallRule>());
+        var ex = await Assert.ThrowsAsync<RpcException>(
+            () => service.ApplyFirewallRule(request, context));
+
+        Assert.Equal(StatusCode.Internal, ex.StatusCode);
+        Assert.Single(firewallController.AddedRules);
+        var removed = Assert.Single(firewallController.RemovedRules);
+        Assert.Equal(@"C:\bin\curl.exe", removed.ProcessPath);
+        Assert.Equal(Direction.Outbound, removed.Direction);
     }
 
     private sealed class FailingEventStore : IEventStore {
@@ -245,43 +252,18 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             => Task.FromResult(ChainVerificationResult.Success(0));
     }
 
-    private sealed class FakeFlowSource : IFlowSource {
-#pragma warning disable CS0067 // Event is required by IFlowSource but not exercised in these tests
-        public event Action<FlowEvent>? OnFlowEvent;
-#pragma warning restore CS0067
-        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-    }
+    private sealed class ThrowingFirewallRuleStore : IFirewallRuleStore {
+        public Task<FirewallRule> UpsertAsync(FirewallRule rule, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("Simulated persist failure");
 
-    private sealed class FakeSnapshotBatchSource : ISnapshotBatchSource {
-        public event Action<IReadOnlyList<CounterSnapshot>>? OnSnapshotBatch;
-        public void Fire(IReadOnlyList<CounterSnapshot> batch) => OnSnapshotBatch?.Invoke(batch);
-    }
+        public Task<FirewallRule?> GetByProcessAndDirectionAsync(
+            string processPath, Direction direction, CancellationToken cancellationToken)
+            => Task.FromResult<FirewallRule?>(null);
 
-    private sealed class FakeServerCallContext : ServerCallContext {
-        private readonly CancellationToken _cancellationToken;
+        public Task<IReadOnlyList<FirewallRule>> ListAllAsync(CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<FirewallRule>>(Array.Empty<FirewallRule>());
 
-        public FakeServerCallContext(CancellationToken cancellationToken) {
-            _cancellationToken = cancellationToken;
-        }
-
-        protected override string MethodCore => "/test";
-        protected override string HostCore => "localhost";
-        protected override string PeerCore => "test-peer";
-        protected override DateTime DeadlineCore => DateTime.MaxValue;
-        protected override Metadata RequestHeadersCore => new();
-        protected override CancellationToken CancellationTokenCore => _cancellationToken;
-        protected override Metadata ResponseTrailersCore => new();
-        protected override Status StatusCore { get; set; }
-        protected override WriteOptions? WriteOptionsCore { get; set; }
-
-        protected override AuthContext AuthContextCore =>
-            new(string.Empty, new Dictionary<string, List<AuthProperty>>());
-
-        protected override ContextPropagationToken CreatePropagationTokenCore(ContextPropagationOptions? options)
-            => throw new NotSupportedException();
-
-        protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders)
-            => Task.CompletedTask;
+        public Task<bool> RemoveAsync(string processPath, Direction direction, CancellationToken cancellationToken)
+            => Task.FromResult(false);
     }
 }

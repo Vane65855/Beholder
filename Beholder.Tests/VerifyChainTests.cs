@@ -3,6 +3,7 @@ using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Storage;
 using Beholder.Protocol;
+using Beholder.Tests.TestDoubles;
 using Grpc.Core;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -131,6 +132,28 @@ public sealed class VerifyChainTests : IDisposable {
         Assert.Equal("hash mismatch", proto.ErrorMessage);
     }
 
+    [Fact]
+    public async Task VerifyChain_VerifyAsyncThrows_ReturnsInternal() {
+        var throwingStore = new ThrowingEventStore();
+        var firewallStore = new SqliteFirewallRuleStore(_connectionFactory);
+        var alertStore = new SqliteAlertStore(_connectionFactory, NullLogger<SqliteAlertStore>.Instance);
+        var pipeline = new FlowEventPipeline(
+            new FakeFlowSource(), _timeProvider,
+            NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
+
+        var service = new BeholderLocalService(
+            _broadcaster, pipeline, firewallStore, alertStore,
+            new FakeFirewallController(), throwingStore, _timeProvider,
+            NullLogger<BeholderLocalService>.Instance);
+
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var ex = await Assert.ThrowsAsync<RpcException>(
+            () => service.VerifyChain(new Local.VerifyChainRequest(), context));
+
+        Assert.Equal(StatusCode.Internal, ex.StatusCode);
+    }
+
     private void CorruptColumn(long seq, string column) {
         if (column != "row_hash" && column != "prev_hash" && column != "payload")
             throw new ArgumentException($"Unsupported column for corruption: {column}", nameof(column));
@@ -147,45 +170,11 @@ public sealed class VerifyChainTests : IDisposable {
         command.ExecuteNonQuery();
     }
 
-    private sealed class FakeFirewallController : IFirewallController {
-        public Task AddRuleAsync(FirewallRule rule, CancellationToken cancellationToken)
-            => Task.CompletedTask;
-        public Task RemoveRuleAsync(string processPath, Direction direction, CancellationToken cancellationToken)
-            => Task.CompletedTask;
-        public Task<IReadOnlyList<FirewallRule>> ListRulesAsync(CancellationToken cancellationToken)
-            => Task.FromResult<IReadOnlyList<FirewallRule>>(Array.Empty<FirewallRule>());
-    }
+    private sealed class ThrowingEventStore : IEventStore {
+        public Task AppendAsync(EventKind kind, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("Simulated infrastructure failure");
 
-    private sealed class FakeFlowSource : IFlowSource {
-#pragma warning disable CS0067 // Event is required by IFlowSource but not exercised in these tests
-        public event Action<FlowEvent>? OnFlowEvent;
-#pragma warning restore CS0067
-        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-    }
-
-    private sealed class FakeSnapshotBatchSource : ISnapshotBatchSource {
-        public event Action<IReadOnlyList<CounterSnapshot>>? OnSnapshotBatch;
-        public void Fire(IReadOnlyList<CounterSnapshot> batch) => OnSnapshotBatch?.Invoke(batch);
-    }
-
-    private sealed class FakeServerCallContext : ServerCallContext {
-        private readonly CancellationToken _cancellationToken;
-        public FakeServerCallContext(CancellationToken cancellationToken) => _cancellationToken = cancellationToken;
-        protected override string MethodCore => "/test";
-        protected override string HostCore => "localhost";
-        protected override string PeerCore => "test-peer";
-        protected override DateTime DeadlineCore => DateTime.MaxValue;
-        protected override Metadata RequestHeadersCore => new();
-        protected override CancellationToken CancellationTokenCore => _cancellationToken;
-        protected override Metadata ResponseTrailersCore => new();
-        protected override Status StatusCore { get; set; }
-        protected override WriteOptions? WriteOptionsCore { get; set; }
-        protected override AuthContext AuthContextCore =>
-            new(string.Empty, new Dictionary<string, List<AuthProperty>>());
-        protected override ContextPropagationToken CreatePropagationTokenCore(ContextPropagationOptions? options)
-            => throw new NotSupportedException();
-        protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders)
-            => Task.CompletedTask;
+        public Task<ChainVerificationResult> VerifyAsync(CancellationToken cancellationToken)
+            => throw new InvalidOperationException("Simulated infrastructure failure");
     }
 }

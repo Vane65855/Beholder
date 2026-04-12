@@ -9,18 +9,18 @@ namespace Beholder.Daemon.Grpc;
 
 /// <summary>
 /// Server-side implementation of the <c>beholder.local.BeholderLocal</c> gRPC
-/// service. <see cref="Subscribe"/> streams live events; <see cref="GetSnapshot"/>
-/// returns the current state for initial UI population;
-/// <see cref="ApplyFirewallRule"/> coordinates OS enforcement, persistence, chain
-/// logging, and subscriber notification. Remaining unary RPCs return
-/// <see cref="StatusCode.Unimplemented"/> until later phases.
+/// service. Exposes five RPCs: <see cref="Subscribe"/> streams live events,
+/// <see cref="GetSnapshot"/> returns the current daemon state,
+/// <see cref="ApplyFirewallRule"/> coordinates OS enforcement with persistence
+/// and chain logging, <see cref="MarkAlertRead"/> stamps an alert's viewed-at
+/// time, and <see cref="VerifyChain"/> validates the chain-hashed event log.
 /// </summary>
 internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBase {
     private const int RecentAlertLimit = 100;
 
     private readonly BroadcastService _broadcaster;
     private readonly FlowEventPipeline _pipeline;
-    private readonly SqliteFirewallRuleStore _firewallStore;
+    private readonly IFirewallRuleStore _firewallStore;
     private readonly IAlertStore _alertStore;
     private readonly IFirewallController _firewallController;
     private readonly IEventStore _eventStore;
@@ -30,7 +30,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     public BeholderLocalService(
         BroadcastService broadcaster,
         FlowEventPipeline pipeline,
-        SqliteFirewallRuleStore firewallStore,
+        IFirewallRuleStore firewallStore,
         IAlertStore alertStore,
         IFirewallController firewallController,
         IEventStore eventStore,
@@ -79,16 +79,22 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     public override async Task<Local.GetSnapshotResponse> GetSnapshot(
         Local.GetSnapshotRequest request, ServerCallContext context
     ) {
-        var ct = context.CancellationToken;
-        var snapshots = await _pipeline.GetCurrentSnapshotsAsync(ct).ConfigureAwait(false);
-        var rules = await _firewallStore.ListAllAsync(ct).ConfigureAwait(false);
-        var alerts = await _alertStore.GetAlertsAsync(RecentAlertLimit, ct).ConfigureAwait(false);
+        try {
+            var ct = context.CancellationToken;
+            var snapshots = await _pipeline.GetCurrentSnapshotsAsync(ct).ConfigureAwait(false);
+            var rules = await _firewallStore.ListAllAsync(ct).ConfigureAwait(false);
+            var alerts = await _alertStore.GetAlertsAsync(RecentAlertLimit, ct).ConfigureAwait(false);
 
-        var response = new Local.GetSnapshotResponse();
-        foreach (var snapshot in snapshots) response.Snapshots.Add(snapshot.ToProto());
-        foreach (var rule in rules) response.FirewallRules.Add(rule.ToProto());
-        foreach (var alert in alerts) response.RecentAlerts.Add(alert.ToProto());
-        return response;
+            var response = new Local.GetSnapshotResponse();
+            foreach (var snapshot in snapshots) response.Snapshots.Add(snapshot.ToProto());
+            foreach (var rule in rules) response.FirewallRules.Add(rule.ToProto());
+            foreach (var alert in alerts) response.RecentAlerts.Add(alert.ToProto());
+            return response;
+        } catch (Exception ex) {
+            _logger.LogError(ex, "GetSnapshot failed");
+            throw new RpcException(new Status(StatusCode.Internal,
+                $"Failed to get snapshot: {ex.Message}"));
+        }
     }
 
     public override async Task<Local.ApplyFirewallRuleResponse> ApplyFirewallRule(

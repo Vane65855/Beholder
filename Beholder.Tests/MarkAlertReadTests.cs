@@ -3,6 +3,7 @@ using Beholder.Core;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Storage;
+using Beholder.Tests.TestDoubles;
 using Grpc.Core;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -128,45 +129,4 @@ public sealed class MarkAlertReadTests : IDisposable {
         await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
-    private sealed class FakeFirewallController : IFirewallController {
-        public Task AddRuleAsync(FirewallRule rule, CancellationToken cancellationToken)
-            => Task.CompletedTask;
-        public Task RemoveRuleAsync(string processPath, Direction direction, CancellationToken cancellationToken)
-            => Task.CompletedTask;
-        public Task<IReadOnlyList<FirewallRule>> ListRulesAsync(CancellationToken cancellationToken)
-            => Task.FromResult<IReadOnlyList<FirewallRule>>(Array.Empty<FirewallRule>());
-    }
-
-    private sealed class FakeFlowSource : IFlowSource {
-#pragma warning disable CS0067 // Event is required by IFlowSource but not exercised in these tests
-        public event Action<FlowEvent>? OnFlowEvent;
-#pragma warning restore CS0067
-        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-    }
-
-    private sealed class FakeSnapshotBatchSource : ISnapshotBatchSource {
-        public event Action<IReadOnlyList<CounterSnapshot>>? OnSnapshotBatch;
-        public void Fire(IReadOnlyList<CounterSnapshot> batch) => OnSnapshotBatch?.Invoke(batch);
-    }
-
-    private sealed class FakeServerCallContext : ServerCallContext {
-        private readonly CancellationToken _cancellationToken;
-        public FakeServerCallContext(CancellationToken cancellationToken) => _cancellationToken = cancellationToken;
-        protected override string MethodCore => "/test";
-        protected override string HostCore => "localhost";
-        protected override string PeerCore => "test-peer";
-        protected override DateTime DeadlineCore => DateTime.MaxValue;
-        protected override Metadata RequestHeadersCore => new();
-        protected override CancellationToken CancellationTokenCore => _cancellationToken;
-        protected override Metadata ResponseTrailersCore => new();
-        protected override Status StatusCore { get; set; }
-        protected override WriteOptions? WriteOptionsCore { get; set; }
-        protected override AuthContext AuthContextCore =>
-            new(string.Empty, new Dictionary<string, List<AuthProperty>>());
-        protected override ContextPropagationToken CreatePropagationTokenCore(ContextPropagationOptions? options)
-            => throw new NotSupportedException();
-        protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders)
-            => Task.CompletedTask;
-    }
 }
