@@ -4,7 +4,6 @@ using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Storage;
 using Beholder.Tests.TestDoubles;
 using Grpc.Core;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Local = Beholder.Protocol.Local;
@@ -30,9 +29,9 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
     public ApplyFirewallRuleTests() {
         _tempDir = Path.Combine(Path.GetTempPath(), "beholder-tests", Guid.NewGuid().ToString());
         _databasePath = Path.Combine(_tempDir, "beholder.db");
-        new DatabaseInitializer(_databasePath).Initialize();
+        new DatabaseInitializer(_databasePath, pooling: false).Initialize();
 
-        var connectionFactory = new ConnectionFactory(_databasePath);
+        var connectionFactory = new ConnectionFactory(_databasePath, pooling: false);
         _firewallStore = new SqliteFirewallRuleStore(connectionFactory);
         _timeProvider = new FakeTimeProvider(FixedTimestamp);
         _eventStore = new SqliteEventStore(connectionFactory, _timeProvider);
@@ -59,7 +58,6 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
 
     public void Dispose() {
         _broadcaster.Dispose();
-        SqliteConnection.ClearAllPools();
         if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true);
     }
 
@@ -152,7 +150,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
         var pipeline = new FlowEventPipeline(
             new FakeFlowSource(), _timeProvider,
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
-        var connectionFactory = new ConnectionFactory(_databasePath);
+        var connectionFactory = new ConnectionFactory(_databasePath, pooling: false);
         var alertStore = new SqliteAlertStore(connectionFactory, NullLogger<SqliteAlertStore>.Instance);
 
         var service = new BeholderLocalService(
@@ -224,7 +222,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         var alertStore = new SqliteAlertStore(
-            new ConnectionFactory(_databasePath), NullLogger<SqliteAlertStore>.Instance);
+            new ConnectionFactory(_databasePath, pooling: false), NullLogger<SqliteAlertStore>.Instance);
 
         var service = new BeholderLocalService(
             _broadcaster, pipeline, throwingStore, alertStore,

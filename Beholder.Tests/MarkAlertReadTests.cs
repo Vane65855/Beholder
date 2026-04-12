@@ -5,7 +5,6 @@ using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Storage;
 using Beholder.Tests.TestDoubles;
 using Grpc.Core;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Local = Beholder.Protocol.Local;
@@ -27,9 +26,9 @@ public sealed class MarkAlertReadTests : IDisposable {
     public MarkAlertReadTests() {
         _tempDir = Path.Combine(Path.GetTempPath(), "beholder-tests", Guid.NewGuid().ToString());
         _databasePath = Path.Combine(_tempDir, "beholder.db");
-        new DatabaseInitializer(_databasePath).Initialize();
+        new DatabaseInitializer(_databasePath, pooling: false).Initialize();
 
-        _connectionFactory = new ConnectionFactory(_databasePath);
+        _connectionFactory = new ConnectionFactory(_databasePath, pooling: false);
         _alertStore = new SqliteAlertStore(_connectionFactory, NullLogger<SqliteAlertStore>.Instance);
         _timeProvider = new FakeTimeProvider(FixedTimestamp);
         var eventStore = new SqliteEventStore(_connectionFactory, _timeProvider);
@@ -49,7 +48,6 @@ public sealed class MarkAlertReadTests : IDisposable {
 
     public void Dispose() {
         _broadcaster.Dispose();
-        SqliteConnection.ClearAllPools();
         if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true);
     }
 

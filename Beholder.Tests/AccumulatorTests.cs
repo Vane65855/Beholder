@@ -330,9 +330,22 @@ public class AccumulatorTests {
             Accumulator.SetWaitSignal(waitSignal);
             await waitSignal.Task.WaitAsync(TestTimeout);
 
+            // Install the settle signal BEFORE advancing. The accumulator is parked
+            // in Task.WhenAny right now, so it cannot consume this signal yet. When
+            // Advance fires the timer below, the accumulator wakes, flushes the
+            // batch, loops back, drains the empty channel, and re-enters
+            // WaitForEventOrTickAsync — firing the settle signal. This guarantees
+            // the next DriveTickAsync call starts with the accumulator parked.
+            var settleSignal = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            Accumulator.SetWaitSignal(settleSignal);
+
             FakeTime.Advance(FlushInterval);
 
-            return await batchTcs.Task.WaitAsync(TestTimeout);
+            var result = await batchTcs.Task.WaitAsync(TestTimeout);
+            await settleSignal.Task.WaitAsync(TestTimeout);
+
+            return result;
         }
 
         public async ValueTask DisposeAsync() {

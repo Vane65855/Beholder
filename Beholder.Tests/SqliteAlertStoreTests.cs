@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Beholder.Core;
 using Beholder.Daemon.Storage;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Beholder.Tests;
@@ -16,14 +15,13 @@ public sealed class SqliteAlertStoreTests : IDisposable {
     public SqliteAlertStoreTests() {
         _tempDir = Path.Combine(Path.GetTempPath(), "beholder-tests", Guid.NewGuid().ToString());
         _databasePath = Path.Combine(_tempDir, "beholder.db");
-        new DatabaseInitializer(_databasePath).Initialize();
+        new DatabaseInitializer(_databasePath, pooling: false).Initialize();
         _store = new SqliteAlertStore(
-            new ConnectionFactory(_databasePath),
+            new ConnectionFactory(_databasePath, pooling: false),
             NullLogger<SqliteAlertStore>.Instance);
     }
 
     public void Dispose() {
-        SqliteConnection.ClearAllPools();
         if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true);
     }
 
@@ -36,7 +34,7 @@ public sealed class SqliteAlertStoreTests : IDisposable {
     [Fact]
     public void Ctor_NullLogger_ThrowsArgumentNullException() {
         Assert.Throws<ArgumentNullException>(() =>
-            new SqliteAlertStore(new ConnectionFactory(_databasePath), null!));
+            new SqliteAlertStore(new ConnectionFactory(_databasePath, pooling: false), null!));
     }
 
     [Fact]
@@ -165,7 +163,7 @@ public sealed class SqliteAlertStoreTests : IDisposable {
 
     [Fact]
     public async Task GetAlertsAsync_MalformedPayload_ReturnsPlaceholderSummary() {
-        using var connection = new ConnectionFactory(_databasePath).CreateConnection();
+        using var connection = new ConnectionFactory(_databasePath, pooling: false).CreateConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO event_log (seq, ts_unix_ns, kind, payload, prev_hash, row_hash)
@@ -192,7 +190,7 @@ public sealed class SqliteAlertStoreTests : IDisposable {
         string summary,
         DateTimeOffset timestamp
     ) {
-        using var connection = new ConnectionFactory(_databasePath).CreateConnection();
+        using var connection = new ConnectionFactory(_databasePath, pooling: false).CreateConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO event_log (seq, ts_unix_ns, kind, payload, prev_hash, row_hash)

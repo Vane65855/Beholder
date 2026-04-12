@@ -8,15 +8,19 @@ namespace Beholder.Daemon.Storage;
 /// not have to know how the database is located.
 /// </summary>
 internal sealed class ConnectionFactory {
-    private readonly string _databasePath;
+    private readonly string _connectionString;
 
-    public ConnectionFactory(string databasePath) {
+    public ConnectionFactory(string databasePath, bool pooling = true) {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
-        _databasePath = databasePath;
+        var builder = new SqliteConnectionStringBuilder {
+            DataSource = databasePath,
+            Pooling = pooling
+        };
+        _connectionString = builder.ConnectionString;
     }
 
     public SqliteConnection CreateConnection() {
-        var connection = new SqliteConnection($"Data Source={_databasePath}");
+        var connection = new SqliteConnection(_connectionString);
         connection.Open();
         return connection;
     }

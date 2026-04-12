@@ -1,6 +1,5 @@
 using Beholder.Core;
 using Beholder.Daemon.Storage;
-using Microsoft.Data.Sqlite;
 
 namespace Beholder.Tests;
 
@@ -16,13 +15,12 @@ public sealed class SqliteEventStoreTests : IDisposable {
     public SqliteEventStoreTests() {
         _tempDir = Path.Combine(Path.GetTempPath(), "beholder-tests", Guid.NewGuid().ToString());
         _databasePath = Path.Combine(_tempDir, "beholder.db");
-        new DatabaseInitializer(_databasePath).Initialize();
-        _connectionFactory = new ConnectionFactory(_databasePath);
+        new DatabaseInitializer(_databasePath, pooling: false).Initialize();
+        _connectionFactory = new ConnectionFactory(_databasePath, pooling: false);
         _store = new SqliteEventStore(_connectionFactory, new FixedTimeProvider(FixedTime));
     }
 
     public void Dispose() {
-        SqliteConnection.ClearAllPools();
         if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true);
     }
 

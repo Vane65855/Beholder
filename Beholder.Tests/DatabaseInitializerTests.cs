@@ -13,14 +13,12 @@ public sealed class DatabaseInitializerTests : IDisposable {
     }
 
     public void Dispose() {
-        // SqliteConnection pools file handles; clear them so the temp directory can be deleted on Windows.
-        SqliteConnection.ClearAllPools();
         if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true);
     }
 
     [Fact]
     public void Initialize_CreatesAllTables_OnNewDatabase() {
-        var initializer = new DatabaseInitializer(_databasePath);
+        var initializer = new DatabaseInitializer(_databasePath, pooling: false);
 
         initializer.Initialize();
 
@@ -33,7 +31,7 @@ public sealed class DatabaseInitializerTests : IDisposable {
 
     [Fact]
     public void Initialize_IsIdempotent_RunningTwiceDoesNotThrow() {
-        var initializer = new DatabaseInitializer(_databasePath);
+        var initializer = new DatabaseInitializer(_databasePath, pooling: false);
 
         initializer.Initialize();
         initializer.Initialize();
@@ -50,7 +48,7 @@ public sealed class DatabaseInitializerTests : IDisposable {
         var nestedDir = Path.Combine(_tempDir, "subdir");
         var nestedDatabase = Path.Combine(nestedDir, "beholder.db");
 
-        new DatabaseInitializer(nestedDatabase).Initialize();
+        new DatabaseInitializer(nestedDatabase, pooling: false).Initialize();
 
         Assert.True(Directory.Exists(nestedDir));
         Assert.True(File.Exists(nestedDatabase));
@@ -58,7 +56,7 @@ public sealed class DatabaseInitializerTests : IDisposable {
 
     [Fact]
     public void Initialize_SetsWalMode() {
-        new DatabaseInitializer(_databasePath).Initialize();
+        new DatabaseInitializer(_databasePath, pooling: false).Initialize();
 
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
@@ -70,7 +68,7 @@ public sealed class DatabaseInitializerTests : IDisposable {
 
     [Fact]
     public void Initialize_CreatesIndexes() {
-        new DatabaseInitializer(_databasePath).Initialize();
+        new DatabaseInitializer(_databasePath, pooling: false).Initialize();
 
         var indexes = ListIndexNames();
         Assert.Contains("idx_event_log_kind", indexes);
@@ -79,7 +77,7 @@ public sealed class DatabaseInitializerTests : IDisposable {
 
     [Fact]
     public void Initialize_EventLogTable_HasCorrectColumns() {
-        new DatabaseInitializer(_databasePath).Initialize();
+        new DatabaseInitializer(_databasePath, pooling: false).Initialize();
 
         var columns = ReadColumnTypes("event_log");
 
@@ -93,7 +91,7 @@ public sealed class DatabaseInitializerTests : IDisposable {
 
     [Fact]
     public void Initialize_FirewallRulesTable_HasUniqueConstraint() {
-        new DatabaseInitializer(_databasePath).Initialize();
+        new DatabaseInitializer(_databasePath, pooling: false).Initialize();
 
         InsertFirewallRule(processPath: "/usr/bin/curl", direction: "Outbound", action: "Allow");
 
@@ -104,7 +102,11 @@ public sealed class DatabaseInitializerTests : IDisposable {
     }
 
     private SqliteConnection OpenConnection() {
-        var connection = new SqliteConnection($"Data Source={_databasePath}");
+        var builder = new SqliteConnectionStringBuilder {
+            DataSource = _databasePath,
+            Pooling = false
+        };
+        var connection = new SqliteConnection(builder.ConnectionString);
         connection.Open();
         return connection;
     }

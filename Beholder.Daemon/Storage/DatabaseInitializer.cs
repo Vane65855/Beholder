@@ -12,15 +12,17 @@ namespace Beholder.Daemon.Storage;
 /// </summary>
 public sealed class DatabaseInitializer {
     private readonly string _databasePath;
+    private readonly bool _pooling;
 
     /// <summary>
     /// Constructs an initializer that targets the SQLite file at
     /// <paramref name="databasePath"/>. The directory containing the file does not
     /// need to exist; <see cref="Initialize"/> will create it.
     /// </summary>
-    public DatabaseInitializer(string databasePath) {
+    public DatabaseInitializer(string databasePath, bool pooling = true) {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         _databasePath = databasePath;
+        _pooling = pooling;
     }
 
     /// <summary>
@@ -31,7 +33,11 @@ public sealed class DatabaseInitializer {
     public void Initialize() {
         EnsureDirectoryExists();
 
-        using var connection = new SqliteConnection($"Data Source={_databasePath}");
+        var builder = new SqliteConnectionStringBuilder {
+            DataSource = _databasePath,
+            Pooling = _pooling
+        };
+        using var connection = new SqliteConnection(builder.ConnectionString);
         connection.Open();
 
         EnableWalMode(connection);
