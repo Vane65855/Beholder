@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 # Map data for network country initials
 *.mmdb
+
+# Text files (scratch notes, outdated plans)
+*.txt
