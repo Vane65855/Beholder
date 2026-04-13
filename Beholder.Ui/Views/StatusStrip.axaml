@@ -10,78 +10,59 @@
 
     <Border BorderBrush="{DynamicResource BorderSubtle}"
             BorderThickness="0,1,0,0">
-        <Grid ColumnDefinitions="Auto,Auto,*,Auto" Margin="16,4">
+        <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" Margin="16,4">
 
             <!-- OUT metrics -->
-            <StackPanel Grid.Column="0" Orientation="Horizontal"
-                        VerticalAlignment="Center" Spacing="4">
-                <TextBlock Text="▲"
-                           Foreground="{DynamicResource TextMuted}"
-                           FontSize="10"
-                           VerticalAlignment="Center" />
-                <TextBlock Text="OUT"
-                           Foreground="{DynamicResource TextMuted}"
-                           FontSize="11" FontWeight="Medium"
-                           LetterSpacing="1"
-                           VerticalAlignment="Center" />
-                <TextBlock Text="{Binding OutboundTotalLabel}"
-                           Foreground="{DynamicResource TextPrimary}"
-                           FontSize="11"
-                           VerticalAlignment="Center" />
-                <TextBlock Text="{Binding OutboundRateLabel}"
-                           Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11"
-                           VerticalAlignment="Center" />
-            </StackPanel>
+            <TextBlock Grid.Column="0" FontSize="11" VerticalAlignment="Center"
+                       ToolTip.Tip="Outbound traffic. Σ = total bytes sent since daemon started. Rate = bytes sent in the last second.">
+                <Run Text="▲ " Foreground="{DynamicResource ChartOutboundStroke}" />
+                <Run Text="OUT " Foreground="{DynamicResource TextMuted}" FontWeight="Medium" />
+                <Run Text="Σ " Foreground="{DynamicResource TextMuted}" />
+                <Run Text="{Binding OutboundTotalLabel}" Foreground="{DynamicResource TextPrimary}" FontWeight="Medium" />
+                <Run Text=" · " Foreground="{DynamicResource TextMuted}" />
+                <Run Text="{Binding OutboundRateLabel}" Foreground="{DynamicResource TextMuted}" />
+            </TextBlock>
 
             <!-- IN metrics -->
-            <StackPanel Grid.Column="1" Orientation="Horizontal"
-                        VerticalAlignment="Center" Spacing="4"
-                        Margin="16,0,0,0">
-                <TextBlock Text="▼"
-                           Foreground="{DynamicResource TextMuted}"
-                           FontSize="10"
-                           VerticalAlignment="Center" />
-                <TextBlock Text="IN"
-                           Foreground="{DynamicResource TextMuted}"
-                           FontSize="11" FontWeight="Medium"
-                           LetterSpacing="1"
-                           VerticalAlignment="Center" />
-                <TextBlock Text="{Binding InboundTotalLabel}"
-                           Foreground="{DynamicResource TextPrimary}"
-                           FontSize="11"
-                           VerticalAlignment="Center" />
-                <TextBlock Text="{Binding InboundRateLabel}"
-                           Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11"
-                           VerticalAlignment="Center" />
-            </StackPanel>
+            <TextBlock Grid.Column="1" FontSize="11" VerticalAlignment="Center"
+                       Margin="24,0,0,0"
+                       ToolTip.Tip="Inbound traffic. Σ = total bytes received since daemon started. Rate = bytes received in the last second.">
+                <Run Text="▼ " Foreground="{DynamicResource ChartInboundStroke}" />
+                <Run Text="IN " Foreground="{DynamicResource TextMuted}" FontWeight="Medium" />
+                <Run Text="Σ " Foreground="{DynamicResource TextMuted}" />
+                <Run Text="{Binding InboundTotalLabel}" Foreground="{DynamicResource TextPrimary}" FontWeight="Medium" />
+                <Run Text=" · " Foreground="{DynamicResource TextMuted}" />
+                <Run Text="{Binding InboundRateLabel}" Foreground="{DynamicResource TextMuted}" />
+            </TextBlock>
 
-            <!-- WAN sparkline + total -->
-            <StackPanel Grid.Column="2" Orientation="Horizontal"
-                        VerticalAlignment="Center" Margin="24,0"
-                        HorizontalAlignment="Right">
+            <!-- WAN ratio bar + total -->
+            <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="8"
+                        VerticalAlignment="Center" Margin="0,0,16,0">
                 <TextBlock Text="WAN"
                            Foreground="{DynamicResource TextMuted}"
                            FontSize="11" FontWeight="Medium"
                            LetterSpacing="1"
-                           VerticalAlignment="Center"
-                           Margin="0,0,8,0" />
-                <Canvas Width="200" Height="14"
-                        VerticalAlignment="Center">
-                    <Polyline Points="{Binding WanSparklinePoints}"
-                              Stroke="{DynamicResource ChartSparklineStroke}"
-                              StrokeThickness="1.5" />
-                </Canvas>
-                <TextBlock Text="{Binding WanTotalLabel}"
-                           Foreground="{DynamicResource TextPrimary}"
-                           FontSize="11"
-                           VerticalAlignment="Center"
-                           Margin="8,0,0,0" />
+                           VerticalAlignment="Center" />
+                <Border Width="80" Height="6" CornerRadius="2"
+                        Background="{DynamicResource BackgroundElevated}"
+                        ClipToBounds="True"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Upload/download ratio. Teal = outbound, coral = inbound.">
+                    <StackPanel Orientation="Horizontal">
+                        <Rectangle Width="{Binding OutboundBarWidth}"
+                                   Fill="{DynamicResource ChartOutboundStroke}" />
+                        <Rectangle Width="{Binding InboundBarWidth}"
+                                   Fill="{DynamicResource ChartInboundStroke}" />
+                    </StackPanel>
+                </Border>
+                <TextBlock FontSize="11" VerticalAlignment="Center">
+                    <Run Text="Σ " Foreground="{DynamicResource TextMuted}" />
+                    <Run Text="{Binding WanTotalLabel}" Foreground="{DynamicResource TextPrimary}" FontWeight="Medium" />
+                </TextBlock>
             </StackPanel>
 
             <!-- Device ID -->
-            <StackPanel Grid.Column="3" Orientation="Horizontal"
+            <StackPanel Grid.Column="4" Orientation="Horizontal"
                         VerticalAlignment="Center" Spacing="4">
                 <TextBlock Text="DEV"
                            Foreground="{DynamicResource TextMuted}"

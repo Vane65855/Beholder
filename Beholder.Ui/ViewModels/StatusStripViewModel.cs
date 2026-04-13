@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using Avalonia.Threading;
 using Beholder.Protocol.Local;
 using Beholder.Ui.Helpers;
@@ -11,11 +10,15 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace Beholder.Ui.ViewModels;
 
 internal sealed partial class StatusStripViewModel : ViewModelBase {
-    private const int MaxSparklineSamples = 60;
-    private const double SparklineWidth = 200;
-    private const double SparklineHeight = 14;
+    private const double BarTotalWidth = 80;
 
-    private readonly List<double> _throughputHistory = new();
+    // LERP smoothing factor — 0.3 per tick reaches target in ~3–4 ticks,
+    // preventing the bar from jittering during bursty traffic patterns.
+    private const double SmoothingFactor = 0.3;
+
+    private double _displayedOutRatio = 0.5;
+
+    private readonly Dictionary<string, ProcessTotals> _perProcessTotals = new(StringComparer.Ordinal);
 
     [ObservableProperty]
     private string _outboundTotalLabel = "0 B";
@@ -33,7 +36,10 @@ internal sealed partial class StatusStripViewModel : ViewModelBase {
     private string _wanTotalLabel = "0 B";
 
     [ObservableProperty]
-    private string _wanSparklinePoints = "";
+    private double _outboundBarWidth;
+
+    [ObservableProperty]
+    private double _inboundBarWidth;
 
     [ObservableProperty]
     private string _deviceIdLabel = "DEV-0000";
@@ -48,10 +54,33 @@ internal sealed partial class StatusStripViewModel : ViewModelBase {
     }
 
     internal void UpdateFromBatch(CounterBatch batch) {
+        // Detect daemon restart: if any snapshot's total is less than what we
+        // stored, the daemon reset its counters — clear stale state.
+        foreach (var snapshot in batch.Snapshots) {
+            if (_perProcessTotals.TryGetValue(snapshot.ProcessPath, out var existing)
+                && snapshot.TotalBytesIn < existing.TotalIn) {
+                _perProcessTotals.Clear();
+                break;
+            }
+        }
+
+        // Upsert per-process lifetime totals from this batch
+        foreach (var snapshot in batch.Snapshots) {
+            _perProcessTotals[snapshot.ProcessPath] = new ProcessTotals(
+                snapshot.TotalBytesIn,
+                snapshot.TotalBytesOut);
+        }
+
+        // Machine-wide totals: sum over ALL known processes, not just this batch
+        long totalIn = 0, totalOut = 0;
+        foreach (var p in _perProcessTotals.Values) {
+            totalIn += p.TotalIn;
+            totalOut += p.TotalOut;
+        }
+
+        // Rates: sum deltas from this batch only (idle processes have zero delta)
         var totalDeltaIn = batch.Snapshots.Sum(s => s.DeltaBytesIn);
         var totalDeltaOut = batch.Snapshots.Sum(s => s.DeltaBytesOut);
-        var totalIn = batch.Snapshots.Sum(s => s.TotalBytesIn);
-        var totalOut = batch.Snapshots.Sum(s => s.TotalBytesOut);
 
         OutboundTotalLabel = ByteFormatter.FormatBytes(totalOut);
         InboundTotalLabel = ByteFormatter.FormatBytes(totalIn);
@@ -59,38 +88,28 @@ internal sealed partial class StatusStripViewModel : ViewModelBase {
         InboundRateLabel = ByteFormatter.FormatRate(totalDeltaIn);
         WanTotalLabel = ByteFormatter.FormatBytes(totalIn + totalOut);
 
-        UpdateSparkline(totalDeltaIn + totalDeltaOut);
+        UpdateRatioBar(totalDeltaOut, totalDeltaIn);
     }
 
-    private void UpdateSparkline(long totalRate) {
-        _throughputHistory.Add(totalRate);
-        while (_throughputHistory.Count > MaxSparklineSamples)
-            _throughputHistory.RemoveAt(0);
-
-        RecomputeSparklinePoints();
-    }
-
-    private void RecomputeSparklinePoints() {
-        if (_throughputHistory.Count < 2) {
-            WanSparklinePoints = "";
+    private void UpdateRatioBar(long outRate, long inRate) {
+        var total = outRate + inRate;
+        if (total == 0) {
+            _displayedOutRatio = 0.5;
+            OutboundBarWidth = 0;
+            InboundBarWidth = 0;
             return;
         }
 
-        var max = _throughputHistory.Max();
-        if (max == 0) max = 1;
+        var targetOutRatio = outRate / (double)total;
+        _displayedOutRatio = _displayedOutRatio * (1 - SmoothingFactor) + targetOutRatio * SmoothingFactor;
 
-        var step = SparklineWidth / (_throughputHistory.Count - 1);
-        var sb = new StringBuilder();
-
-        for (int i = 0; i < _throughputHistory.Count; i++) {
-            var x = i * step;
-            var y = SparklineHeight - (_throughputHistory[i] / max * SparklineHeight);
-            if (i > 0) sb.Append(' ');
-            sb.Append(FormattableString.Invariant($"{x:F1},{y:F1}"));
-        }
-
-        WanSparklinePoints = sb.ToString();
+        OutboundBarWidth = _displayedOutRatio * BarTotalWidth;
+        InboundBarWidth = (1 - _displayedOutRatio) * BarTotalWidth;
     }
 
-    internal int SparklineSampleCount => _throughputHistory.Count;
+    internal double DisplayedOutRatio => _displayedOutRatio;
+
+    internal int TrackedProcessCount => _perProcessTotals.Count;
+
+    private record ProcessTotals(long TotalIn, long TotalOut);
 }

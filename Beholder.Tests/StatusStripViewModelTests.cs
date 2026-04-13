@@ -24,6 +24,7 @@ public class StatusStripViewModelTests {
         var vm = CreateViewModel();
         var batch = new CounterBatch();
         batch.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/firefox.exe",
             ProcessName = "firefox.exe",
             TotalBytesIn = 1000,
             TotalBytesOut = 2000,
@@ -31,6 +32,7 @@ public class StatusStripViewModelTests {
             DeltaBytesOut = 200,
         });
         batch.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/chrome.exe",
             ProcessName = "chrome.exe",
             TotalBytesIn = 3000,
             TotalBytesOut = 4000,
@@ -50,6 +52,7 @@ public class StatusStripViewModelTests {
         var vm = CreateViewModel();
         var batch = new CounterBatch();
         batch.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/test.exe",
             DeltaBytesOut = 1024,
             DeltaBytesIn = 2048,
         });
@@ -61,35 +64,182 @@ public class StatusStripViewModelTests {
     }
 
     [Fact]
-    public void WanThroughputHistory_CapsAt60Samples() {
+    public void UpdateFromBatch_IdleState_BarWidthsAreZero() {
         var vm = CreateViewModel();
+        var batch = new CounterBatch();
+        batch.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/test.exe",
+            DeltaBytesOut = 0,
+            DeltaBytesIn = 0,
+        });
 
-        for (int i = 0; i < 100; i++) {
-            var batch = new CounterBatch();
-            batch.Snapshots.Add(new CounterSnapshot {
-                DeltaBytesIn = i * 100,
-                DeltaBytesOut = i * 100,
-            });
-            vm.UpdateFromBatch(batch);
-        }
+        vm.UpdateFromBatch(batch);
 
-        Assert.Equal(60, vm.SparklineSampleCount);
+        Assert.Equal(0, vm.OutboundBarWidth);
+        Assert.Equal(0, vm.InboundBarWidth);
     }
 
     [Fact]
-    public void UpdateFromBatch_GeneratesSparklinePoints() {
+    public void UpdateFromBatch_OutboundHeavy_OutboundBarWider() {
+        var vm = CreateViewModel();
+        var batch = new CounterBatch();
+        batch.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/test.exe",
+            DeltaBytesOut = 900,
+            DeltaBytesIn = 100,
+        });
+
+        vm.UpdateFromBatch(batch);
+
+        Assert.True(vm.OutboundBarWidth > vm.InboundBarWidth);
+    }
+
+    [Fact]
+    public void UpdateFromBatch_InboundHeavy_InboundBarWider() {
+        var vm = CreateViewModel();
+        var batch = new CounterBatch();
+        batch.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/test.exe",
+            DeltaBytesOut = 100,
+            DeltaBytesIn = 900,
+        });
+
+        vm.UpdateFromBatch(batch);
+
+        Assert.True(vm.InboundBarWidth > vm.OutboundBarWidth);
+    }
+
+    [Fact]
+    public void UpdateFromBatch_Smoothing_DoesNotJumpInstantly() {
+        var vm = CreateViewModel();
+        var batch = new CounterBatch();
+        batch.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/test.exe",
+            DeltaBytesOut = 1000,
+            DeltaBytesIn = 0,
+        });
+
+        vm.UpdateFromBatch(batch);
+
+        // Smoothing starts from 0.5 and LERPs toward 1.0 with factor 0.3,
+        // so after one tick: 0.5 * 0.7 + 1.0 * 0.3 = 0.65 → not yet at 80px
+        Assert.True(vm.OutboundBarWidth < 80);
+        Assert.True(vm.OutboundBarWidth > 0);
+    }
+
+    [Fact]
+    public void UpdateFromBatch_SparseBatches_RetainsTotalsFromPriorProcesses() {
         var vm = CreateViewModel();
 
-        for (int i = 0; i < 5; i++) {
-            var batch = new CounterBatch();
-            batch.Snapshots.Add(new CounterSnapshot {
-                DeltaBytesIn = (i + 1) * 100,
-                DeltaBytesOut = 0,
-            });
-            vm.UpdateFromBatch(batch);
-        }
+        var batch1 = new CounterBatch();
+        batch1.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/chrome.exe",
+            TotalBytesIn = 1000, TotalBytesOut = 500,
+            DeltaBytesIn = 100, DeltaBytesOut = 50,
+        });
+        batch1.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/firefox.exe",
+            TotalBytesIn = 2000, TotalBytesOut = 1000,
+            DeltaBytesIn = 200, DeltaBytesOut = 100,
+        });
+        vm.UpdateFromBatch(batch1);
 
-        Assert.False(string.IsNullOrEmpty(vm.WanSparklinePoints));
-        Assert.Contains(",", vm.WanSparklinePoints);
+        var batch2 = new CounterBatch();
+        batch2.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/firefox.exe",
+            TotalBytesIn = 2500, TotalBytesOut = 1200,
+            DeltaBytesIn = 500, DeltaBytesOut = 200,
+        });
+        vm.UpdateFromBatch(batch2);
+
+        Assert.Equal("3.4 KB", vm.InboundTotalLabel);
+        Assert.Equal("1.7 KB", vm.OutboundTotalLabel);
+    }
+
+    [Fact]
+    public void UpdateFromBatch_ProcessUpdate_UpsertsNotAccumulates() {
+        var vm = CreateViewModel();
+
+        var batch1 = new CounterBatch();
+        batch1.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/chrome.exe",
+            TotalBytesIn = 1000, TotalBytesOut = 500,
+        });
+        vm.UpdateFromBatch(batch1);
+
+        var batch2 = new CounterBatch();
+        batch2.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/chrome.exe",
+            TotalBytesIn = 2000, TotalBytesOut = 1000,
+        });
+        vm.UpdateFromBatch(batch2);
+
+        Assert.Equal("2.0 KB", vm.InboundTotalLabel);
+        Assert.Equal("1000 B", vm.OutboundTotalLabel);
+    }
+
+    [Fact]
+    public void UpdateFromBatch_DaemonReset_ClearsAccumulator() {
+        var vm = CreateViewModel();
+
+        var batch1 = new CounterBatch();
+        batch1.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/chrome.exe",
+            TotalBytesIn = 50_000, TotalBytesOut = 25_000,
+        });
+        vm.UpdateFromBatch(batch1);
+
+        var batch2 = new CounterBatch();
+        batch2.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/chrome.exe",
+            TotalBytesIn = 100, TotalBytesOut = 50,
+        });
+        vm.UpdateFromBatch(batch2);
+
+        Assert.Equal("100 B", vm.InboundTotalLabel);
+        Assert.Equal("50 B", vm.OutboundTotalLabel);
+    }
+
+    [Fact]
+    public void UpdateFromBatch_RatesReflectCurrentBatchOnly() {
+        var vm = CreateViewModel();
+
+        var batch1 = new CounterBatch();
+        batch1.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/chrome.exe",
+            DeltaBytesIn = 500, DeltaBytesOut = 250,
+        });
+        vm.UpdateFromBatch(batch1);
+
+        var batch2 = new CounterBatch();
+        batch2.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/firefox.exe",
+            DeltaBytesIn = 100, DeltaBytesOut = 50,
+        });
+        vm.UpdateFromBatch(batch2);
+
+        Assert.Equal("100 B/s", vm.InboundRateLabel);
+        Assert.Equal("50 B/s", vm.OutboundRateLabel);
+    }
+
+    [Fact]
+    public void UpdateFromBatch_EmptyBatch_RetainsTotals() {
+        var vm = CreateViewModel();
+
+        var batch1 = new CounterBatch();
+        batch1.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "fake/chrome.exe",
+            TotalBytesIn = 1000, TotalBytesOut = 500,
+            DeltaBytesIn = 100, DeltaBytesOut = 50,
+        });
+        vm.UpdateFromBatch(batch1);
+
+        var batch2 = new CounterBatch();
+        vm.UpdateFromBatch(batch2);
+
+        Assert.Equal("1000 B", vm.InboundTotalLabel);
+        Assert.Equal("500 B", vm.OutboundTotalLabel);
+        Assert.Equal("0 B/s", vm.InboundRateLabel);
+        Assert.Equal("0 B/s", vm.OutboundRateLabel);
     }
 }
