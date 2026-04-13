@@ -93,6 +93,7 @@ Distinct from severity. These tokens represent daemon connection state, which ma
 |-------|-----------|-------------|-------|
 | `StatusOnline` | `#2EA043` | TBD | "daemon: online" indicator in top nav bar |
 | `StatusOffline` | `#DA3633` | TBD | "daemon: offline" indicator in top nav bar |
+| `StatusConnecting` | `#D4A017` | TBD | "connecting…" / "reconnecting…" in top nav bar |
 
 ### Data Visualization
 

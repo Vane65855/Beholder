@@ -77,6 +77,9 @@
     <Color x:Key="StatusOfflineColor">#DA3633</Color>
     <SolidColorBrush x:Key="StatusOffline" Color="{StaticResource StatusOfflineColor}" />
 
+    <Color x:Key="StatusConnectingColor">#D4A017</Color>
+    <SolidColorBrush x:Key="StatusConnecting" Color="{StaticResource StatusConnectingColor}" />
+
     <!-- ── Data Visualization ──────────────────────────────────────── -->
     <Color x:Key="ChartOutboundFillColor">#4D00BCD4</Color>
     <SolidColorBrush x:Key="ChartOutboundFill" Color="{StaticResource ChartOutboundFillColor}" />

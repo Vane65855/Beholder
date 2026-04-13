@@ -32,10 +32,12 @@
                            Foreground="{DynamicResource TextSecondary}"
                            FontSize="11"
                            VerticalAlignment="Center" />
-                <TextBlock Text="offline"
-                           Foreground="{DynamicResource StatusOffline}"
+                <TextBlock Text="{Binding DaemonStatusLabel}"
                            FontSize="11"
-                           VerticalAlignment="Center" />
+                           VerticalAlignment="Center"
+                           Classes.disconnected="{Binding IsDaemonDisconnected}"
+                           Classes.connecting="{Binding IsDaemonConnecting}"
+                           Classes.connected="{Binding IsDaemonConnected}" />
             </StackPanel>
 
             <!-- Tab buttons -->
@@ -115,6 +117,16 @@
         </Style>
         <Style Selector="Button.navTab.active /template/ ContentPresenter">
             <Setter Property="Foreground" Value="{DynamicResource AccentPrimary}" />
+        </Style>
+
+        <Style Selector="TextBlock.disconnected">
+            <Setter Property="Foreground" Value="{DynamicResource StatusOffline}" />
+        </Style>
+        <Style Selector="TextBlock.connecting">
+            <Setter Property="Foreground" Value="{DynamicResource StatusConnecting}" />
+        </Style>
+        <Style Selector="TextBlock.connected">
+            <Setter Property="Foreground" Value="{DynamicResource StatusOnline}" />
         </Style>
     </UserControl.Styles>
 </UserControl>

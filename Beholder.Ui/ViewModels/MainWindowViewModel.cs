@@ -1,3 +1,6 @@
+using System;
+using Avalonia.Threading;
+using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -16,6 +19,18 @@ internal partial class MainWindowViewModel : ViewModelBase {
     [ObservableProperty]
     private object? _activeTabContent;
 
+    [ObservableProperty]
+    private string _daemonStatusLabel = "offline";
+
+    [ObservableProperty]
+    private bool _isDaemonDisconnected = true;
+
+    [ObservableProperty]
+    private bool _isDaemonConnecting;
+
+    [ObservableProperty]
+    private bool _isDaemonConnected;
+
     public bool IsTrafficActive => ActiveTab == TabKind.Traffic;
     public bool IsFirewallActive => ActiveTab == TabKind.Firewall;
     public bool IsAlertsActive => ActiveTab == TabKind.Alerts;
@@ -28,8 +43,19 @@ internal partial class MainWindowViewModel : ViewModelBase {
     public string MapLabel => ActiveTab == TabKind.Map ? "[ MAP ]" : "MAP";
     public string ScannerLabel => ActiveTab == TabKind.Scanner ? "[ SCANNER ]" : "SCANNER";
 
-    public MainWindowViewModel() {
+    public MainWindowViewModel(IDaemonClient daemonClient) {
+        ArgumentNullException.ThrowIfNull(daemonClient);
         ActiveTabContent = _trafficTab;
+        daemonClient.StateChanged += OnDaemonStateChanged;
+    }
+
+    private void OnDaemonStateChanged(DaemonStatusInfo status) {
+        Dispatcher.UIThread.Post(() => {
+            DaemonStatusLabel = status.Label;
+            IsDaemonDisconnected = status.State is ConnectionState.Disconnected;
+            IsDaemonConnecting = status.State is ConnectionState.Connecting or ConnectionState.Reconnecting;
+            IsDaemonConnected = status.State is ConnectionState.Connected;
+        });
     }
 
     partial void OnActiveTabChanged(TabKind value) {
