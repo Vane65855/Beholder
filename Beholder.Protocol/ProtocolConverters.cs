@@ -110,4 +110,80 @@ internal static class ProtocolConverters {
             ErrorMessage = source.ErrorMessage ?? "",
         };
     }
+
+    // ---- Traffic query adapters (Core → Proto) ----
+
+    /// <summary>Maps a traffic time point onto its wire equivalent.</summary>
+    public static Local.TrafficTimePoint ToProto(this Core.TrafficTimePoint source) {
+        return new Local.TrafficTimePoint {
+            TimestampUnixNs = source.Timestamp.ToUnixTimeNanoseconds(),
+            BytesIn = source.BytesIn,
+            BytesOut = source.BytesOut,
+        };
+    }
+
+    /// <summary>Maps a destination summary onto its wire equivalent.</summary>
+    public static Local.DestinationSummary ToProto(this Core.DestinationSummary source) {
+        return new Local.DestinationSummary {
+            RemoteAddress = source.RemoteAddress,
+            Hostname = source.Hostname ?? "",
+            Country = source.Country.ToString(),
+            TotalBytesIn = source.TotalBytesIn,
+            TotalBytesOut = source.TotalBytesOut,
+            ConnectionCount = source.ConnectionCount,
+        };
+    }
+
+    /// <summary>Maps a country traffic summary onto its wire equivalent.</summary>
+    public static Local.CountryTrafficSummary ToProto(this Core.CountryTrafficSummary source) {
+        return new Local.CountryTrafficSummary {
+            Country = source.Country.ToString(),
+            TotalBytesIn = source.TotalBytesIn,
+            TotalBytesOut = source.TotalBytesOut,
+        };
+    }
+
+    // ---- Traffic query adapters (Proto → Core) ----
+
+    /// <summary>Converts Unix nanoseconds (millisecond precision) back to a DateTimeOffset.</summary>
+    public static DateTimeOffset FromUnixTimeNanoseconds(this long unixNs)
+        => DateTimeOffset.FromUnixTimeMilliseconds(unixNs / 1_000_000L);
+
+    /// <summary>Maps a wire traffic time point to its domain equivalent.</summary>
+    public static Core.TrafficTimePoint ToDomain(this Local.TrafficTimePoint source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Core.TrafficTimePoint(
+            timestamp: source.TimestampUnixNs.FromUnixTimeNanoseconds(),
+            bytesIn: source.BytesIn,
+            bytesOut: source.BytesOut);
+    }
+
+    /// <summary>Maps a wire destination summary to its domain equivalent.</summary>
+    public static Core.DestinationSummary ToDomain(this Local.DestinationSummary source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Core.DestinationSummary(
+            remoteAddress: source.RemoteAddress,
+            hostname: string.IsNullOrEmpty(source.Hostname) ? null : source.Hostname,
+            country: ParseCountryCode(source.Country),
+            totalBytesIn: source.TotalBytesIn,
+            totalBytesOut: source.TotalBytesOut,
+            connectionCount: source.ConnectionCount);
+    }
+
+    /// <summary>Maps a wire country traffic summary to its domain equivalent.</summary>
+    public static Core.CountryTrafficSummary ToDomain(this Local.CountryTrafficSummary source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Core.CountryTrafficSummary(
+            country: ParseCountryCode(source.Country),
+            totalBytesIn: source.TotalBytesIn,
+            totalBytesOut: source.TotalBytesOut);
+    }
+
+    private static Core.CountryCode ParseCountryCode(string value) {
+        return value switch {
+            "--" => Core.CountryCode.Local,
+            "??" => Core.CountryCode.Unknown,
+            _ => Core.CountryCode.FromAlpha2(value)
+        };
+    }
 }

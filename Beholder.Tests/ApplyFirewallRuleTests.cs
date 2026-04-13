@@ -1,4 +1,5 @@
 using Beholder.Core;
+using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Storage;
@@ -42,6 +43,8 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
 
         var pipeline = new FlowEventPipeline(
             new FakeFlowSource(), _timeProvider,
+            new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
+            new TrafficStorageOptions(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         var alertStore = new SqliteAlertStore(connectionFactory, NullLogger<SqliteAlertStore>.Instance);
 
@@ -52,6 +55,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             alertStore,
             _firewallController,
             _eventStore,
+            new FakeTrafficStore(),
             _timeProvider,
             NullLogger<BeholderLocalService>.Instance);
     }
@@ -149,14 +153,16 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
         var failingEventStore = new FailingEventStore();
         var pipeline = new FlowEventPipeline(
             new FakeFlowSource(), _timeProvider,
+            new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
+            new TrafficStorageOptions(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         var connectionFactory = new ConnectionFactory(_databasePath, pooling: false);
         var alertStore = new SqliteAlertStore(connectionFactory, NullLogger<SqliteAlertStore>.Instance);
 
         var service = new BeholderLocalService(
             _broadcaster, pipeline, _firewallStore, alertStore,
-            _firewallController, failingEventStore, _timeProvider,
-            NullLogger<BeholderLocalService>.Instance);
+            _firewallController, failingEventStore, new FakeTrafficStore(),
+            _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var request = MakeRequest();
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
@@ -220,14 +226,16 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
         var firewallController = new FakeFirewallController();
         var pipeline = new FlowEventPipeline(
             new FakeFlowSource(), _timeProvider,
+            new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
+            new TrafficStorageOptions(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         var alertStore = new SqliteAlertStore(
             new ConnectionFactory(_databasePath, pooling: false), NullLogger<SqliteAlertStore>.Instance);
 
         var service = new BeholderLocalService(
             _broadcaster, pipeline, throwingStore, alertStore,
-            firewallController, _eventStore, _timeProvider,
-            NullLogger<BeholderLocalService>.Instance);
+            firewallController, _eventStore, new FakeTrafficStore(),
+            _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var request = MakeRequest();
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Beholder.Core;
+using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Storage;
@@ -38,12 +39,14 @@ public sealed class MarkAlertReadTests : IDisposable {
             snapshotSource, _timeProvider, NullLogger<BroadcastService>.Instance);
         var pipeline = new FlowEventPipeline(
             new FakeFlowSource(), _timeProvider,
+            new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
+            new TrafficStorageOptions(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
 
         _service = new BeholderLocalService(
             _broadcaster, pipeline, firewallStore, _alertStore,
-            new FakeFirewallController(), eventStore, _timeProvider,
-            NullLogger<BeholderLocalService>.Instance);
+            new FakeFirewallController(), eventStore, new FakeTrafficStore(),
+            _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
     public void Dispose() {

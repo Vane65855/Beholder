@@ -56,6 +56,30 @@ public sealed class DatabaseInitializer {
 
     private static void CreateTables(SqliteConnection connection) {
         Execute(connection, """
+            CREATE TABLE IF NOT EXISTS traffic_buckets_10s (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                process_path    TEXT    NOT NULL,
+                process_name    TEXT    NOT NULL,
+                remote_address  TEXT    NOT NULL,
+                remote_port     INTEGER NOT NULL,
+                hostname        TEXT,
+                country         TEXT    NOT NULL,
+                bytes_in        INTEGER NOT NULL,
+                bytes_out       INTEGER NOT NULL,
+                bucket_start_ms INTEGER NOT NULL,
+                bucket_seconds  INTEGER NOT NULL DEFAULT 10
+            );
+            """);
+
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS dns_cache (
+                address    TEXT    PRIMARY KEY,
+                hostname   TEXT    NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            """);
+
+        Execute(connection, """
             CREATE TABLE IF NOT EXISTS event_log (
                 seq           INTEGER PRIMARY KEY AUTOINCREMENT,
                 ts_unix_ns    INTEGER NOT NULL,
@@ -111,6 +135,10 @@ public sealed class DatabaseInitializer {
     private static void CreateIndexes(SqliteConnection connection) {
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_event_log_kind ON event_log(kind);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_firewall_rules_process_path ON firewall_rules(process_path);");
+
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_process_time ON traffic_buckets_10s(process_path, bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_time ON traffic_buckets_10s(bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_country_time ON traffic_buckets_10s(country, bucket_start_ms);");
     }
 
     private static void Execute(SqliteConnection connection, string sql) {

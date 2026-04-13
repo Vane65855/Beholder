@@ -1,19 +1,23 @@
 using System.Net;
 using System.Threading.Channels;
 using Beholder.Core;
+using Beholder.Daemon;
 using Beholder.Daemon.Pipeline;
+using Beholder.Tests.TestDoubles;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Beholder.Tests;
 
-public class AccumulatorTests {
+public class TrafficEngineTests {
     private static readonly DateTimeOffset StartInstant =
         new(2026, 4, 10, 12, 0, 0, TimeSpan.Zero);
 
     private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(1);
 
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+
+    // --- 1-second tick / CounterSnapshot tests (preserving Accumulator contract) ---
 
     [Fact]
     public async Task SingleFlowEvent_ProducesSnapshotWithCorrectBytes() {
@@ -177,10 +181,14 @@ public class AccumulatorTests {
     public async Task CancellationToken_StopsTheLoop() {
         var channel = Channel.CreateUnbounded<FlowEvent>();
         var fakeTime = new FakeTimeProvider(StartInstant);
-        var accumulator = new Accumulator(channel.Reader, fakeTime, NullLogger<Accumulator>.Instance);
+        var engine = new TrafficEngine(
+            channel.Reader, fakeTime,
+            new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
+            new TrafficStorageOptions(),
+            NullLogger<TrafficEngine>.Instance);
         using var cts = new CancellationTokenSource();
 
-        var runTask = accumulator.RunAsync(cts.Token);
+        var runTask = engine.RunAsync(cts.Token);
         cts.Cancel();
 
         await runTask.WaitAsync(TestTimeout, TestContext.Current.CancellationToken);
@@ -188,36 +196,10 @@ public class AccumulatorTests {
     }
 
     [Fact]
-    public void Constructor_NullReader_ThrowsArgumentNullException() {
-        Assert.Throws<ArgumentNullException>(() => new Accumulator(
-            reader: null!,
-            timeProvider: new FakeTimeProvider(StartInstant),
-            logger: NullLogger<Accumulator>.Instance));
-    }
-
-    [Fact]
-    public void Constructor_NullTimeProvider_ThrowsArgumentNullException() {
-        var channel = Channel.CreateUnbounded<FlowEvent>();
-        Assert.Throws<ArgumentNullException>(() => new Accumulator(
-            reader: channel.Reader,
-            timeProvider: null!,
-            logger: NullLogger<Accumulator>.Instance));
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_ThrowsArgumentNullException() {
-        var channel = Channel.CreateUnbounded<FlowEvent>();
-        Assert.Throws<ArgumentNullException>(() => new Accumulator(
-            reader: channel.Reader,
-            timeProvider: new FakeTimeProvider(StartInstant),
-            logger: null!));
-    }
-
-    [Fact]
-    public async Task GetCurrentSnapshotsAsync_EmptyAccumulator_ReturnsEmpty() {
+    public async Task GetCurrentSnapshotsAsync_EmptyEngine_ReturnsEmpty() {
         await using var fixture = Fixture.Start();
 
-        var snapshots = await fixture.Accumulator.GetCurrentSnapshotsAsync(
+        var snapshots = await fixture.Engine.GetCurrentSnapshotsAsync(
             TestContext.Current.CancellationToken);
 
         Assert.Empty(snapshots);
@@ -229,7 +211,7 @@ public class AccumulatorTests {
 
         await fixture.DriveTickAsync(BuildFlow(bytesOut: 500));
 
-        var snapshots = await fixture.Accumulator.GetCurrentSnapshotsAsync(
+        var snapshots = await fixture.Engine.GetCurrentSnapshotsAsync(
             TestContext.Current.CancellationToken);
 
         var snapshot = Assert.Single(snapshots);
@@ -246,7 +228,7 @@ public class AccumulatorTests {
         await fixture.DriveTickAsync(
             BuildFlow(processName: "b.exe", processPath: @"C:\b.exe", bytesOut: 200));
 
-        var snapshots = await fixture.Accumulator.GetCurrentSnapshotsAsync(
+        var snapshots = await fixture.Engine.GetCurrentSnapshotsAsync(
             TestContext.Current.CancellationToken);
 
         Assert.Equal(2, snapshots.Count);
@@ -254,6 +236,190 @@ public class AccumulatorTests {
         Assert.Contains(@"C:\a.exe", paths);
         Assert.Contains(@"C:\b.exe", paths);
     }
+
+    // --- 10-second bucket / SQLite persistence tests ---
+
+    [Fact]
+    public async Task BucketFlush_WritesTrafficBucketsToStore() {
+        var trafficStore = new FakeTrafficStore();
+        await using var fixture = Fixture.Start(trafficStore: trafficStore);
+
+        // Drive 10 ticks (10 seconds) to trigger a bucket flush
+        for (var i = 0; i < 10; i++) {
+            await fixture.DriveTickAsync(BuildFlow(bytesIn: 100, bytesOut: 50));
+        }
+
+        Assert.NotEmpty(trafficStore.WrittenBuckets);
+        var bucket = trafficStore.WrittenBuckets[0];
+        Assert.Equal(@"C:\Windows\System32\curl.exe", bucket.ProcessPath);
+        Assert.Equal("curl.exe", bucket.ProcessName);
+        Assert.Equal(1000, bucket.BytesIn);
+        Assert.Equal(500, bucket.BytesOut);
+        Assert.Equal(10, bucket.BucketSeconds);
+    }
+
+    [Fact]
+    public async Task BucketFlush_MultipleDestinations_WritesMultipleBuckets() {
+        var trafficStore = new FakeTrafficStore();
+        await using var fixture = Fixture.Start(trafficStore: trafficStore);
+
+        for (var i = 0; i < 10; i++) {
+            await fixture.DriveTickAsync(
+                BuildFlow(remoteIp: "1.1.1.1", bytesIn: 100, bytesOut: 50),
+                BuildFlow(remoteIp: "2.2.2.2", bytesIn: 200, bytesOut: 100));
+        }
+
+        Assert.True(trafficStore.WrittenBuckets.Count >= 2);
+        var addr1 = trafficStore.WrittenBuckets.FirstOrDefault(b => b.RemoteAddress == "1.1.1.1");
+        var addr2 = trafficStore.WrittenBuckets.FirstOrDefault(b => b.RemoteAddress == "2.2.2.2");
+        Assert.NotNull(addr1);
+        Assert.NotNull(addr2);
+        Assert.Equal(1000, addr1.BytesIn);
+        Assert.Equal(2000, addr2.BytesIn);
+    }
+
+    [Fact]
+    public async Task BucketFlush_ResetsDeltas_NextBucketStartsFresh() {
+        var trafficStore = new FakeTrafficStore();
+        await using var fixture = Fixture.Start(trafficStore: trafficStore);
+
+        // First bucket: 10 ticks
+        for (var i = 0; i < 10; i++) {
+            await fixture.DriveTickAsync(BuildFlow(bytesIn: 100, bytesOut: 50));
+        }
+        var firstBucketCount = trafficStore.WrittenBuckets.Count;
+        Assert.True(firstBucketCount > 0);
+
+        // Second bucket: 10 more ticks with different bytes
+        for (var i = 0; i < 10; i++) {
+            await fixture.DriveTickAsync(BuildFlow(bytesIn: 200, bytesOut: 100));
+        }
+
+        var secondBuckets = trafficStore.WrittenBuckets.Skip(firstBucketCount).ToList();
+        Assert.NotEmpty(secondBuckets);
+        var secondBucket = secondBuckets[0];
+        Assert.Equal(2000, secondBucket.BytesIn);
+        Assert.Equal(1000, secondBucket.BytesOut);
+    }
+
+    [Fact]
+    public async Task BucketFlush_JoinsHostnameFromDnsCache() {
+        var dnsCache = new FakeDnsCache();
+        dnsCache.Add("1.1.1.1", "one.one.one.one");
+        var trafficStore = new FakeTrafficStore();
+        await using var fixture = Fixture.Start(trafficStore: trafficStore, dnsCache: dnsCache);
+
+        for (var i = 0; i < 10; i++) {
+            await fixture.DriveTickAsync(BuildFlow(remoteIp: "1.1.1.1", bytesIn: 100));
+        }
+
+        Assert.NotEmpty(trafficStore.WrittenBuckets);
+        Assert.Equal("one.one.one.one", trafficStore.WrittenBuckets[0].Hostname);
+    }
+
+    [Fact]
+    public async Task BucketFlush_PersistsDnsCacheEntries() {
+        var dnsCache = new FakeDnsCache();
+        dnsCache.Add("1.1.1.1", "one.one.one.one");
+        var dnsCacheStore = new FakeDnsCacheStore();
+        var trafficStore = new FakeTrafficStore();
+        await using var fixture = Fixture.Start(
+            trafficStore: trafficStore, dnsCacheStore: dnsCacheStore, dnsCache: dnsCache);
+
+        for (var i = 0; i < 10; i++) {
+            await fixture.DriveTickAsync(BuildFlow(remoteIp: "1.1.1.1", bytesIn: 100));
+        }
+
+        Assert.Contains(dnsCacheStore.UpsertedEntries, e =>
+            e.Address == "1.1.1.1" && e.Hostname == "one.one.one.one");
+    }
+
+    [Fact]
+    public async Task BucketFlush_NullHostname_NoHostnameInBucket() {
+        var trafficStore = new FakeTrafficStore();
+        await using var fixture = Fixture.Start(trafficStore: trafficStore);
+
+        for (var i = 0; i < 10; i++) {
+            await fixture.DriveTickAsync(BuildFlow(remoteIp: "1.1.1.1", bytesIn: 100));
+        }
+
+        Assert.NotEmpty(trafficStore.WrittenBuckets);
+        Assert.Null(trafficStore.WrittenBuckets[0].Hostname);
+    }
+
+    [Fact]
+    public async Task TickDeltas_ResetIndependently_FromBucketDeltas() {
+        var trafficStore = new FakeTrafficStore();
+        await using var fixture = Fixture.Start(trafficStore: trafficStore);
+
+        // Drive 1 tick — tick deltas reset, bucket deltas still accumulating
+        var firstBatch = await fixture.DriveTickAsync(BuildFlow(bytesIn: 100));
+        var firstSnapshot = Assert.Single(firstBatch);
+        Assert.Equal(100, firstSnapshot.DeltaBytesIn);
+
+        // Drive another tick — tick delta is fresh, bucket is still accumulating
+        var secondBatch = await fixture.DriveTickAsync(BuildFlow(bytesIn: 200));
+        var secondSnapshot = Assert.Single(secondBatch);
+        Assert.Equal(200, secondSnapshot.DeltaBytesIn);
+
+        // No bucket flush yet (only 2 ticks)
+        Assert.Empty(trafficStore.WrittenBuckets);
+    }
+
+    // --- Constructor validation ---
+
+    [Fact]
+    public void Constructor_NullReader_ThrowsArgumentNullException() {
+        Assert.Throws<ArgumentNullException>(() => new TrafficEngine(
+            reader: null!,
+            timeProvider: new FakeTimeProvider(StartInstant),
+            trafficStore: new FakeTrafficStore(),
+            dnsCacheStore: new FakeDnsCacheStore(),
+            dnsCache: new FakeDnsCache(),
+            options: new TrafficStorageOptions(),
+            logger: NullLogger<TrafficEngine>.Instance));
+    }
+
+    [Fact]
+    public void Constructor_NullTimeProvider_ThrowsArgumentNullException() {
+        var channel = Channel.CreateUnbounded<FlowEvent>();
+        Assert.Throws<ArgumentNullException>(() => new TrafficEngine(
+            reader: channel.Reader,
+            timeProvider: null!,
+            trafficStore: new FakeTrafficStore(),
+            dnsCacheStore: new FakeDnsCacheStore(),
+            dnsCache: new FakeDnsCache(),
+            options: new TrafficStorageOptions(),
+            logger: NullLogger<TrafficEngine>.Instance));
+    }
+
+    [Fact]
+    public void Constructor_NullTrafficStore_ThrowsArgumentNullException() {
+        var channel = Channel.CreateUnbounded<FlowEvent>();
+        Assert.Throws<ArgumentNullException>(() => new TrafficEngine(
+            reader: channel.Reader,
+            timeProvider: new FakeTimeProvider(StartInstant),
+            trafficStore: null!,
+            dnsCacheStore: new FakeDnsCacheStore(),
+            dnsCache: new FakeDnsCache(),
+            options: new TrafficStorageOptions(),
+            logger: NullLogger<TrafficEngine>.Instance));
+    }
+
+    [Fact]
+    public void Constructor_NullLogger_ThrowsArgumentNullException() {
+        var channel = Channel.CreateUnbounded<FlowEvent>();
+        Assert.Throws<ArgumentNullException>(() => new TrafficEngine(
+            reader: channel.Reader,
+            timeProvider: new FakeTimeProvider(StartInstant),
+            trafficStore: new FakeTrafficStore(),
+            dnsCacheStore: new FakeDnsCacheStore(),
+            dnsCache: new FakeDnsCache(),
+            options: new TrafficStorageOptions(),
+            logger: null!));
+    }
+
+    // --- Helpers ---
 
     private static FlowEvent BuildFlow(
         string processName = "curl.exe",
@@ -282,31 +448,45 @@ public class AccumulatorTests {
         private readonly Task _runTask;
 
         public FakeTimeProvider FakeTime { get; }
-        public Accumulator Accumulator { get; }
+        public TrafficEngine Engine { get; }
         public List<IReadOnlyList<CounterSnapshot>> ReceivedBatches { get; } = new();
 
-        private Fixture(Channel<FlowEvent> channel, FakeTimeProvider fakeTime, Accumulator accumulator) {
+        private Fixture(
+            Channel<FlowEvent> channel,
+            FakeTimeProvider fakeTime,
+            TrafficEngine engine
+        ) {
             _channel = channel;
             FakeTime = fakeTime;
-            Accumulator = accumulator;
+            Engine = engine;
             _cts = new CancellationTokenSource();
 
-            accumulator.OnSnapshotBatch += batch => {
+            engine.OnSnapshotBatch += batch => {
                 lock (ReceivedBatches) {
                     ReceivedBatches.Add(batch);
                     _pendingBatchTcs?.TrySetResult(batch);
                 }
             };
-            _runTask = accumulator.RunAsync(_cts.Token);
+            _runTask = engine.RunAsync(_cts.Token);
         }
 
         private TaskCompletionSource<IReadOnlyList<CounterSnapshot>>? _pendingBatchTcs;
 
-        public static Fixture Start() {
+        public static Fixture Start(
+            FakeTrafficStore? trafficStore = null,
+            FakeDnsCacheStore? dnsCacheStore = null,
+            FakeDnsCache? dnsCache = null
+        ) {
             var channel = Channel.CreateUnbounded<FlowEvent>();
             var fakeTime = new FakeTimeProvider(StartInstant);
-            var accumulator = new Accumulator(channel.Reader, fakeTime, NullLogger<Accumulator>.Instance);
-            return new Fixture(channel, fakeTime, accumulator);
+            var engine = new TrafficEngine(
+                channel.Reader, fakeTime,
+                trafficStore ?? new FakeTrafficStore(),
+                dnsCacheStore ?? new FakeDnsCacheStore(),
+                dnsCache ?? new FakeDnsCache(),
+                new TrafficStorageOptions(),
+                NullLogger<TrafficEngine>.Instance);
+            return new Fixture(channel, fakeTime, engine);
         }
 
         public async Task<IReadOnlyList<CounterSnapshot>> DriveTickAsync(params FlowEvent[] events) {
@@ -321,24 +501,14 @@ public class AccumulatorTests {
                 Assert.True(_channel.Writer.TryWrite(flowEvent));
             }
 
-            // Wait until the accumulator has entered WaitForEventOrTickAsync and
-            // registered a Task.Delay timer with the FakeTimeProvider. This closes
-            // the race where Advance fires before the timer exists, causing the
-            // timer to be created relative to the already-advanced clock.
             var waitSignal = new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously);
-            Accumulator.SetWaitSignal(waitSignal);
+            Engine.SetWaitSignal(waitSignal);
             await waitSignal.Task.WaitAsync(TestTimeout);
 
-            // Install the settle signal BEFORE advancing. The accumulator is parked
-            // in Task.WhenAny right now, so it cannot consume this signal yet. When
-            // Advance fires the timer below, the accumulator wakes, flushes the
-            // batch, loops back, drains the empty channel, and re-enters
-            // WaitForEventOrTickAsync — firing the settle signal. This guarantees
-            // the next DriveTickAsync call starts with the accumulator parked.
             var settleSignal = new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously);
-            Accumulator.SetWaitSignal(settleSignal);
+            Engine.SetWaitSignal(settleSignal);
 
             FakeTime.Advance(FlushInterval);
 

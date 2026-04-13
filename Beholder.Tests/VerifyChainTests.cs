@@ -1,4 +1,5 @@
 using Beholder.Core;
+using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Storage;
@@ -38,12 +39,14 @@ public sealed class VerifyChainTests : IDisposable {
             snapshotSource, _timeProvider, NullLogger<BroadcastService>.Instance);
         var pipeline = new FlowEventPipeline(
             new FakeFlowSource(), _timeProvider,
+            new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
+            new TrafficStorageOptions(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
 
         _service = new BeholderLocalService(
             _broadcaster, pipeline, firewallStore, alertStore,
-            new FakeFirewallController(), _eventStore, _timeProvider,
-            NullLogger<BeholderLocalService>.Instance);
+            new FakeFirewallController(), _eventStore, new FakeTrafficStore(),
+            _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
     public void Dispose() {
@@ -137,12 +140,14 @@ public sealed class VerifyChainTests : IDisposable {
         var alertStore = new SqliteAlertStore(_connectionFactory, NullLogger<SqliteAlertStore>.Instance);
         var pipeline = new FlowEventPipeline(
             new FakeFlowSource(), _timeProvider,
+            new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
+            new TrafficStorageOptions(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
 
         var service = new BeholderLocalService(
             _broadcaster, pipeline, firewallStore, alertStore,
-            new FakeFirewallController(), throwingStore, _timeProvider,
-            NullLogger<BeholderLocalService>.Instance);
+            new FakeFirewallController(), throwingStore, new FakeTrafficStore(),
+            _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
 

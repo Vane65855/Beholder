@@ -144,6 +144,69 @@ message VerifyChainResponse {
   string error_message = 4;     // "" when is_valid = true
 }
 
+// ---- Historical traffic query messages ----
+
+message TrafficTimePoint {
+  int64 timestamp_unix_ns = 1;
+  int64 bytes_in = 2;
+  int64 bytes_out = 3;
+}
+
+message DestinationSummary {
+  string remote_address = 1;
+  string hostname = 2;         // empty string when unknown
+  string country = 3;          // alpha-2, "??", or "--"
+  int64 total_bytes_in = 4;
+  int64 total_bytes_out = 5;
+  int32 connection_count = 6;
+}
+
+message CountryTrafficSummary {
+  string country = 1;          // alpha-2, "??", or "--"
+  int64 total_bytes_in = 2;
+  int64 total_bytes_out = 3;
+}
+
+message GetProcessTimelineRequest {
+  string process_path = 1;
+  int64 from_unix_ns = 2;
+  int64 to_unix_ns = 3;
+  int64 resolution_ms = 4;
+}
+
+message GetProcessTimelineResponse {
+  repeated TrafficTimePoint points = 1;
+}
+
+message GetProcessDestinationsRequest {
+  string process_path = 1;
+  int64 from_unix_ns = 2;
+  int64 to_unix_ns = 3;
+}
+
+message GetProcessDestinationsResponse {
+  repeated DestinationSummary destinations = 1;
+}
+
+message GetAggregateTimelineRequest {
+  int64 from_unix_ns = 1;
+  int64 to_unix_ns = 2;
+  int64 resolution_ms = 3;
+}
+
+message GetAggregateTimelineResponse {
+  repeated TrafficTimePoint points = 1;
+}
+
+message GetCountryBreakdownRequest {
+  int64 from_unix_ns = 1;
+  int64 to_unix_ns = 2;
+}
+
+message GetCountryBreakdownResponse {
+  repeated CountryTrafficSummary countries = 1;
+}
+
 // ---- Service ----
 
 service BeholderLocal {
@@ -152,4 +215,8 @@ service BeholderLocal {
   rpc ApplyFirewallRule(ApplyFirewallRuleRequest) returns (ApplyFirewallRuleResponse);
   rpc MarkAlertRead(MarkAlertReadRequest) returns (MarkAlertReadResponse);
   rpc VerifyChain(VerifyChainRequest) returns (VerifyChainResponse);
+  rpc GetProcessTimeline(GetProcessTimelineRequest) returns (GetProcessTimelineResponse);
+  rpc GetProcessDestinations(GetProcessDestinationsRequest) returns (GetProcessDestinationsResponse);
+  rpc GetAggregateTimeline(GetAggregateTimelineRequest) returns (GetAggregateTimelineResponse);
+  rpc GetCountryBreakdown(GetCountryBreakdownRequest) returns (GetCountryBreakdownResponse);
 }

@@ -145,6 +145,116 @@ public class ProtocolConvertersTests {
         Assert.Equal(1_700_000_000_000_000_000L, ns);
     }
 
+    // ---- Traffic query converter tests ----
+
+    [Fact]
+    public void TrafficTimePoint_ToProto_AllFieldsPreserved() {
+        var source = new Core.TrafficTimePoint(FixedTimestamp, 5000, 3000);
+
+        var proto = source.ToProto();
+
+        Assert.Equal(FixedTimestamp.ToUnixTimeNanoseconds(), proto.TimestampUnixNs);
+        Assert.Equal(5000, proto.BytesIn);
+        Assert.Equal(3000, proto.BytesOut);
+    }
+
+    [Fact]
+    public void TrafficTimePoint_ToDomain_RoundTrips() {
+        var source = new Core.TrafficTimePoint(FixedTimestamp, 5000, 3000);
+        var roundTripped = source.ToProto().ToDomain();
+
+        Assert.Equal(source, roundTripped);
+    }
+
+    [Fact]
+    public void DestinationSummary_ToProto_AllFieldsPreserved() {
+        var source = new Core.DestinationSummary(
+            "93.184.216.34", "example.com",
+            Core.CountryCode.FromAlpha2("US"), 10_000, 5_000, 3);
+
+        var proto = source.ToProto();
+
+        Assert.Equal("93.184.216.34", proto.RemoteAddress);
+        Assert.Equal("example.com", proto.Hostname);
+        Assert.Equal("US", proto.Country);
+        Assert.Equal(10_000, proto.TotalBytesIn);
+        Assert.Equal(5_000, proto.TotalBytesOut);
+        Assert.Equal(3, proto.ConnectionCount);
+    }
+
+    [Fact]
+    public void DestinationSummary_ToProto_NullHostname_BecomesEmptyString() {
+        var source = new Core.DestinationSummary(
+            "1.2.3.4", null, Core.CountryCode.Unknown, 0, 0, 0);
+
+        var proto = source.ToProto();
+
+        Assert.Equal("", proto.Hostname);
+    }
+
+    [Fact]
+    public void DestinationSummary_ToDomain_RoundTrips() {
+        var source = new Core.DestinationSummary(
+            "93.184.216.34", "example.com",
+            Core.CountryCode.FromAlpha2("US"), 10_000, 5_000, 3);
+        var roundTripped = source.ToProto().ToDomain();
+
+        Assert.Equal(source, roundTripped);
+    }
+
+    [Fact]
+    public void DestinationSummary_ToDomain_EmptyHostname_BecomesNull() {
+        var proto = new Local.DestinationSummary {
+            RemoteAddress = "1.2.3.4",
+            Hostname = "",
+            Country = "??",
+            TotalBytesIn = 0,
+            TotalBytesOut = 0,
+            ConnectionCount = 0
+        };
+
+        var domain = proto.ToDomain();
+
+        Assert.Null(domain.Hostname);
+    }
+
+    [Fact]
+    public void CountryTrafficSummary_ToProto_AllFieldsPreserved() {
+        var source = new Core.CountryTrafficSummary(
+            Core.CountryCode.FromAlpha2("DE"), 50_000, 25_000);
+
+        var proto = source.ToProto();
+
+        Assert.Equal("DE", proto.Country);
+        Assert.Equal(50_000, proto.TotalBytesIn);
+        Assert.Equal(25_000, proto.TotalBytesOut);
+    }
+
+    [Fact]
+    public void CountryTrafficSummary_ToDomain_RoundTrips() {
+        var source = new Core.CountryTrafficSummary(
+            Core.CountryCode.FromAlpha2("DE"), 50_000, 25_000);
+        var roundTripped = source.ToProto().ToDomain();
+
+        Assert.Equal(source, roundTripped);
+    }
+
+    [Fact]
+    public void CountryTrafficSummary_ToDomain_SentinelCountryCodes() {
+        var localProto = new Local.CountryTrafficSummary { Country = "--", TotalBytesIn = 1, TotalBytesOut = 2 };
+        var unknownProto = new Local.CountryTrafficSummary { Country = "??", TotalBytesIn = 3, TotalBytesOut = 4 };
+
+        Assert.Equal(Core.CountryCode.Local, localProto.ToDomain().Country);
+        Assert.Equal(Core.CountryCode.Unknown, unknownProto.ToDomain().Country);
+    }
+
+    [Fact]
+    public void FromUnixTimeNanoseconds_ConvertsCorrectly() {
+        var ns = 1_700_000_000_000_000_000L;
+        var result = ns.FromUnixTimeNanoseconds();
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_000_000L), result);
+    }
+
     private static Core.CounterSnapshot BuildCounterSnapshot(
         IReadOnlyDictionary<Core.CountryCode, long> byCountry
     ) {

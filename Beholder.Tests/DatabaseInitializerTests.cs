@@ -27,6 +27,8 @@ public sealed class DatabaseInitializerTests : IDisposable {
         Assert.Contains("checkpoint", tables);
         Assert.Contains("firewall_rules", tables);
         Assert.Contains("process_registry", tables);
+        Assert.Contains("traffic_buckets_10s", tables);
+        Assert.Contains("dns_cache", tables);
     }
 
     [Fact]
@@ -41,6 +43,8 @@ public sealed class DatabaseInitializerTests : IDisposable {
         Assert.Contains("checkpoint", tables);
         Assert.Contains("firewall_rules", tables);
         Assert.Contains("process_registry", tables);
+        Assert.Contains("traffic_buckets_10s", tables);
+        Assert.Contains("dns_cache", tables);
     }
 
     [Fact]
@@ -73,6 +77,9 @@ public sealed class DatabaseInitializerTests : IDisposable {
         var indexes = ListIndexNames();
         Assert.Contains("idx_event_log_kind", indexes);
         Assert.Contains("idx_firewall_rules_process_path", indexes);
+        Assert.Contains("idx_traffic_process_time", indexes);
+        Assert.Contains("idx_traffic_time", indexes);
+        Assert.Contains("idx_traffic_country_time", indexes);
     }
 
     [Fact]

@@ -58,6 +58,11 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<IFirewallRuleStore>(sp => sp.GetRequiredService<SqliteFirewallRuleStore>());
     builder.Services.AddSingleton<SqliteAlertStore>();
     builder.Services.AddSingleton<IAlertStore>(sp => sp.GetRequiredService<SqliteAlertStore>());
+    builder.Services.AddSingleton<SqliteTrafficStore>();
+    builder.Services.AddSingleton<ITrafficStore>(sp => sp.GetRequiredService<SqliteTrafficStore>());
+    builder.Services.AddSingleton<SqliteDnsCacheStore>();
+    builder.Services.AddSingleton<IDnsCacheStore>(sp => sp.GetRequiredService<SqliteDnsCacheStore>());
+    builder.Services.AddSingleton<TrafficStorageOptions>();
 
     // Broadcast service must be registered BEFORE the pipeline so its StartAsync
     // runs first and subscribes to ISnapshotBatchSource.OnSnapshotBatch before

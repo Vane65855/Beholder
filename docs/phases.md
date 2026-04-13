@@ -1,14 +1,14 @@
 # Beholder NMT — Project Status & Phase Plan
 
-**Last updated:** 2026-04-12
-**Current checkpoint:** Phase 4.5 (post-stability fixes)
-**Test count:** 273
+**Last updated:** 2026-04-13
+**Current checkpoint:** Phase 4.6a (historical traffic storage)
+**Test count:** 379
 
 ---
 
 ## 1. Status Summary
 
-As of 2026-04-12, the daemon is functionally complete as a standalone service: it captures per-process network telemetry via ETW on Windows, enriches flows with DB-IP country codes, aggregates into per-second counter snapshots, persists state to a chain-hashed SQLite event log, manages firewall rules via INetFwPolicy2 COM interop, and exposes a gRPC IPC surface with five RPCs (Subscribe, GetSnapshot, ApplyFirewallRule, MarkAlertRead, VerifyChain). The DNS cache passively captures hostname-to-IP mappings from the Microsoft-Windows-DNS-Client ETW provider. 273 tests pass deterministically. The UI project exists as an Avalonia 12 skeleton with no functional views. Linux platform, uplink client, and uplink test stub are project stubs. Next up: Phase 5 (UI shell and daemon connection).
+As of 2026-04-13, the daemon captures per-process network telemetry via ETW on Windows, enriches flows with DB-IP country codes, and now persists per-destination traffic to SQLite via a new `TrafficEngine` that replaced the `Accumulator`. The engine produces two outputs from the same event stream: per-second `CounterSnapshot` batches for the live IPC stream (unchanged from Phase 2) and per-10-second `TrafficBucket` rows in `traffic_buckets_10s` for historical queries. Four new gRPC RPCs (`GetProcessTimeline`, `GetProcessDestinations`, `GetAggregateTimeline`, `GetCountryBreakdown`) serve aggregated traffic data from SQLite. DNS hostname mappings are persisted to a `dns_cache` table, surviving daemon restarts. The gRPC IPC surface now has nine RPCs total. 379 tests pass deterministically. Next up: Phase 5 (UI shell and daemon connection).
 
 ---
 
@@ -141,6 +141,46 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 
 ---
 
+### Phase 4.6a — Historical traffic storage (single-tier) ✅
+
+**Purpose:** Replace the `Accumulator` with a `TrafficEngine` that persists per-destination traffic to SQLite, enabling all historical traffic queries. This is the first tier (`traffic_buckets_10s`, 10-second resolution, 30-day retention) of a planned five-tier rollup cascade.
+
+**Key components:**
+- `Beholder.Core/TrafficBucket.cs` — Per-destination, per-10-second stored row
+- `Beholder.Core/TrafficTimePoint.cs` — Single point on a time-series chart
+- `Beholder.Core/DestinationSummary.cs` — Aggregated traffic to one remote host
+- `Beholder.Core/CountryTrafficSummary.cs` — Per-country aggregate
+- `Beholder.Core/ITrafficStore.cs` — Persistence + query interface (6 methods)
+- `Beholder.Core/IDnsCacheStore.cs` — Persistent DNS cache interface (3 methods)
+- `Beholder.Daemon/TrafficStorageOptions.cs` — Configuration (retention, bucket size, eviction timeouts)
+- `Beholder.Daemon/Storage/SqliteTrafficStore.cs` — `ITrafficStore` implementation
+- `Beholder.Daemon/Storage/SqliteDnsCacheStore.cs` — `IDnsCacheStore` implementation
+- `Beholder.Daemon/Pipeline/TrafficEngine.cs` — Replaces `Accumulator.cs`, same external contract (`OnSnapshotBatch`, `GetCurrentSnapshotsAsync`, `SetWaitSignal`) plus SQLite persistence
+- `Beholder.Daemon/Storage/DatabaseInitializer.cs` — Added `traffic_buckets_10s` table, `dns_cache` table, 3 indexes
+- `Beholder.Protocol/Protos/beholder_local.proto` — 8 new messages, 4 new RPCs
+- `Beholder.Protocol/ProtocolConverters.cs` — ToProto/ToDomain for traffic types + `FromUnixTimeNanoseconds`
+- `Beholder.Daemon/Grpc/BeholderLocalService.cs` — 4 new RPC implementations
+- `Beholder.Daemon/Program.cs` — DI registration for stores and options
+
+**Files deleted:** `Beholder.Daemon/Pipeline/Accumulator.cs`, `Beholder.Tests/AccumulatorTests.cs`
+
+**Tests added:** ~106 new tests (4 record type test files, SqliteTrafficStore round-trip/query/prune tests, SqliteDnsCacheStore upsert/resolve/prune tests, TrafficEngine 1s-tick/10s-bucket/DNS-joining/eviction tests, protocol converter round-trip tests, DatabaseInitializer schema verification updates)
+
+**Architecture:**
+- **TrafficEngine** produces TWO outputs from one event stream: (1) per-second `CounterSnapshot` batches for live IPC, (2) per-10-second `TrafficBucket` rows in SQLite
+- **In-memory state is bounded:** `DestinationAggregate` (tick + bucket deltas, NO cumulative totals) evicted after 5 min idle; `ProcessLifetimeTotals` (session-scoped) evicted after 1 hr idle
+- **SQLite is authoritative:** all historical queries hit `traffic_buckets_10s` directly. Per-destination cumulative totals are SQL aggregates, never in-memory
+- **DNS hostnames** joined at 10s flush time via `IDnsCache.Resolve()` and persisted to `dns_cache` table
+
+**Design decisions:**
+- Replaced `Accumulator` entirely rather than bolting on a second channel. Historical traffic data IS the primary data, not secondary.
+- Named table `traffic_buckets_10s` (not `traffic_buckets`) to document it as one tier in a future cascade. Phase 4.6b adds `traffic_raw` (1s, 10 min retention), Phase 4.6c adds coarser tiers.
+- Rollup invariant: `SUM(bytes)` over a time range must be identical regardless of which tier is consulted. Coarser tiers are built by summing finer-tier rows.
+- Destination eviction flushes non-zero bucket bytes to SQLite before removing — never evict data that has not been persisted.
+- Process lifetime totals are NOT reconstructed from SQLite on restart. They start from zero; the UI already handles daemon-reset detection.
+
+---
+
 ## 3. Phase-by-Phase Lessons Learned
 
 ### Phase 0
@@ -175,6 +215,13 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 - **Proto3 sentinel conventions avoid wrapper types.** `FailedAtSeq = 0` and `ErrorMessage = ""` for success are cleaner than `google.protobuf.Int64Value` wrappers. Document the convention in the proto file comments.
 - **`SqliteConnection.ClearAllPools()` is process-global.** It disposes ALL pooled connections across the entire process, not just the calling test's connections. Under parallel xUnit execution, one test's cleanup destroys another test's active connections. Fix: disable pooling in tests via `Pooling=false` connection string parameter.
 
+### Phase 4.6a
+
+- **Historical data is the primary data, not secondary.** The original plan was to bolt a `TrafficRecorder` alongside the `Accumulator`. But the Accumulator was destroying per-destination detail — the very data the system exists to capture. Replacing it with `TrafficEngine` eliminated the false dichotomy between "live" and "historical" data. One pipeline, two output cadences.
+- **Unbounded in-memory state is an architectural bug.** The initial `DestinationAggregate` design had cumulative `TotalBytesIn/Out` fields that grow forever. The fix: store only tick deltas and bucket deltas in memory, evict idle entries, and let SQL aggregation serve cumulative queries.
+- **`ArgumentException.ThrowIfNullOrWhiteSpace` throws `ArgumentNullException` for null inputs.** xUnit `Assert.Throws<ArgumentException>` requires exact type match and will not catch a subclass. Null test cases must use separate `[Fact]` methods with `Assert.Throws<ArgumentNullException>`.
+- **Name tables for their tier, not their function.** `traffic_buckets_10s` (not `traffic_buckets`) documents that this is the first tier in a rollup cascade. When `traffic_buckets_1m` appears in Phase 4.6c, the naming is self-explanatory.
+
 ### Phase 4.5
 
 - **Multi-tick test synchronization requires a settle signal.** The first `DriveTickAsync` call works because the accumulator hasn't entered its wait loop yet. Subsequent calls race: the accumulator may re-enter `WaitForEventOrTickAsync` and consume a signal before the test installs one. Fix: install a settle signal before `Advance` and wait for it after the batch, guaranteeing the accumulator is parked before the next call.
@@ -192,6 +239,7 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 | 2 | 2026-04-10 | Platform layer + pipeline | `EtwFlowSource.Dispose` used banned sync-over-async; `InternalsVisibleTo` missing; magic timeout constant; formatting violations; stale terminology in docs | Added `IAsyncDisposable`; added `InternalsVisibleTo`; extracted constant; fixed formatting; updated docs |
 | 4 | 2026-04-12 | gRPC service, broadcast, full daemon | Stale XML docs on `BeholderLocalService`; counter logging too verbose; `GetSnapshot` missing exception handling; `BeholderLocalService` not registered as singleton; `SqliteFirewallRuleStore` not behind interface; missing persist-failure rollback test; missing `VerifyChain` infrastructure test; duplicated test fakes across 3 files; `AlertKind` ordinal alignment unverified | Updated docs; `LogDebug`; added try/catch; singleton registration; extracted `IFirewallRuleStore`; added rollback test; added infra test; extracted shared test doubles; verified alignment |
 | 4.5 | 2026-04-12 | Test stability (flaky failures) | `AccumulatorTests` ~2% timeout in multi-tick tests (settle signal race); `SqliteConnection.ClearAllPools()` ~3% `ObjectDisposedException` under parallel execution | Settle signal protocol in `DriveTickAsync`; `Pooling=false` in test `ConnectionFactory`/`DatabaseInitializer`; removed all `ClearAllPools` calls |
+| 4.6a | 2026-04-13 | Historical traffic storage | `Accumulator` discarded all per-destination detail; no SQLite persistence; DNS cache in-memory only; `ArgumentNullException` vs `ArgumentException` in record test cases | Replaced `Accumulator` with `TrafficEngine`; added `traffic_buckets_10s` + `dns_cache` tables; 4 new query RPCs; bounded in-memory state with eviction; split null test cases into separate `[Fact]` methods |
 
 ---
 
@@ -204,7 +252,8 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 - **Uplink client (Beholder.Daemon.Uplink)** — project stub exists. Outbound gRPC client with connection state machine, JWT auth, and telemetry forwarding. Phase 9.
 - **Uplink test stub (Beholder.Tests.UplinkStub)** — project stub exists. Reference gRPC server for uplink integration testing. Phase 9.
 - **Alert pipeline (daemon side)** — `NewProcessDetector`, `BinaryHashMonitor`, `ChainIntegrityMonitor` not yet implemented. The `AlertKind` enum and `IAlertStore` interface are defined, but no daemon code generates alerts yet. Phase 7.
-- **AccumulatorTests residual flakiness** — the settle-signal fix eliminated most failures, but ~1-2% timeout rate may persist under extreme CPU contention. The synchronization protocol is correct but depends on thread scheduling. Monitor during future test runs.
+- **TrafficEngineTests residual flakiness** — inherited from AccumulatorTests. The settle-signal fix eliminated most failures, but ~1-2% timeout rate may persist under extreme CPU contention. Monitor during future test runs.
+- **Tiered rollup storage (Phase 4.6b/c)** — Phase 4.6a implements only the `traffic_buckets_10s` tier (10s resolution, 30-day retention). Phase 4.6b will add `traffic_raw` (1s, 10 min retention) with raw→10s rollup. Phase 4.6c will add `traffic_buckets_1m`, `traffic_buckets_10m`, `traffic_buckets_1h` with full cascade. Until then, all queries hit the single `_10s` table regardless of requested time range.
 - **UI quality standards enforcement** — Phase 5.4 onward must comply with `docs/UI_QUALITY_STANDARDS.md`. Phases 5.1–5.3 are retroactively compliant (their quality issues were caught and fixed during manual review). Every future UI phase plan must include the verification and reference comparison sections defined in that document.
 - **LiveCharts2 Avalonia 12 support** — a dev build (`2.1.0-dev-247`) is installed in `Beholder.Ui` but not yet used in any view. Evaluate stability before building the Phase 8 map tab against it.
 - **Tmds.DBus.Protocol vulnerability** — force-upgraded to 0.92.0 via explicit `PackageReference` to avoid Avalonia 12's transitive pull of vulnerable 0.90.3. Monitor for Avalonia updates that resolve this transitively.

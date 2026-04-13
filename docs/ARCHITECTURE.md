@@ -68,15 +68,27 @@ Rules:
 ```
 OS kernel event (ETW / netlink)
   → Platform provider (Daemon.Windows / Daemon.Linux)
-    → IFlowSource.OnFlowEvent callback
-      → Channel<FlowEvent> (bounded, backpressure)
-        → Accumulator (aggregates per-process byte deltas, 1-second buckets)
-          → Two consumers in parallel:
-            1. SQLite writer (append to event_log, update chain hash)
-            2. IPC broadcaster (push CounterBatch to connected UI clients)
+    → GeoIpFlowSourceDecorator (attaches country code)
+      → IFlowSource.OnFlowEvent callback
+        → Channel<FlowEvent> (bounded, 10,000 capacity, DropOldest)
+          → TrafficEngine (replaces Accumulator)
+            → Two output cadences from the same event stream:
+              1. Every 1 second:  Aggregate destinations by process →
+                 build CounterSnapshot per process → fire OnSnapshotBatch →
+                 BroadcastService → IPC subscribers (UI clients)
+              2. Every 10 seconds: Build TrafficBucket per destination with
+                 bucket bytes > 0 → join hostname via IDnsCache.Resolve() →
+                 ITrafficStore.WriteBucketsAsync() + IDnsCacheStore.UpsertBatchAsync()
+                 → evict idle destinations (5 min) and process totals (1 hr)
 ```
 
-The Channel<T> decouples the OS callback (which must return fast) from the slower SQLite writes and IPC broadcasts. The channel is bounded — if consumers fall behind, the producer drops the oldest unprocessed events and logs a warning. Data loss in the counter pipeline is acceptable; the OS-level counters are cumulative, so the next sample self-corrects.
+The Channel\<T\> decouples the OS callback (which must return fast) from the engine's processing. The channel is bounded — if the engine falls behind, the producer drops the oldest unprocessed events and logs a warning. Data loss in the counter pipeline is acceptable; the OS-level counters are cumulative, so the next sample self-corrects.
+
+The TrafficEngine holds two kinds of in-memory state, both bounded:
+- **DestinationAggregate:** Per-(process, address, port) tick/bucket deltas. NO cumulative totals. Evicted after 5 minutes idle. ~100–500 entries steady state.
+- **ProcessLifetimeTotals:** Session-scoped per-process cumulative bytes. Evicted after 1 hour idle. ~50–200 entries. NOT reconstructed from SQLite on restart.
+
+Historical queries (timelines, destination breakdowns, country analysis) are served from SQLite via four gRPC RPCs, never from in-memory state.
 
 ### Firewall Rule Application
 
@@ -179,6 +191,39 @@ CREATE TABLE process_registry (
 );
 ```
 
+### traffic_buckets_10s (first tier of rollup cascade)
+
+```sql
+CREATE TABLE traffic_buckets_10s (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    process_path    TEXT    NOT NULL,
+    process_name    TEXT    NOT NULL,
+    remote_address  TEXT    NOT NULL,
+    remote_port     INTEGER NOT NULL,
+    hostname        TEXT,               -- NULL when DNS cache had no entry
+    country         TEXT    NOT NULL,   -- alpha-2, "??", or "--"
+    bytes_in        INTEGER NOT NULL,
+    bytes_out       INTEGER NOT NULL,
+    bucket_start_ms INTEGER NOT NULL,   -- Unix milliseconds, aligned to 10s boundary
+    bucket_seconds  INTEGER NOT NULL DEFAULT 10
+);
+-- Indexes: (process_path, bucket_start_ms), (bucket_start_ms), (country, bucket_start_ms)
+```
+
+Phase 4.6a: this is the only tier. All historical queries hit this table regardless of time range. Phase 4.6b/c will add finer and coarser tiers with cascading rollup. The rollup invariant: `SUM(bytes)` over a time range returns identical totals regardless of which tier is consulted, because coarser tiers are built by summing finer-tier rows.
+
+### dns_cache (persistent hostname-to-IP mappings)
+
+```sql
+CREATE TABLE dns_cache (
+    address    TEXT    PRIMARY KEY,   -- IP address as string
+    hostname   TEXT    NOT NULL,
+    updated_at INTEGER NOT NULL       -- Unix milliseconds
+);
+```
+
+Survives daemon restarts. Populated during 10-second bucket flush from the in-memory `IDnsCache`. Used to backfill hostnames on traffic records.
+
 ## IPC Protocol (Daemon ↔ UI)
 
 gRPC over named pipe (`\\.\pipe\beholder` on Windows) or Unix domain socket (`/run/beholder.sock` on Linux). The pipe/socket is DACL'd (Windows) or permission-restricted (Linux) to the local user or a `beholder-users` group.
@@ -187,16 +232,29 @@ The UI is a gRPC client. The daemon is a gRPC server. The primary RPC is a serve
 
 ```protobuf
 service BeholderLocal {
+    // Live streaming
     rpc Subscribe (SubscribeRequest) returns (stream DaemonEvent);
-    rpc ApplyFirewallRule (FirewallRuleRequest) returns (FirewallRuleResponse);
-    rpc GetSnapshot (SnapshotRequest) returns (Snapshot);
-    rpc VerifyChain (VerifyRequest) returns (VerifyResponse);
+    // Current state
+    rpc GetSnapshot (GetSnapshotRequest) returns (GetSnapshotResponse);
+    // Firewall management
+    rpc ApplyFirewallRule (ApplyFirewallRuleRequest) returns (ApplyFirewallRuleResponse);
+    // Alert management
+    rpc MarkAlertRead (MarkAlertReadRequest) returns (MarkAlertReadResponse);
+    // Chain integrity
+    rpc VerifyChain (VerifyChainRequest) returns (VerifyChainResponse);
+    // Historical traffic queries (Phase 4.6a)
+    rpc GetProcessTimeline (GetProcessTimelineRequest) returns (GetProcessTimelineResponse);
+    rpc GetProcessDestinations (GetProcessDestinationsRequest) returns (GetProcessDestinationsResponse);
+    rpc GetAggregateTimeline (GetAggregateTimelineRequest) returns (GetAggregateTimelineResponse);
+    rpc GetCountryBreakdown (GetCountryBreakdownRequest) returns (GetCountryBreakdownResponse);
 }
 ```
 
 `Subscribe` is the main channel: the UI calls it once on connect and receives a stream of events (counter batches, alerts, rule changes) for the lifetime of the connection.
 
 `GetSnapshot` returns the current state (all active processes, their cumulative counters, firewall rules, recent alerts) so the UI can populate its views immediately on connect without waiting for the next counter tick.
+
+The four `Get*` RPCs query SQLite directly for historical traffic data. They accept time ranges and (for timelines) a resolution parameter that controls bucket aggregation granularity.
 
 ## Uplink Protocol (Daemon → Aggregator)
 
