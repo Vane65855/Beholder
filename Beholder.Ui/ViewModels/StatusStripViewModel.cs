@@ -10,13 +10,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace Beholder.Ui.ViewModels;
 
 internal sealed partial class StatusStripViewModel : ViewModelBase {
-    private const double BarTotalWidth = 80;
-
     // LERP smoothing factor — 0.3 per tick reaches target in ~3–4 ticks,
     // preventing the bar from jittering during bursty traffic patterns.
     private const double SmoothingFactor = 0.3;
-
-    private double _displayedOutRatio = 0.5;
 
     private readonly Dictionary<string, ProcessTotals> _perProcessTotals = new(StringComparer.Ordinal);
 
@@ -36,13 +32,15 @@ internal sealed partial class StatusStripViewModel : ViewModelBase {
     private string _wanTotalLabel = "0 B";
 
     [ObservableProperty]
-    private double _outboundBarWidth;
+    private double _outboundRatio = 0.5;
 
     [ObservableProperty]
-    private double _inboundBarWidth;
+    private bool _hasTraffic;
 
     [ObservableProperty]
     private string _deviceIdLabel = "DEV-0000";
+
+    public double InboundRatio => 1.0 - OutboundRatio;
 
     public StatusStripViewModel(DaemonStreamSubscriber subscriber) {
         ArgumentNullException.ThrowIfNull(subscriber);
@@ -91,23 +89,18 @@ internal sealed partial class StatusStripViewModel : ViewModelBase {
         UpdateRatioBar(totalDeltaOut, totalDeltaIn);
     }
 
-    private void UpdateRatioBar(long outRate, long inRate) {
-        var total = outRate + inRate;
-        if (total == 0) {
-            _displayedOutRatio = 0.5;
-            OutboundBarWidth = 0;
-            InboundBarWidth = 0;
-            return;
-        }
-
-        var targetOutRatio = outRate / (double)total;
-        _displayedOutRatio = _displayedOutRatio * (1 - SmoothingFactor) + targetOutRatio * SmoothingFactor;
-
-        OutboundBarWidth = _displayedOutRatio * BarTotalWidth;
-        InboundBarWidth = (1 - _displayedOutRatio) * BarTotalWidth;
+    partial void OnOutboundRatioChanged(double value) {
+        OnPropertyChanged(nameof(InboundRatio));
     }
 
-    internal double DisplayedOutRatio => _displayedOutRatio;
+    private void UpdateRatioBar(long outRate, long inRate) {
+        var total = outRate + inRate;
+        HasTraffic = total > 0;
+        if (!HasTraffic) return;
+
+        var targetOutRatio = outRate / (double)total;
+        OutboundRatio = OutboundRatio * (1 - SmoothingFactor) + targetOutRatio * SmoothingFactor;
+    }
 
     internal int TrackedProcessCount => _perProcessTotals.Count;
 

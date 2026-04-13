@@ -64,7 +64,7 @@ public class StatusStripViewModelTests {
     }
 
     [Fact]
-    public void UpdateFromBatch_IdleState_BarWidthsAreZero() {
+    public void UpdateFromBatch_IdleState_HasTrafficIsFalse() {
         var vm = CreateViewModel();
         var batch = new CounterBatch();
         batch.Snapshots.Add(new CounterSnapshot {
@@ -75,12 +75,11 @@ public class StatusStripViewModelTests {
 
         vm.UpdateFromBatch(batch);
 
-        Assert.Equal(0, vm.OutboundBarWidth);
-        Assert.Equal(0, vm.InboundBarWidth);
+        Assert.False(vm.HasTraffic);
     }
 
     [Fact]
-    public void UpdateFromBatch_OutboundHeavy_OutboundBarWider() {
+    public void UpdateFromBatch_OutboundHeavy_OutboundRatioHigher() {
         var vm = CreateViewModel();
         var batch = new CounterBatch();
         batch.Snapshots.Add(new CounterSnapshot {
@@ -91,11 +90,12 @@ public class StatusStripViewModelTests {
 
         vm.UpdateFromBatch(batch);
 
-        Assert.True(vm.OutboundBarWidth > vm.InboundBarWidth);
+        Assert.True(vm.HasTraffic);
+        Assert.True(vm.OutboundRatio > vm.InboundRatio);
     }
 
     [Fact]
-    public void UpdateFromBatch_InboundHeavy_InboundBarWider() {
+    public void UpdateFromBatch_InboundHeavy_InboundRatioHigher() {
         var vm = CreateViewModel();
         var batch = new CounterBatch();
         batch.Snapshots.Add(new CounterSnapshot {
@@ -106,7 +106,8 @@ public class StatusStripViewModelTests {
 
         vm.UpdateFromBatch(batch);
 
-        Assert.True(vm.InboundBarWidth > vm.OutboundBarWidth);
+        Assert.True(vm.HasTraffic);
+        Assert.True(vm.InboundRatio > vm.OutboundRatio);
     }
 
     [Fact]
@@ -122,9 +123,8 @@ public class StatusStripViewModelTests {
         vm.UpdateFromBatch(batch);
 
         // Smoothing starts from 0.5 and LERPs toward 1.0 with factor 0.3,
-        // so after one tick: 0.5 * 0.7 + 1.0 * 0.3 = 0.65 → not yet at 80px
-        Assert.True(vm.OutboundBarWidth < 80);
-        Assert.True(vm.OutboundBarWidth > 0);
+        // so after one tick: 0.5 * 0.7 + 1.0 * 0.3 = 0.65
+        Assert.InRange(vm.OutboundRatio, 0.60, 0.70);
     }
 
     [Fact]

@@ -108,6 +108,34 @@ Distinct from severity. These tokens represent daemon connection state, which ma
 | `ChartSparklineFill` | `#00BCD4` at 20% opacity | TBD | WAN throughput bar fill in bottom status strip. Currently matches `AccentPrimary` but tokenized independently for future flexibility. |
 | `ChartSparklineStroke` | `#00BCD4` | TBD | WAN throughput bar stroke. Same independence note as fill. |
 
+### Traffic Direction Color Semantics
+
+Beholder intentionally inverts the speed-test convention for upload/download
+colors:
+
+- **Upload (outbound)** uses the coral/orange chart stroke color. Unexpected
+  outbound traffic is a security-relevant signal (data exfiltration, unwanted
+  cloud sync, telemetry). Using the attention-grabbing color for upload
+  surfaces the pattern most likely to matter to a security-conscious user.
+
+- **Download (inbound)** uses the teal chart stroke color. Downloads are
+  typically expected (web browsing, software updates, video streaming) and
+  don't warrant visual emphasis.
+
+This is contrarian to tools like Speedtest.net that use green for download
+(because "fast download is good") and tools like GlassWire that use cyan for
+both. Beholder's framing is security-first, not performance-first.
+
+**Do not swap these back to convention without a deliberate UX conversation.**
+The decision is intentional and aligned with Beholder's positioning as a
+control surface for network security awareness rather than a connection
+speed tool.
+
+`SeverityDanger` is reserved for hard error states (daemon offline, connection
+failures, rule conflicts) and is NOT used for upload emphasis. Coral
+(`ChartInboundStroke`) is the correct attention-grabbing color for
+security-relevant-but-not-critical signals.
+
 ### Per-Process Series
 
 The process list assigns colors from a fixed palette. Colors are assigned deterministically by index — the mapping between process and color is not hardcoded. The "All processes" summary row always uses `Series01`.
@@ -181,9 +209,14 @@ Persistent across all tabs. Left-to-right:
 
 Persistent across all tabs. Left-to-right:
 
-1. **Throughput metrics** — `▲ OUT` with cumulative total and current rate, `▼ IN` with same. Arrow indicators use `TextMuted`, values use `TextPrimary`.
-2. **WAN sparkline** — inline miniature bar/area chart showing recent WAN throughput. Uses `ChartSparklineFill` and `ChartSparklineStroke`. Cumulative label at the right end.
-3. **Device identifier** — far right. "DEV" label in `TextMuted`, device ID in `TextPrimary` (truncated with ellipsis).
+1. **Upload metrics** — `▲ UPLOAD` with Σ cumulative total and current rate.
+   Arrow in coral (`ChartInboundStroke`), values in `TextPrimary`.
+2. **Download metrics** — `▼ DOWNLOAD` with Σ cumulative total and current rate.
+   Arrow in teal (`ChartOutboundStroke`), values in `TextPrimary`.
+3. **Ratio bar** — flexible-width bar (120–300 px) centered in the middle
+   column. Coral fill = upload share, teal fill = download share.
+4. **WAN total** — "WAN Σ" label with cumulative in+out total.
+5. **Device identifier** — "DEV" label with device ID.
 
 Background uses `BackgroundNavBar`.
 
