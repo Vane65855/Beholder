@@ -205,6 +205,7 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 - **Uplink test stub (Beholder.Tests.UplinkStub)** — project stub exists. Reference gRPC server for uplink integration testing. Phase 9.
 - **Alert pipeline (daemon side)** — `NewProcessDetector`, `BinaryHashMonitor`, `ChainIntegrityMonitor` not yet implemented. The `AlertKind` enum and `IAlertStore` interface are defined, but no daemon code generates alerts yet. Phase 7.
 - **AccumulatorTests residual flakiness** — the settle-signal fix eliminated most failures, but ~1-2% timeout rate may persist under extreme CPU contention. The synchronization protocol is correct but depends on thread scheduling. Monitor during future test runs.
+- **UI quality standards enforcement** — Phase 5.4 onward must comply with `docs/UI_QUALITY_STANDARDS.md`. Phases 5.1–5.3 are retroactively compliant (their quality issues were caught and fixed during manual review). Every future UI phase plan must include the verification and reference comparison sections defined in that document.
 - **LiveCharts2 Avalonia 12 support** — a dev build (`2.1.0-dev-247`) is installed in `Beholder.Ui` but not yet used in any view. Evaluate stability before building the Phase 8 map tab against it.
 - **Tmds.DBus.Protocol vulnerability** — force-upgraded to 0.92.0 via explicit `PackageReference` to avoid Avalonia 12's transitive pull of vulnerable 0.90.3. Monitor for Avalonia updates that resolve this transitively.
 
@@ -222,6 +223,8 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 **Notes from earlier phases:** The gRPC service exposes 5 RPCs. `ProtocolConverters` handles Core ↔ Proto type mapping. The UI should use `ProtocolConverters` extension methods, not duplicate the mapping logic. Country enrichment is already done daemon-side (Phase 3.2 decorator), so the UI receives pre-resolved country codes in `CounterSnapshot`.
 
 ### Phase 6 — UI views (one tab per sub-phase)
+
+**Quality gate:** All Phase 6 sub-phases must comply with `docs/UI_QUALITY_STANDARDS.md`. Each sub-phase plan must include the verification (three window sizes, 30s daemon uptime, real data, extreme scenario) and reference comparison sections defined in that document.
 
 - 6.1 — Traffic tab, process list panel (sortable, color-coded, selectable)
 - 6.2 — Traffic tab, graph panel (custom `Canvas`-based streaming area chart, not a charting library)

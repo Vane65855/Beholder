@@ -11,6 +11,10 @@ Before planning, writing, or modifying ANY code you MUST read and internalize:
 3. `docs/PRINCIPLES.md` — SOLID, DRY, CLEAN code, and design rules
 4. This file in its entirety
 
+For any phase that involves UI work, also read:
+
+5. `docs/UI_QUALITY_STANDARDS.md` — responsive sizing, required states, banned patterns, verification requirements
+
 If you skip these documents you WILL produce code that contradicts established patterns and creates unnecessary refactoring work. Read them. Every time.
 
 ## Project Identity

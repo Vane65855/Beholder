@@ -33,6 +33,8 @@
 
 Beholder NMT is a control-surface tool for network monitoring and firewall management. The UI prioritizes information density and dark-environment readability over consumer aesthetics. Its visual DNA draws from network-engineering consoles, security-analyst dashboards, and tools like GlassWire — utilitarian interfaces where every pixel earns its place by communicating state. The design is compact, technical, and structured around rapid comprehension: a user glancing at the screen should immediately know what's flowing, what's blocked, and what needs attention. Color is semantic, not decorative — it encodes severity, state, and data series, never branding or embellishment.
 
+For implementation-level quality requirements — responsive sizing, required UI states, verification procedures, and banned patterns — see [UI_QUALITY_STANDARDS.md](UI_QUALITY_STANDARDS.md). That document governs how designs in this file are built. This file governs what they look like.
+
 ---
 
 ## 2. Design Tokens
