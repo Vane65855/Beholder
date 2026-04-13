@@ -101,8 +101,8 @@ Distinct from severity. These tokens represent daemon connection state, which ma
 |-------|-----------|-------------|-------|
 | `ChartOutboundFill` | `#00BCD4` at 30% opacity | TBD | Area fill under the outbound traffic curve |
 | `ChartOutboundStroke` | `#00BCD4` | TBD | Outbound traffic curve line |
-| `ChartInboundFill` | `#E8734A` at 30% opacity | TBD | Area fill under the inbound traffic curve |
-| `ChartInboundStroke` | `#E8734A` | TBD | Inbound traffic curve line |
+| `ChartInboundFill` | `#A855F7` at 30% opacity | TBD | Area fill under the upload traffic curve |
+| `ChartInboundStroke` | `#A855F7` | TBD | Upload traffic curve line (token name is legacy; see Traffic Direction Color Semantics) |
 | `ChartGridline` | `#1C2530` | TBD | Background grid lines on chart axes |
 | `ChartAxisLabel` | `#5A6370` | TBD | Axis tick labels (time, byte values) |
 | `ChartSparklineFill` | `#00BCD4` at 20% opacity | TBD | WAN throughput bar fill in bottom status strip. Currently matches `AccentPrimary` but tokenized independently for future flexibility. |
@@ -110,31 +110,40 @@ Distinct from severity. These tokens represent daemon connection state, which ma
 
 ### Traffic Direction Color Semantics
 
-Beholder intentionally inverts the speed-test convention for upload/download
-colors:
+Beholder uses two primary colors for directional traffic indicators:
 
-- **Upload (outbound)** uses the coral/orange chart stroke color. Unexpected
-  outbound traffic is a security-relevant signal (data exfiltration, unwanted
-  cloud sync, telemetry). Using the attention-grabbing color for upload
-  surfaces the pattern most likely to matter to a security-conscious user.
+- **Download (inbound)** uses teal (`ChartOutboundStroke`, `#00BCD4`).
+  Downloads are typically expected (web browsing, software updates, video
+  streaming) and teal is calm, cool, non-alarming.
 
-- **Download (inbound)** uses the teal chart stroke color. Downloads are
-  typically expected (web browsing, software updates, video streaming) and
-  don't warrant visual emphasis.
+- **Upload (outbound)** uses purple/violet (`ChartInboundStroke`, `#A855F7`).
+  Unexpected outbound traffic is a security-relevant signal (data
+  exfiltration, unwanted cloud sync, telemetry). Purple is visually
+  distinct from both the neutral text colors AND the severity-danger
+  red, giving upload its own clear semantic space.
 
-This is contrarian to tools like Speedtest.net that use green for download
-(because "fast download is good") and tools like GlassWire that use cyan for
-both. Beholder's framing is security-first, not performance-first.
+This is intentionally contrarian to tools like Speedtest.net (green for
+download) and GlassWire (cyan for both). Beholder's framing is
+security-first, not performance-first.
 
-**Do not swap these back to convention without a deliberate UX conversation.**
-The decision is intentional and aligned with Beholder's positioning as a
-control surface for network security awareness rather than a connection
-speed tool.
+**Historical note:** An earlier design used coral/orange (`#E8734A`) for
+upload. This was changed to purple (`#A855F7`) because coral read as
+"warning/alarm" to some users, overlapping semantically with
+`SeverityWarn` and `SeverityDanger`. Purple carves out a distinct
+visual space for "noteworthy but not an emergency."
 
-`SeverityDanger` is reserved for hard error states (daemon offline, connection
-failures, rule conflicts) and is NOT used for upload emphasis. Coral
-(`ChartInboundStroke`) is the correct attention-grabbing color for
-security-relevant-but-not-critical signals.
+**Token naming note:** The tokens `ChartOutboundStroke` and
+`ChartInboundStroke` have names that no longer match their semantic
+use (teal is used for inbound/download, purple is used for
+outbound/upload). Names are preserved for stability; a future rename
+pass may align names with semantics.
+
+`SeverityDanger` (red) remains reserved for hard error states
+(daemon offline, connection failures, rule conflicts) and is NOT
+used for traffic direction indicators.
+
+**Do not swap these back to convention without a deliberate UX
+conversation.**
 
 ### Per-Process Series
 
@@ -209,16 +218,16 @@ Persistent across all tabs. Left-to-right:
 
 Persistent across all tabs. Left-to-right:
 
-1. **Upload metrics** — `▲ UPLOAD` with Σ cumulative total and current rate.
-   Arrow in coral (`ChartInboundStroke`), values in `TextPrimary`.
-2. **Download metrics** — `▼ DOWNLOAD` with Σ cumulative total and current rate.
+1. **Download metrics** — `▼ DOWNLOAD` with Σ cumulative total and current rate.
    Arrow in teal (`ChartOutboundStroke`), values in `TextPrimary`.
-3. **Ratio bar** — flexible-width bar (120–300 px) centered in the middle
-   column. Coral fill = upload share, teal fill = download share.
+2. **Upload metrics** — `▲ UPLOAD` with Σ cumulative total and current rate.
+   Arrow in purple (`ChartInboundStroke`), values in `TextPrimary`.
+3. **Ratio bar** — flexible-width bar centered in the middle column. Teal
+   fill (left) = download share, purple fill (right) = upload share.
 4. **WAN total** — "WAN Σ" label with cumulative in+out total.
 5. **Device identifier** — "DEV" label with device ID.
 
-Background uses `BackgroundNavBar`.
+Background uses `BackgroundPanel`.
 
 ### Main Content Area
 

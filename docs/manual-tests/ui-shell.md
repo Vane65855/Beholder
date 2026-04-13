@@ -41,8 +41,8 @@
 - [ ] Visible at bottom of window
 - [ ] Background is slightly lighter than main area (#0D1117)
 - [ ] Top border visible as subtle line
-- [ ] "OUT 0 B" visible on the left
-- [ ] "IN 0 B" visible next to OUT
+- [ ] "▼ DOWNLOAD Σ 0 B · 0 B/s" visible on the left (teal arrow)
+- [ ] "▲ UPLOAD Σ 0 B · 0 B/s" visible next to DOWNLOAD (purple arrow)
 - [ ] "DEV-0000" visible on the right in muted text
 
 ## Theme tokens

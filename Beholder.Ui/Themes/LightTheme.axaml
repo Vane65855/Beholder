@@ -81,10 +81,12 @@
     <Color x:Key="ChartOutboundStrokeColor">#00BCD4</Color>
     <SolidColorBrush x:Key="ChartOutboundStroke" Color="{StaticResource ChartOutboundStrokeColor}" />
 
-    <Color x:Key="ChartInboundFillColor">#4DE8734A</Color>
+    <!-- ChartInboundStroke: despite the name, this is the upload/attention color.
+         Name is legacy; semantic flip documented in UI_DESIGN.md §2. -->
+    <Color x:Key="ChartInboundFillColor">#4DA855F7</Color>
     <SolidColorBrush x:Key="ChartInboundFill" Color="{StaticResource ChartInboundFillColor}" />
 
-    <Color x:Key="ChartInboundStrokeColor">#E8734A</Color>
+    <Color x:Key="ChartInboundStrokeColor">#A855F7</Color>
     <SolidColorBrush x:Key="ChartInboundStroke" Color="{StaticResource ChartInboundStrokeColor}" />
 
     <Color x:Key="ChartGridlineColor">#1C2530</Color>

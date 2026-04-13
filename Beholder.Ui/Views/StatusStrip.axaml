@@ -12,20 +12,8 @@
             BorderThickness="0,1,0,0">
         <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" Margin="16,4">
 
-            <!-- Upload metrics -->
-            <TextBlock Grid.Column="0" FontSize="11" VerticalAlignment="Center"
-                       ToolTip.Tip="Upload traffic. Σ = total bytes sent since daemon started. Rate = bytes sent in the last second.">
-                <Run Text="▲ " Foreground="{DynamicResource ChartInboundStroke}" />
-                <Run Text="UPLOAD " Foreground="{DynamicResource TextMuted}" FontWeight="Medium" />
-                <Run Text="Σ " Foreground="{DynamicResource TextMuted}" />
-                <Run Text="{Binding OutboundTotalLabel}" Foreground="{DynamicResource TextPrimary}" FontWeight="Medium" />
-                <Run Text=" · " Foreground="{DynamicResource TextMuted}" />
-                <Run Text="{Binding OutboundRateLabel}" Foreground="{DynamicResource TextMuted}" />
-            </TextBlock>
-
             <!-- Download metrics -->
-            <TextBlock Grid.Column="1" FontSize="11" VerticalAlignment="Center"
-                       Margin="24,0,0,0"
+            <TextBlock Grid.Column="0" FontSize="11" VerticalAlignment="Center"
                        ToolTip.Tip="Download traffic. Σ = total bytes received since daemon started. Rate = bytes received in the last second.">
                 <Run Text="▼ " Foreground="{DynamicResource ChartOutboundStroke}" />
                 <Run Text="DOWNLOAD " Foreground="{DynamicResource TextMuted}" FontWeight="Medium" />
@@ -33,6 +21,18 @@
                 <Run Text="{Binding InboundTotalLabel}" Foreground="{DynamicResource TextPrimary}" FontWeight="Medium" />
                 <Run Text=" · " Foreground="{DynamicResource TextMuted}" />
                 <Run Text="{Binding InboundRateLabel}" Foreground="{DynamicResource TextMuted}" />
+            </TextBlock>
+
+            <!-- Upload metrics -->
+            <TextBlock Grid.Column="1" FontSize="11" VerticalAlignment="Center"
+                       Margin="24,0,0,0"
+                       ToolTip.Tip="Upload traffic. Σ = total bytes sent since daemon started. Rate = bytes sent in the last second.">
+                <Run Text="▲ " Foreground="{DynamicResource ChartInboundStroke}" />
+                <Run Text="UPLOAD " Foreground="{DynamicResource TextMuted}" FontWeight="Medium" />
+                <Run Text="Σ " Foreground="{DynamicResource TextMuted}" />
+                <Run Text="{Binding OutboundTotalLabel}" Foreground="{DynamicResource TextPrimary}" FontWeight="Medium" />
+                <Run Text=" · " Foreground="{DynamicResource TextMuted}" />
+                <Run Text="{Binding OutboundRateLabel}" Foreground="{DynamicResource TextMuted}" />
             </TextBlock>
 
             <!-- Ratio bar (flex-sized in star column) -->
@@ -44,14 +44,14 @@
                     HorizontalAlignment="Stretch"
                     Margin="24,0"
                     MinWidth="100"
-                    ToolTip.Tip="Upload/download ratio. Coral = upload share, teal = download share.">
+                    ToolTip.Tip="Download/upload ratio. Teal = download share, purple = upload share.">
                 <Grid IsVisible="{Binding HasTraffic}">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="{Binding OutboundRatio, Converter={StaticResource RatioToGridLength}}" />
                         <ColumnDefinition Width="{Binding InboundRatio, Converter={StaticResource RatioToGridLength}}" />
+                        <ColumnDefinition Width="{Binding OutboundRatio, Converter={StaticResource RatioToGridLength}}" />
                     </Grid.ColumnDefinitions>
-                    <Rectangle Grid.Column="0" Fill="{DynamicResource ChartInboundStroke}" />
-                    <Rectangle Grid.Column="1" Fill="{DynamicResource ChartOutboundStroke}" />
+                    <Rectangle Grid.Column="0" Fill="{DynamicResource ChartOutboundStroke}" />
+                    <Rectangle Grid.Column="1" Fill="{DynamicResource ChartInboundStroke}" />
                 </Grid>
             </Border>
 
