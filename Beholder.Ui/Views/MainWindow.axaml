@@ -22,6 +22,6 @@
     <Grid RowDefinitions="Auto,*,Auto">
         <views:TopNavBar Grid.Row="0" />
         <ContentControl Grid.Row="1" Content="{Binding ActiveTabContent}" />
-        <views:StatusStrip Grid.Row="2" />
+        <views:StatusStrip Grid.Row="2" DataContext="{Binding StatusStripVm}" />
     </Grid>
 </Window>

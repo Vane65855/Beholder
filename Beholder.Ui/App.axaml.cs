@@ -12,6 +12,7 @@ namespace Beholder.Ui;
 
 public partial class App : Application {
     private DaemonClient? _daemonClient;
+    private DaemonStreamSubscriber? _streamSubscriber;
 
     public override void Initialize() {
         AvaloniaXamlLoader.Load(this);
@@ -28,14 +29,23 @@ public partial class App : Application {
                 TimeProvider.System,
                 loggerFactory.CreateLogger<DaemonClient>());
 
+            _streamSubscriber = new DaemonStreamSubscriber(
+                _daemonClient,
+                loggerFactory.CreateLogger<DaemonStreamSubscriber>());
+
+            var statusStripVm = new StatusStripViewModel(_streamSubscriber);
+
             desktop.MainWindow = new MainWindow {
-                DataContext = new MainWindowViewModel(_daemonClient),
+                DataContext = new MainWindowViewModel(_daemonClient, statusStripVm),
             };
 
-            // Fire-and-forget — ConnectAsync loops internally with backoff
+            // Fire-and-forget — both loops run indefinitely until shutdown
             _ = _daemonClient.ConnectAsync(CancellationToken.None);
+            _ = _streamSubscriber.StartAsync(CancellationToken.None);
 
             desktop.ShutdownRequested += async (_, _) => {
+                if (_streamSubscriber is not null)
+                    await _streamSubscriber.DisposeAsync();
                 if (_daemonClient is not null)
                     await _daemonClient.DisposeAsync();
             };

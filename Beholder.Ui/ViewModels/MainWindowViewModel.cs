@@ -43,8 +43,12 @@ internal partial class MainWindowViewModel : ViewModelBase {
     public string MapLabel => ActiveTab == TabKind.Map ? "[ MAP ]" : "MAP";
     public string ScannerLabel => ActiveTab == TabKind.Scanner ? "[ SCANNER ]" : "SCANNER";
 
-    public MainWindowViewModel(IDaemonClient daemonClient) {
+    public StatusStripViewModel StatusStripVm { get; }
+
+    public MainWindowViewModel(IDaemonClient daemonClient, StatusStripViewModel statusStripVm) {
         ArgumentNullException.ThrowIfNull(daemonClient);
+        ArgumentNullException.ThrowIfNull(statusStripVm);
+        StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         daemonClient.StateChanged += OnDaemonStateChanged;
     }

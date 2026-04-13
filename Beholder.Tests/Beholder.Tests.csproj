@@ -33,6 +33,7 @@
     <ProjectReference Include="..\Beholder.Daemon.GeoIp\Beholder.Daemon.GeoIp.csproj" />
     <ProjectReference Include="..\Beholder.Daemon.Uplink\Beholder.Daemon.Uplink.csproj" />
     <ProjectReference Include="..\Beholder.Tests.UplinkStub\Beholder.Tests.UplinkStub.csproj" />
+    <ProjectReference Include="..\Beholder.Ui\Beholder.Ui.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(OS)' == 'Windows_NT'">

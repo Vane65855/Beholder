@@ -5,53 +5,94 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="28"
              x:Class="Beholder.Ui.Views.StatusStrip"
-             x:DataType="vm:MainWindowViewModel"
+             x:DataType="vm:StatusStripViewModel"
              Background="{DynamicResource BackgroundPanel}">
 
     <Border BorderBrush="{DynamicResource BorderSubtle}"
             BorderThickness="0,1,0,0">
-        <Grid ColumnDefinitions="Auto,*,Auto" Margin="16,4">
+        <Grid ColumnDefinitions="Auto,Auto,*,Auto" Margin="16,4">
 
-            <!-- Throughput metrics -->
+            <!-- OUT metrics -->
             <StackPanel Grid.Column="0" Orientation="Horizontal"
-                        VerticalAlignment="Center" Spacing="16">
-                <StackPanel Orientation="Horizontal" Spacing="4">
-                    <TextBlock Text="OUT"
-                               Foreground="{DynamicResource TextMuted}"
-                               FontSize="11" FontWeight="Medium"
-                               LetterSpacing="1"
-                               VerticalAlignment="Center" />
-                    <TextBlock Text="0 B"
-                               Foreground="{DynamicResource TextSecondary}"
-                               FontSize="11"
-                               VerticalAlignment="Center" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Spacing="4">
-                    <TextBlock Text="IN"
-                               Foreground="{DynamicResource TextMuted}"
-                               FontSize="11" FontWeight="Medium"
-                               LetterSpacing="1"
-                               VerticalAlignment="Center" />
-                    <TextBlock Text="0 B"
-                               Foreground="{DynamicResource TextSecondary}"
-                               FontSize="11"
-                               VerticalAlignment="Center" />
-                </StackPanel>
+                        VerticalAlignment="Center" Spacing="4">
+                <TextBlock Text="▲"
+                           Foreground="{DynamicResource TextMuted}"
+                           FontSize="10"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="OUT"
+                           Foreground="{DynamicResource TextMuted}"
+                           FontSize="11" FontWeight="Medium"
+                           LetterSpacing="1"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="{Binding OutboundTotalLabel}"
+                           Foreground="{DynamicResource TextPrimary}"
+                           FontSize="11"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="{Binding OutboundRateLabel}"
+                           Foreground="{DynamicResource TextSecondary}"
+                           FontSize="11"
+                           VerticalAlignment="Center" />
             </StackPanel>
 
-            <!-- WAN sparkline placeholder -->
-            <Border Grid.Column="1"
-                    Background="{DynamicResource BackgroundPanel}"
-                    Height="14" Margin="24,0"
-                    VerticalAlignment="Center" />
+            <!-- IN metrics -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal"
+                        VerticalAlignment="Center" Spacing="4"
+                        Margin="16,0,0,0">
+                <TextBlock Text="▼"
+                           Foreground="{DynamicResource TextMuted}"
+                           FontSize="10"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="IN"
+                           Foreground="{DynamicResource TextMuted}"
+                           FontSize="11" FontWeight="Medium"
+                           LetterSpacing="1"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="{Binding InboundTotalLabel}"
+                           Foreground="{DynamicResource TextPrimary}"
+                           FontSize="11"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="{Binding InboundRateLabel}"
+                           Foreground="{DynamicResource TextSecondary}"
+                           FontSize="11"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+
+            <!-- WAN sparkline + total -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal"
+                        VerticalAlignment="Center" Margin="24,0"
+                        HorizontalAlignment="Right">
+                <TextBlock Text="WAN"
+                           Foreground="{DynamicResource TextMuted}"
+                           FontSize="11" FontWeight="Medium"
+                           LetterSpacing="1"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0" />
+                <Canvas Width="200" Height="14"
+                        VerticalAlignment="Center">
+                    <Polyline Points="{Binding WanSparklinePoints}"
+                              Stroke="{DynamicResource ChartSparklineStroke}"
+                              StrokeThickness="1.5" />
+                </Canvas>
+                <TextBlock Text="{Binding WanTotalLabel}"
+                           Foreground="{DynamicResource TextPrimary}"
+                           FontSize="11"
+                           VerticalAlignment="Center"
+                           Margin="8,0,0,0" />
+            </StackPanel>
 
             <!-- Device ID -->
-            <TextBlock Grid.Column="2"
-                       Text="DEV-0000"
-                       Foreground="{DynamicResource TextMuted}"
-                       FontSize="11"
-                       LetterSpacing="1"
-                       VerticalAlignment="Center" />
+            <StackPanel Grid.Column="3" Orientation="Horizontal"
+                        VerticalAlignment="Center" Spacing="4">
+                <TextBlock Text="DEV"
+                           Foreground="{DynamicResource TextMuted}"
+                           FontSize="11" FontWeight="Medium"
+                           LetterSpacing="1"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="{Binding DeviceIdLabel}"
+                           Foreground="{DynamicResource TextPrimary}"
+                           FontSize="11"
+                           VerticalAlignment="Center" />
+            </StackPanel>
         </Grid>
     </Border>
 </UserControl>
