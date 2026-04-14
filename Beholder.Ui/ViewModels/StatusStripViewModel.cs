@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Avalonia.Threading;
-using Beholder.Protocol.Local;
 using Beholder.Ui.Helpers;
 using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -13,8 +11,6 @@ internal sealed partial class StatusStripViewModel : ViewModelBase {
     // LERP smoothing factor — 0.3 per tick reaches target in ~3–4 ticks,
     // preventing the bar from jittering during bursty traffic patterns.
     private const double SmoothingFactor = 0.3;
-
-    private readonly Dictionary<string, ProcessTotals> _perProcessTotals = new(StringComparer.Ordinal);
 
     [ObservableProperty]
     private string _outboundTotalLabel = "0 B";
@@ -42,43 +38,25 @@ internal sealed partial class StatusStripViewModel : ViewModelBase {
 
     public double InboundRatio => 1.0 - OutboundRatio;
 
-    public StatusStripViewModel(DaemonStreamSubscriber subscriber) {
-        ArgumentNullException.ThrowIfNull(subscriber);
-        subscriber.CounterBatchReceived += OnCounterBatch;
+    public StatusStripViewModel(ProcessStateService processStateService) {
+        ArgumentNullException.ThrowIfNull(processStateService);
+        processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
     }
 
-    private void OnCounterBatch(CounterBatch batch) {
-        Dispatcher.UIThread.Post(() => UpdateFromBatch(batch));
+    private void OnProcessStatesUpdated(IReadOnlyDictionary<string, ProcessState> states) {
+        Dispatcher.UIThread.Post(() => UpdateFromStates(states));
     }
 
-    internal void UpdateFromBatch(CounterBatch batch) {
-        // Detect daemon restart: if any snapshot's total is less than what we
-        // stored, the daemon reset its counters — clear stale state.
-        foreach (var snapshot in batch.Snapshots) {
-            if (_perProcessTotals.TryGetValue(snapshot.ProcessPath, out var existing)
-                && snapshot.TotalBytesIn < existing.TotalIn) {
-                _perProcessTotals.Clear();
-                break;
-            }
-        }
-
-        // Upsert per-process lifetime totals from this batch
-        foreach (var snapshot in batch.Snapshots) {
-            _perProcessTotals[snapshot.ProcessPath] = new ProcessTotals(
-                snapshot.TotalBytesIn,
-                snapshot.TotalBytesOut);
-        }
-
-        // Machine-wide totals: sum over ALL known processes, not just this batch
+    internal void UpdateFromStates(IReadOnlyDictionary<string, ProcessState> states) {
         long totalIn = 0, totalOut = 0;
-        foreach (var p in _perProcessTotals.Values) {
-            totalIn += p.TotalIn;
-            totalOut += p.TotalOut;
-        }
+        long totalDeltaIn = 0, totalDeltaOut = 0;
 
-        // Rates: sum deltas from this batch only (idle processes have zero delta)
-        var totalDeltaIn = batch.Snapshots.Sum(s => s.DeltaBytesIn);
-        var totalDeltaOut = batch.Snapshots.Sum(s => s.DeltaBytesOut);
+        foreach (var state in states.Values) {
+            totalIn += state.TotalBytesIn;
+            totalOut += state.TotalBytesOut;
+            totalDeltaIn += state.DeltaBytesIn;
+            totalDeltaOut += state.DeltaBytesOut;
+        }
 
         OutboundTotalLabel = ByteFormatter.FormatBytes(totalOut);
         InboundTotalLabel = ByteFormatter.FormatBytes(totalIn);
@@ -101,8 +79,4 @@ internal sealed partial class StatusStripViewModel : ViewModelBase {
         var targetOutRatio = outRate / (double)total;
         OutboundRatio = OutboundRatio * (1 - SmoothingFactor) + targetOutRatio * SmoothingFactor;
     }
-
-    internal int TrackedProcessCount => _perProcessTotals.Count;
-
-    private record ProcessTotals(long TotalIn, long TotalOut);
 }

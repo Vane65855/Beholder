@@ -27,7 +27,8 @@
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Grpc.Net.Client" Version="2.76.0" />
-    <PackageReference Include="LiveChartsCore.SkiaSharpView.Avalonia" Version="2.1.0-dev-247" />
+    <!-- LiveChartsCore removed: incompatible with Avalonia 12 (PinchEvent API removed).
+         Traffic chart uses custom TrafficChartControl per ARCHITECTURE.md. -->
   </ItemGroup>
 
   <ItemGroup>

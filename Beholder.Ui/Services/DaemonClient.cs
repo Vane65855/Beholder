@@ -127,6 +127,34 @@ internal sealed class DaemonClient : IDaemonClient {
         return await _client!.VerifyChainAsync(request, cancellationToken: ct);
     }
 
+    public async Task<GetProcessTimelineResponse> GetProcessTimelineAsync(
+        GetProcessTimelineRequest request, CancellationToken ct) {
+        ArgumentNullException.ThrowIfNull(request);
+        EnsureConnected();
+        return await _client!.GetProcessTimelineAsync(request, cancellationToken: ct);
+    }
+
+    public async Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(
+        GetAggregateTimelineRequest request, CancellationToken ct) {
+        ArgumentNullException.ThrowIfNull(request);
+        EnsureConnected();
+        return await _client!.GetAggregateTimelineAsync(request, cancellationToken: ct);
+    }
+
+    public async Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(
+        GetProcessDestinationsRequest request, CancellationToken ct) {
+        ArgumentNullException.ThrowIfNull(request);
+        EnsureConnected();
+        return await _client!.GetProcessDestinationsAsync(request, cancellationToken: ct);
+    }
+
+    public async Task<GetCountryBreakdownResponse> GetCountryBreakdownAsync(
+        GetCountryBreakdownRequest request, CancellationToken ct) {
+        ArgumentNullException.ThrowIfNull(request);
+        EnsureConnected();
+        return await _client!.GetCountryBreakdownAsync(request, cancellationToken: ct);
+    }
+
     public AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken ct) {
         EnsureConnected();
         return _client!.Subscribe(new SubscribeRequest(), cancellationToken: ct);

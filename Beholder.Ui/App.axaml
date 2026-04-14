@@ -16,6 +16,7 @@
     <Application.Resources>
         <ResourceDictionary>
             <converters:DoubleToGridLengthConverter x:Key="RatioToGridLength" />
+            <converters:SeriesIndexToBrushConverter x:Key="SeriesToBrush" />
             <ResourceDictionary.MergedDictionaries>
                 <ResourceInclude Source="avares://Beholder.Ui/Themes/DarkTheme.axaml" />
             </ResourceDictionary.MergedDictionaries>

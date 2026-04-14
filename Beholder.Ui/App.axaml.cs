@@ -33,10 +33,11 @@ public partial class App : Application {
                 _daemonClient,
                 loggerFactory.CreateLogger<DaemonStreamSubscriber>());
 
-            var statusStripVm = new StatusStripViewModel(_streamSubscriber);
+            var processStateService = new ProcessStateService(_streamSubscriber);
+            var statusStripVm = new StatusStripViewModel(processStateService);
 
             desktop.MainWindow = new MainWindow {
-                DataContext = new MainWindowViewModel(_daemonClient, statusStripVm),
+                DataContext = new MainWindowViewModel(_daemonClient, processStateService, statusStripVm),
             };
 
             // Fire-and-forget — both loops run indefinitely until shutdown

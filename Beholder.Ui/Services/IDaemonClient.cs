@@ -33,5 +33,9 @@ internal interface IDaemonClient : IAsyncDisposable {
     Task<ApplyFirewallRuleResponse> ApplyFirewallRuleAsync(ApplyFirewallRuleRequest request, CancellationToken ct);
     Task<MarkAlertReadResponse> MarkAlertReadAsync(MarkAlertReadRequest request, CancellationToken ct);
     Task<VerifyChainResponse> VerifyChainAsync(VerifyChainRequest request, CancellationToken ct);
+    Task<GetProcessTimelineResponse> GetProcessTimelineAsync(GetProcessTimelineRequest request, CancellationToken ct);
+    Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(GetAggregateTimelineRequest request, CancellationToken ct);
+    Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(GetProcessDestinationsRequest request, CancellationToken ct);
+    Task<GetCountryBreakdownResponse> GetCountryBreakdownAsync(GetCountryBreakdownRequest request, CancellationToken ct);
     Grpc.Core.AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken ct);
 }

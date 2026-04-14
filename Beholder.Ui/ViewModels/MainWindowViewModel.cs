@@ -7,7 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 namespace Beholder.Ui.ViewModels;
 
 internal partial class MainWindowViewModel : ViewModelBase {
-    private readonly TrafficTabViewModel _trafficTab = new();
+    private readonly TrafficTabViewModel _trafficTab;
     private readonly FirewallTabViewModel _firewallTab = new();
     private readonly AlertsTabViewModel _alertsTab = new();
     private readonly MapTabViewModel _mapTab = new();
@@ -45,9 +45,14 @@ internal partial class MainWindowViewModel : ViewModelBase {
 
     public StatusStripViewModel StatusStripVm { get; }
 
-    public MainWindowViewModel(IDaemonClient daemonClient, StatusStripViewModel statusStripVm) {
+    public MainWindowViewModel(
+        IDaemonClient daemonClient,
+        ProcessStateService processStateService,
+        StatusStripViewModel statusStripVm) {
         ArgumentNullException.ThrowIfNull(daemonClient);
+        ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(statusStripVm);
+        _trafficTab = new TrafficTabViewModel(daemonClient, processStateService);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         daemonClient.StateChanged += OnDaemonStateChanged;

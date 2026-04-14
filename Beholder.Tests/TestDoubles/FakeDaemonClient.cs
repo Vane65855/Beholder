@@ -57,6 +57,22 @@ internal sealed class FakeDaemonClient : IDaemonClient {
         VerifyChainRequest request, CancellationToken ct) =>
         Task.FromResult(new VerifyChainResponse());
 
+    public Task<GetProcessTimelineResponse> GetProcessTimelineAsync(
+        GetProcessTimelineRequest request, CancellationToken ct) =>
+        Task.FromResult(new GetProcessTimelineResponse());
+
+    public Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(
+        GetAggregateTimelineRequest request, CancellationToken ct) =>
+        Task.FromResult(new GetAggregateTimelineResponse());
+
+    public Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(
+        GetProcessDestinationsRequest request, CancellationToken ct) =>
+        Task.FromResult(new GetProcessDestinationsResponse());
+
+    public Task<GetCountryBreakdownResponse> GetCountryBreakdownAsync(
+        GetCountryBreakdownRequest request, CancellationToken ct) =>
+        Task.FromResult(new GetCountryBreakdownResponse());
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 

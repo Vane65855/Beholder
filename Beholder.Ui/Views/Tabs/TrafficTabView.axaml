@@ -1,12 +1,200 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Beholder.Ui.ViewModels"
+             xmlns:models="using:Beholder.Ui.Models"
+             xmlns:controls="using:Beholder.Ui.Controls"
              x:Class="Beholder.Ui.Views.Tabs.TrafficTabView"
              x:DataType="vm:TrafficTabViewModel"
              Background="{DynamicResource BackgroundRoot}">
-    <TextBlock Text="Traffic tab content"
-               Foreground="{DynamicResource TextMuted}"
-               FontSize="14"
-               HorizontalAlignment="Center"
-               VerticalAlignment="Center" />
+
+    <Grid ColumnDefinitions="Auto,*">
+
+        <!-- ── Left: Process List Panel ──────────────────────────────── -->
+        <Border Grid.Column="0"
+                MinWidth="200" MaxWidth="350"
+                Background="{DynamicResource BackgroundPanel}"
+                BorderBrush="{DynamicResource BorderSubtle}"
+                BorderThickness="0,0,1,0">
+            <DockPanel>
+                <!-- Header row -->
+                <Grid DockPanel.Dock="Top"
+                      ColumnDefinitions="*,Auto"
+                      Margin="12,10,12,6">
+                    <TextBlock Grid.Column="0"
+                               Text="PROCESS"
+                               FontSize="11"
+                               LetterSpacing="1"
+                               Foreground="{DynamicResource TextMuted}" />
+                    <TextBlock Grid.Column="1"
+                               Text="OUT"
+                               FontSize="11"
+                               LetterSpacing="1"
+                               Foreground="{DynamicResource TextMuted}" />
+                </Grid>
+
+                <Border DockPanel.Dock="Top"
+                        Height="1"
+                        Background="{DynamicResource DividerHorizontal}"
+                        Margin="0,0,0,2" />
+
+                <!-- Process list -->
+                <ListBox ItemsSource="{Binding ProcessList}"
+                         SelectedItem="{Binding SelectedProcess}"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.Styles>
+                        <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="12,6" />
+                            <Setter Property="Cursor" Value="Hand" />
+                            <Setter Property="Background" Value="Transparent" />
+                        </Style>
+                        <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+                        </Style>
+                        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                            <Setter Property="Background" Value="{DynamicResource BackgroundSelected}" />
+                        </Style>
+                    </ListBox.Styles>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:ProcessListItem">
+                            <Grid ColumnDefinitions="14,*,Auto" Height="24">
+                                <!-- Colored series dot -->
+                                <Ellipse Grid.Column="0"
+                                         Width="8" Height="8"
+                                         VerticalAlignment="Center"
+                                         Fill="{Binding SeriesIndex, Converter={StaticResource SeriesToBrush}}" />
+
+                                <!-- Process name -->
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding DisplayName}"
+                                           Foreground="{DynamicResource TextPrimary}"
+                                           FontSize="13"
+                                           VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           Margin="6,0,8,0" />
+
+                                <!-- Total bytes label -->
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding TotalBytesLabel}"
+                                           Foreground="{DynamicResource TextSecondary}"
+                                           FontSize="13"
+                                           VerticalAlignment="Center"
+                                           HorizontalAlignment="Right" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Border>
+
+        <!-- ── Right: Chart Area ─────────────────────────────────────── -->
+        <DockPanel Grid.Column="1" Margin="0">
+
+            <!-- Top bar: chart title + view switcher -->
+            <Grid DockPanel.Dock="Top"
+                  ColumnDefinitions="*,Auto"
+                  Margin="16,10,16,6">
+                <TextBlock Grid.Column="0"
+                           Text="OUTBOUND  ·  BYTES/SEC"
+                           FontSize="11"
+                           LetterSpacing="1"
+                           Foreground="{DynamicResource TextMuted}"
+                           VerticalAlignment="Center" />
+
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="2">
+                    <Button Content="GRAPH"
+                            FontSize="11"
+                            MinWidth="64"
+                            Padding="10,4"
+                            Background="Transparent"
+                            Foreground="{DynamicResource AccentPrimary}"
+                            BorderBrush="{DynamicResource BorderSubtle}"
+                            BorderThickness="1"
+                            CornerRadius="3"
+                            Cursor="Hand"
+                            IsEnabled="True" />
+                    <Button Content="COLS"
+                            FontSize="11"
+                            MinWidth="64"
+                            Padding="10,4"
+                            Background="Transparent"
+                            Foreground="{DynamicResource TextMuted}"
+                            BorderBrush="{DynamicResource BorderSubtle}"
+                            BorderThickness="1"
+                            CornerRadius="3"
+                            IsEnabled="False"
+                            ToolTip.Tip="Column view — coming soon" />
+                    <Button Content="MAP"
+                            FontSize="11"
+                            MinWidth="64"
+                            Padding="10,4"
+                            Background="Transparent"
+                            Foreground="{DynamicResource TextMuted}"
+                            BorderBrush="{DynamicResource BorderSubtle}"
+                            BorderThickness="1"
+                            CornerRadius="3"
+                            IsEnabled="False"
+                            ToolTip.Tip="Map view — coming soon" />
+                </StackPanel>
+            </Grid>
+
+            <!-- Chart + state overlays -->
+            <Grid>
+                <!-- Custom traffic chart -->
+                <controls:TrafficChartControl SeriesData="{Binding ChartData}"
+                                             HorizontalAlignment="Stretch"
+                                             VerticalAlignment="Stretch"
+                                             Margin="8,0,8,8" />
+
+                <!-- Loading overlay -->
+                <StackPanel IsVisible="{Binding IsLoading}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="8">
+                    <TextBlock Text="Connecting to daemon..."
+                               Foreground="{DynamicResource TextMuted}"
+                               FontSize="14"
+                               HorizontalAlignment="Center" />
+                </StackPanel>
+
+                <!-- Empty overlay -->
+                <StackPanel IsVisible="{Binding IsEmpty}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="4">
+                    <TextBlock Text="No traffic data yet"
+                               Foreground="{DynamicResource TextSecondary}"
+                               FontSize="14"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="Traffic will appear when processes access the network."
+                               Foreground="{DynamicResource TextMuted}"
+                               FontSize="12"
+                               HorizontalAlignment="Center" />
+                </StackPanel>
+
+                <!-- Error overlay -->
+                <Border IsVisible="{Binding HasError}"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,8,0,0"
+                        Padding="12,6"
+                        Background="{DynamicResource BackgroundElevated}"
+                        CornerRadius="4"
+                        BorderBrush="{DynamicResource SeverityWarn}"
+                        BorderThickness="1">
+                    <TextBlock Text="{Binding ErrorMessage}"
+                               Foreground="{DynamicResource SeverityWarn}"
+                               FontSize="12" />
+                </Border>
+            </Grid>
+        </DockPanel>
+    </Grid>
 </UserControl>
