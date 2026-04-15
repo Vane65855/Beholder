@@ -6,6 +6,9 @@
 # dotenv files
 .env
 
+# Claude Code session workspace (plan files, task outputs)
+.claude/
+
 # Debug logs
 beholder-debug.log
 

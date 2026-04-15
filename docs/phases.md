@@ -1,7 +1,7 @@
 # Beholder NMT — Project Status & Phase Plan
 
 **Last updated:** 2026-04-15
-**Current checkpoint:** Phase 4.6b (full rollup cascade)
+**Current checkpoint:** Phase 5.4.1 (Traffic tab corrective fixes)
 **Test count:** 457
 
 ---
@@ -252,6 +252,34 @@ Existing tests updated: `SqliteTrafficStoreTests` (rename pass + `CreateBucket` 
 - **Self-traffic filter interacts cleanly.** Filtered events never enter raw, so no Beholder-process rows exist in any tier.
 
 **Files NOT touched:** Any UI file, `.proto` files, `BroadcastService`, `BeholderLocalService`, `SelfTrafficFilter`, `RecordingOptions`.
+
+---
+
+### Phase 5.4.1 — Traffic tab corrective fixes ✅
+
+**Purpose:** Fix three user-reported bugs in the Traffic tab and one latent rendering artifact, then ensure the UI properly seeds historical data on reconnect so the tab doesn't start from zero when the UI is closed and reopened while the daemon runs.
+
+**Key components:**
+- `Beholder.Ui/ViewModels/TrafficTabViewModel.cs` — `SortProcessList` rewritten from indexer-assignment insertion sort to `ObservableCollection.Move`-based reorder (fixes selection deselecting on every tick). Idle-process filter added to `UpdateFromStates` via new `RemoveProcess` helper — processes whose 5-minute rolling window is all zeros are dropped from the display list. `OnSelectedProcessChanged` falls back to `_allProcessesItem` when selection is cleared (e.g., selected process goes idle and is removed). `LoadHistoricalDataAsync` removed — replaced by `ProcessStateService.SeedAsync` which seeds per-process state from daemon historical data before the live stream starts.
+- `Beholder.Ui/Views/Tabs/TrafficTabView.axaml` — Chart title changed from `OUTBOUND · BYTES/SEC` to `TRAFFIC · BYTES/SEC` to match the two-directional (download + upload) chart content.
+- `Beholder.Ui/Controls/TrafficChartControl.cs` — Catmull-Rom spline overshoot clamped via `ClampY` helper. Both `StrokeSmoothPath` and `FillSmoothArea` now clamp control-point Y coordinates to `[top, baselineY]`, preventing curves from dipping below the 0 B/s baseline on downward transitions or bulging above the data envelope on upward transitions.
+- `Beholder.Ui/Services/ProcessStateService.cs` — New `SeedAsync` method: on daemon connect, calls `GetSnapshotAsync` to populate per-process `TotalBytesIn/Out`, then calls `GetProcessTimelineAsync` per process to backfill the 5-minute `RecentDeltaIn/Out` circular buffers from `traffic_raw`. Constructor now takes `IDaemonClient` as a second parameter.
+- `Beholder.Ui/Services/DaemonStreamSubscriber.cs` — New `OnConnected` async callback property, invoked between `WaitForConnected` and `ConsumeStream`. Wired to `ProcessStateService.SeedAsync` in `App.axaml.cs`. Ensures seeding completes before any live `CounterBatch` events arrive, eliminating the chart race condition.
+- `Beholder.Ui/App.axaml.cs` — Passes `_daemonClient` to `ProcessStateService` constructor; wires `_streamSubscriber.OnConnected = ct => processStateService.SeedAsync(ct)`.
+
+**Tests added:** 3 regression tests in `TrafficTabViewModelTests.cs`:
+- `SelectedProcess_SurvivesReSortFromStateUpdate` — asserts `replaceCount == 0` via `CollectionChanged` observation (the hard regression guard against indexer-assignment sort).
+- `IdleProcess_RemovedFromList_OnSubsequentStateUpdate` — all-zero rolling window → process removed.
+- `SelectedProcess_GoesIdle_FallsBackToAllProcesses` — null write-back from idle-process removal → `SelectedProcess` recovers to `_allProcessesItem`.
+
+**Design decisions:**
+- **Move-based sort, never indexer assignment.** `ObservableCollection.Move` raises `NotifyCollectionChangedAction.Move`, which Avalonia's `SelectingItemsControl` handles by keeping the selection attached to the moved item. Indexer assignment (`coll[i] = x`) raises `Replace`, which clears selection. A code comment at the top of `SortProcessList` documents this invariant.
+- **Idle filter at the ViewModel, not the service.** `ProcessStateService` keeps tracking all processes (including idle ones) because `StatusStripViewModel` needs cumulative totals for every-process-ever-seen. The idle display filter is a view concern, not a data concern.
+- **Reconnect seeding runs before the live stream.** The `OnConnected` callback in `DaemonStreamSubscriber` fires between `WaitForConnected` and `ConsumeStream`, so the first live `CounterBatch` arrives into pre-populated circular buffers. No race condition, no chart flash-then-clear.
+- **Per-process historical backfill is O(N) RPCs.** Each process gets a `GetProcessTimelineAsync(path, now-5min, now, 1s)` call (~300 rows from `traffic_raw` over local IPC). At N=50 processes, total seeding time is ~50-100 ms. Best-effort: individual failures don't block the live stream.
+- **Chart clamp, not monotone cubic.** `ClampY(y, top, baselineY)` via `Math.Clamp` is the minimum-diff fix. A full monotone cubic interpolant (Fritsch-Carlson) would also eliminate overshoot but changes the curve character; the clamp preserves the existing Catmull-Rom aesthetic while constraining extrema.
+
+**Files NOT touched:** Any daemon file, `.proto` files, theme files, `ProcessState.cs`, `ProcessListItem.cs`. The fixes are purely UI-layer (ViewModel, View, Control, Services).
 
 ---
 

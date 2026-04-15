@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(echo \"EXIT:$?\")",
-      "Bash(dotnet build:*)",
-      "Bash(\"Beholder.Tests\\\\bin\\\\Debug\\\\net10.0\\\\Beholder.Tests.exe\")"
-    ]
-  }
-}
