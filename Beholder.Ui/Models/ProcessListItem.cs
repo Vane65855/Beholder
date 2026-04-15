@@ -19,10 +19,22 @@ internal sealed partial class ProcessListItem : ObservableObject {
     public int SeriesIndex { get; }
 
     [ObservableProperty]
-    private long _totalBytesOut;
+    private long _recentBytesIn;
 
     [ObservableProperty]
-    private string _totalBytesLabel = "0 B";
+    private long _recentBytesOut;
+
+    [ObservableProperty]
+    private string _recentInLabel = "0 B";
+
+    [ObservableProperty]
+    private string _recentOutLabel = "0 B";
+
+    /// <summary>
+    /// Combined recent in+out traffic — used as the sort key for the process list.
+    /// Derived, not observable; callers read it after <see cref="UpdateTraffic"/>.
+    /// </summary>
+    public long SortKey => RecentBytesIn + RecentBytesOut;
 
     public ProcessListItem(string processPath, string displayName, bool isAll = false) {
         ProcessPath = processPath;
@@ -31,8 +43,10 @@ internal sealed partial class ProcessListItem : ObservableObject {
         SeriesIndex = isAll ? 1 : SeriesColorHelper.GetSeriesIndex(processPath);
     }
 
-    public void UpdateTraffic(long totalBytesOut) {
-        TotalBytesOut = totalBytesOut;
-        TotalBytesLabel = ByteFormatter.FormatBytes(totalBytesOut);
+    public void UpdateTraffic(long recentBytesIn, long recentBytesOut) {
+        RecentBytesIn = recentBytesIn;
+        RecentBytesOut = recentBytesOut;
+        RecentInLabel = ByteFormatter.FormatBytes(recentBytesIn);
+        RecentOutLabel = ByteFormatter.FormatBytes(recentBytesOut);
     }
 }

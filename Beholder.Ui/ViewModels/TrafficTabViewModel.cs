@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media;
@@ -16,12 +15,11 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace Beholder.Ui.ViewModels;
 
 internal sealed partial class TrafficTabViewModel : ViewModelBase {
-    private const int MaxVisibleSeries = 8;
-
     private readonly IDaemonClient _daemonClient;
     private readonly ProcessStateService _processStateService;
     private readonly Dictionary<string, ProcessListItem> _processLookup = new(StringComparer.Ordinal);
     private readonly ProcessListItem _allProcessesItem;
+    private IReadOnlyDictionary<string, ProcessState>? _lastStates;
     private bool _historicalDataLoaded;
 
     [ObservableProperty]
@@ -78,6 +76,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
     }
 
     internal void UpdateFromStates(IReadOnlyDictionary<string, ProcessState> states) {
+        _lastStates = states;
         IsLoading = false;
 
         if (states.Count == 0) {
@@ -86,99 +85,143 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         }
         IsEmpty = false;
 
-        // Upsert process list items
-        long allTotalOut = 0;
+        // Upsert process list items using recent-window sums for display + sort.
+        long allRecentIn = 0;
+        long allRecentOut = 0;
         foreach (var kvp in states) {
-            allTotalOut += kvp.Value.TotalBytesOut;
+            var state = kvp.Value;
+            long recentIn = 0;
+            long recentOut = 0;
+            for (var i = 0; i < state.RecentDeltaIn.Count; i++)
+                recentIn += state.RecentDeltaIn[i];
+            for (var i = 0; i < state.RecentDeltaOut.Count; i++)
+                recentOut += state.RecentDeltaOut[i];
+
+            allRecentIn += recentIn;
+            allRecentOut += recentOut;
+
+            if (recentIn + recentOut == 0) {
+                // Process is idle across its whole recent window — drop it from
+                // the display list. The aggregate totals above already included
+                // its zero contribution, and RebuildChartData/AggregateAll still
+                // iterates the `states` dictionary directly, so the chart's
+                // "All processes" view is unaffected by this display filter.
+                RemoveProcess(kvp.Key);
+                continue;
+            }
 
             if (!_processLookup.TryGetValue(kvp.Key, out var item)) {
-                item = new ProcessListItem(kvp.Key, kvp.Value.DisplayName);
+                item = new ProcessListItem(kvp.Key, state.DisplayName);
                 _processLookup[kvp.Key] = item;
                 ProcessList.Add(item);
             }
-            item.UpdateTraffic(kvp.Value.TotalBytesOut);
+            item.UpdateTraffic(recentIn, recentOut);
         }
 
-        _allProcessesItem.UpdateTraffic(allTotalOut);
+        _allProcessesItem.UpdateTraffic(allRecentIn, allRecentOut);
 
         SortProcessList();
         RebuildChartData(states);
     }
 
     private void SortProcessList() {
-        // Simple insertion sort — process list is typically small (< 50 items)
-        for (var i = 2; i < ProcessList.Count; i++) {
-            var current = ProcessList[i];
-            var j = i - 1;
-            while (j >= 1 && ProcessList[j].TotalBytesOut < current.TotalBytesOut) {
-                ProcessList[j + 1] = ProcessList[j];
-                j--;
-            }
-            ProcessList[j + 1] = current;
+        // CRITICAL: never use indexer assignment (ProcessList[x] = y) on this
+        // ObservableCollection — it fires NotifyCollectionChangedAction.Replace,
+        // which causes Avalonia's ListBox to clear its SelectedItem when the
+        // replaced index was the user's current selection. Use Move/Add/Remove
+        // exclusively so identity is preserved and selection follows the item.
+        if (ProcessList.Count <= 2) return;
+
+        // Index 0 (_allProcessesItem) is pinned. Sort indices 1.. by SortKey desc
+        // into a plain List copy, then reorder ProcessList via Move calls.
+        var sorted = new List<ProcessListItem>(ProcessList.Count - 1);
+        for (var i = 1; i < ProcessList.Count; i++)
+            sorted.Add(ProcessList[i]);
+        sorted.Sort(static (a, b) => b.SortKey.CompareTo(a.SortKey));
+
+        for (var targetIndex = 1; targetIndex <= sorted.Count; targetIndex++) {
+            var desired = sorted[targetIndex - 1];
+            var currentIndex = ProcessList.IndexOf(desired);
+            if (currentIndex != targetIndex)
+                ProcessList.Move(currentIndex, targetIndex);
         }
     }
 
     partial void OnSelectedProcessChanged(ProcessListItem? value) {
-        // Rebuild chart with current data when selection changes
+        if (value is null) {
+            // Selection was cleared — typically because the selected process
+            // went idle and was removed from ProcessList, so Avalonia's
+            // SelectingItemsControl wrote null back. Fall back to the pinned
+            // "All processes" entry; this reassignment re-enters the handler
+            // with the ALL item and takes the rebuild branch below.
+            SelectedProcess = _allProcessesItem;
+            return;
+        }
+        if (_lastStates is not null)
+            RebuildChartData(_lastStates);
+    }
+
+    private void RemoveProcess(string processPath) {
+        if (_processLookup.Remove(processPath, out var item))
+            ProcessList.Remove(item);
     }
 
     private void RebuildChartData(IReadOnlyDictionary<string, ProcessState> states) {
         var selected = SelectedProcess;
         var showAll = selected is null || selected.IsAll;
 
+        // ChartOutboundStroke = teal (download). ChartInboundStroke = purple (upload).
+        // Token names are legacy — see DarkTheme.axaml §Data Visualization.
+        var downloadColor = ThemeColorHelper.Resolve("ChartOutboundStrokeColor");
+        var uploadColor = ThemeColorHelper.Resolve("ChartInboundStrokeColor");
+
+        long[] downloadValues;
+        long[] uploadValues;
+
         if (showAll) {
-            ChartData = BuildStackedSeries(states);
+            (downloadValues, uploadValues) = AggregateAll(states);
+        } else if (states.TryGetValue(selected!.ProcessPath, out var state)) {
+            downloadValues = BufferToArray(state.RecentDeltaIn);
+            uploadValues = BufferToArray(state.RecentDeltaOut);
         } else {
-            ChartData = BuildSingleSeries(selected!, states);
+            ChartData = [];
+            return;
         }
+
+        ChartData = [
+            new ChartSeries("Download", downloadValues, downloadColor),
+            new ChartSeries("Upload", uploadValues, uploadColor),
+        ];
     }
 
-    private List<ChartSeries> BuildStackedSeries(IReadOnlyDictionary<string, ProcessState> states) {
-        var result = new List<ChartSeries>();
-        var ranked = states.Values
-            .OrderByDescending(s => s.TotalBytesOut)
-            .Take(MaxVisibleSeries)
-            .ToList();
-
-        foreach (var state in ranked) {
-            var recentOut = state.RecentDeltaOut.ToList();
-            var seriesIndex = SeriesColorHelper.GetSeriesIndex(state.ProcessPath);
-            var color = ResolveSeriesColor(seriesIndex);
-            result.Add(new ChartSeries(state.DisplayName, recentOut, color));
-        }
-
-        // "Other" series: sum remaining processes
-        if (states.Count > MaxVisibleSeries) {
-            var otherProcesses = states.Values
-                .OrderByDescending(s => s.TotalBytesOut)
-                .Skip(MaxVisibleSeries)
-                .ToList();
-
-            if (otherProcesses.Count > 0) {
-                var sampleCount = otherProcesses.Max(s => s.RecentDeltaOut.Count);
-                var summed = new long[sampleCount];
-                foreach (var p in otherProcesses) {
-                    for (var i = 0; i < p.RecentDeltaOut.Count; i++)
-                        summed[i] += p.RecentDeltaOut[i];
-                }
-                var otherColor = ResolveSeriesColor(7);
-                result.Add(new ChartSeries("Other", summed, otherColor));
-            }
-        }
-
+    private static long[] BufferToArray(CircularBuffer<long> buffer) {
+        var result = new long[buffer.Count];
+        for (var i = 0; i < buffer.Count; i++)
+            result[i] = buffer[i];
         return result;
     }
 
-    private static List<ChartSeries> BuildSingleSeries(
-        ProcessListItem selected,
+    private static (long[] Download, long[] Upload) AggregateAll(
         IReadOnlyDictionary<string, ProcessState> states) {
-        if (!states.TryGetValue(selected.ProcessPath, out var state))
-            return [];
-
-        var recentOut = state.RecentDeltaOut.ToList();
-        var seriesIndex = SeriesColorHelper.GetSeriesIndex(state.ProcessPath);
-        var color = ResolveSeriesColor(seriesIndex);
-        return [new ChartSeries(state.DisplayName, recentOut, color)];
+        // Right-align: find max buffer length, treat missing older samples as 0.
+        var max = 0;
+        foreach (var s in states.Values) {
+            if (s.RecentDeltaIn.Count > max) max = s.RecentDeltaIn.Count;
+            if (s.RecentDeltaOut.Count > max) max = s.RecentDeltaOut.Count;
+        }
+        var download = new long[max];
+        var upload = new long[max];
+        foreach (var s in states.Values) {
+            var inBuf = s.RecentDeltaIn;
+            var outBuf = s.RecentDeltaOut;
+            var inOffset = max - inBuf.Count;
+            var outOffset = max - outBuf.Count;
+            for (var i = 0; i < inBuf.Count; i++)
+                download[inOffset + i] += inBuf[i];
+            for (var i = 0; i < outBuf.Count; i++)
+                upload[outOffset + i] += outBuf[i];
+        }
+        return (download, upload);
     }
 
     private async Task LoadHistoricalDataAsync() {
@@ -202,31 +245,25 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
                 return;
             }
 
-            var values = new long[response.Points.Count];
-            for (var i = 0; i < response.Points.Count; i++)
-                values[i] = response.Points[i].BytesOut;
+            var downloadValues = new long[response.Points.Count];
+            var uploadValues = new long[response.Points.Count];
+            for (var i = 0; i < response.Points.Count; i++) {
+                downloadValues[i] = response.Points[i].BytesIn;
+                uploadValues[i] = response.Points[i].BytesOut;
+            }
 
-            var strokeColor = ResolveThemeColor("ChartOutboundStrokeColor");
-            ChartData = [new ChartSeries("All processes", values, strokeColor)];
+            // Same semantic flip as RebuildChartData — see DarkTheme.axaml.
+            var downloadColor = ThemeColorHelper.Resolve("ChartOutboundStrokeColor");
+            var uploadColor = ThemeColorHelper.Resolve("ChartInboundStrokeColor");
+            ChartData = [
+                new ChartSeries("Download", downloadValues, downloadColor),
+                new ChartSeries("Upload", uploadValues, uploadColor),
+            ];
             IsLoading = false;
         } catch (Exception) {
-            // Historical data is best-effort — live streaming will fill in
+            // Historical data is best-effort — live streaming will fill in.
             _historicalDataLoaded = true;
             IsLoading = false;
         }
-    }
-
-    private static Color ResolveSeriesColor(int seriesIndex) {
-        var key = SeriesColorHelper.GetColorResourceKey(seriesIndex);
-        return ResolveThemeColor(key);
-    }
-
-    private static Color ResolveThemeColor(string resourceKey) {
-        var app = Avalonia.Application.Current;
-        if (app is not null
-            && Avalonia.Controls.ResourceNodeExtensions.TryFindResource(app, resourceKey, out var obj)
-            && obj is Color color)
-            return color;
-        return Colors.White;
     }
 }

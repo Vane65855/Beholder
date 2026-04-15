@@ -16,16 +16,23 @@
                 BorderBrush="{DynamicResource BorderSubtle}"
                 BorderThickness="0,0,1,0">
             <DockPanel>
-                <!-- Header row -->
+                <!-- Header row — columns mirror the item template for alignment -->
                 <Grid DockPanel.Dock="Top"
-                      ColumnDefinitions="*,Auto"
+                      ColumnDefinitions="14,*,Auto,Auto"
                       Margin="12,10,12,6">
-                    <TextBlock Grid.Column="0"
+                    <TextBlock Grid.Column="1"
                                Text="PROCESS"
                                FontSize="11"
                                LetterSpacing="1"
-                               Foreground="{DynamicResource TextMuted}" />
-                    <TextBlock Grid.Column="1"
+                               Foreground="{DynamicResource TextMuted}"
+                               Margin="6,0,8,0" />
+                    <TextBlock Grid.Column="2"
+                               Text="IN"
+                               FontSize="11"
+                               LetterSpacing="1"
+                               Foreground="{DynamicResource TextMuted}"
+                               Margin="0,0,8,0" />
+                    <TextBlock Grid.Column="3"
                                Text="OUT"
                                FontSize="11"
                                LetterSpacing="1"
@@ -63,7 +70,7 @@
                     </ListBox.Styles>
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="models:ProcessListItem">
-                            <Grid ColumnDefinitions="14,*,Auto" Height="24">
+                            <Grid ColumnDefinitions="14,*,Auto,Auto" Height="24">
                                 <!-- Colored series dot -->
                                 <Ellipse Grid.Column="0"
                                          Width="8" Height="8"
@@ -79,13 +86,34 @@
                                            TextTrimming="CharacterEllipsis"
                                            Margin="6,0,8,0" />
 
-                                <!-- Total bytes label -->
-                                <TextBlock Grid.Column="2"
-                                           Text="{Binding TotalBytesLabel}"
-                                           Foreground="{DynamicResource TextSecondary}"
-                                           FontSize="13"
-                                           VerticalAlignment="Center"
-                                           HorizontalAlignment="Right" />
+                                <!-- IN: teal arrow + recent-window bytes in.
+                                     ChartOutboundStroke token is semantically the
+                                     download/teal color (name is legacy — see DarkTheme.axaml). -->
+                                <StackPanel Grid.Column="2"
+                                            Orientation="Horizontal"
+                                            VerticalAlignment="Center"
+                                            Margin="0,0,8,0">
+                                    <TextBlock Text="▼ "
+                                               FontSize="13"
+                                               Foreground="{DynamicResource ChartOutboundStroke}" />
+                                    <TextBlock Text="{Binding RecentInLabel}"
+                                               FontSize="13"
+                                               Foreground="{DynamicResource TextSecondary}" />
+                                </StackPanel>
+
+                                <!-- OUT: purple arrow + recent-window bytes out.
+                                     ChartInboundStroke token is semantically the
+                                     upload/purple color (name is legacy). -->
+                                <StackPanel Grid.Column="3"
+                                            Orientation="Horizontal"
+                                            VerticalAlignment="Center">
+                                    <TextBlock Text="▲ "
+                                               FontSize="13"
+                                               Foreground="{DynamicResource ChartInboundStroke}" />
+                                    <TextBlock Text="{Binding RecentOutLabel}"
+                                               FontSize="13"
+                                               Foreground="{DynamicResource TextSecondary}" />
+                                </StackPanel>
                             </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
@@ -101,7 +129,7 @@
                   ColumnDefinitions="*,Auto"
                   Margin="16,10,16,6">
                 <TextBlock Grid.Column="0"
-                           Text="OUTBOUND  ·  BYTES/SEC"
+                           Text="TRAFFIC  ·  BYTES/SEC"
                            FontSize="11"
                            LetterSpacing="1"
                            Foreground="{DynamicResource TextMuted}"
@@ -132,17 +160,6 @@
                             CornerRadius="3"
                             IsEnabled="False"
                             ToolTip.Tip="Column view — coming soon" />
-                    <Button Content="MAP"
-                            FontSize="11"
-                            MinWidth="64"
-                            Padding="10,4"
-                            Background="Transparent"
-                            Foreground="{DynamicResource TextMuted}"
-                            BorderBrush="{DynamicResource BorderSubtle}"
-                            BorderThickness="1"
-                            CornerRadius="3"
-                            IsEnabled="False"
-                            ToolTip.Tip="Map view — coming soon" />
                 </StackPanel>
             </Grid>
 
