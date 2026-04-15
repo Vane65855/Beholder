@@ -1,8 +1,8 @@
 # Beholder NMT — Project Status & Phase Plan
 
 **Last updated:** 2026-04-15
-**Current checkpoint:** Phase 4.7 (self-traffic filter)
-**Test count:** 434
+**Current checkpoint:** Phase 4.6b (full rollup cascade)
+**Test count:** 457
 
 ---
 
@@ -174,7 +174,7 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 
 **Design decisions:**
 - Replaced `Accumulator` entirely rather than bolting on a second channel. Historical traffic data IS the primary data, not secondary.
-- Named table `traffic_buckets_10s` (not `traffic_buckets`) to document it as one tier in a future cascade. Phase 4.6b adds `traffic_raw` (1s, 10 min retention), Phase 4.6c adds coarser tiers.
+- Named table `traffic_buckets_10s` (not `traffic_buckets`) to document it as one tier in a future cascade. Phase 4.6b (merged) adds `traffic_raw` at 1 s and the coarser `_1m`/`_10m`/`_1h` tiers in a single unified rollup cascade.
 - Rollup invariant: `SUM(bytes)` over a time range must be identical regardless of which tier is consulted. Coarser tiers are built by summing finer-tier rows.
 - Destination eviction flushes non-zero bucket bytes to SQLite before removing — never evict data that has not been persisted.
 - Process lifetime totals are NOT reconstructed from SQLite on restart. They start from zero; the UI already handles daemon-reset detection.
@@ -204,6 +204,54 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 **Files NOT touched:** `TrafficEngine.cs`, `SqliteTrafficStore.cs`, `BroadcastService.cs`, any UI or protocol file — the filter is invisible to every layer downstream of ingestion, and to every layer upstream of the protocol wire.
 
 **Future work:** The v1 filter is deliberately one switch. Granular recording policy (per-path exclusion lists, localhost-only, port ranges) is deferred to the Settings UI phase and will live behind the same `"Recording"` config section.
+
+---
+
+### Phase 4.6b — Full rollup cascade (merged 4.6b + 4.6c) ✅
+
+**Purpose:** Add the remaining four tiers above and below `traffic_buckets_10s` so every historical query hits the most efficient resolution for its time range. Previously split into 4.6b (raw tier) + 4.6c (coarser tiers); merged because the tier-selection logic, rollup service, and invariant enforcement — the expensive parts — exist only once the cascade has more than one tier.
+
+**Key components:**
+- `Beholder.Daemon/RollupOptions.cs` — `RollupOptions` class with `RetentionPreset` enum (`Balanced` / `Compact`), `RollupTier` record with nullable `TimeSpan?` retention. Preset bound from `appsettings.json` `"Rollup"` section via `IOptionsMonitor<RollupOptions>`.
+- `Beholder.Daemon/Storage/TierSelector.cs` — Pure static helper: picks the coarsest tier whose `BucketSeconds ≤ resolution` and `Retention ≥ range`. Fallback: finest tier whose retention covers the range. Terminal tier (`_1h`, null retention = infinite) always covers.
+- `Beholder.Daemon/Pipeline/RollupService.cs` — New hosted service. Cascades via `INSERT ... SELECT ... GROUP BY` per adjacent tier pair. Watermark via `MAX(bucket_start_ms) + target_bucket_ms`. Null-retention tiers skip pruning. First-tick catch-up runs all pairs regardless of interval.
+- `Beholder.Daemon/Storage/DatabaseInitializer.cs` — 4 new tables (`traffic_raw`, `traffic_buckets_1m`, `traffic_buckets_10m`, `traffic_buckets_1h`) + 12 new indexes. Idempotent.
+- `Beholder.Daemon/Pipeline/TrafficEngine.cs` — Switched from 10-second to 1-second raw flush. Each tick writes one raw bucket per active destination. `BucketBytesIn/Out` → `RawBytesIn/Out`. Engine no longer owns pruning or bucket-cadence config.
+- `Beholder.Daemon/Storage/SqliteTrafficStore.cs` — Writes go to `traffic_raw` via `WriteRawBucketsAsync`. All query methods internally call `TierSelector.Select` to pick the table. `PruneAsync` removed from `ITrafficStore` (pruning moved to `RollupService`).
+- `Beholder.Daemon/TrafficStorageOptions.cs` — Shrunk to `IdleDestinationTimeoutMinutes` + `IdleProcessTimeoutHours` only. `RetentionDays`, `PruneIntervalHours`, `BucketSeconds` removed (those concerns moved to `RollupOptions`/`RollupService`).
+- `Beholder.Daemon/Program.cs` — `Configure<RollupOptions>(GetSection("Rollup"))`. `RollupService` registered as hosted after `FlowEventPipeline` for startup ordering.
+- `docs/ARCHITECTURE.md` — New ~60-line "Storage Rollup Architecture" subsection: cascade diagram, rollup invariant statement, tier-selection rule, watermark strategy, both presets with storage tables, nullable terminal retention, future `RetentionOptions.MaxDataAge` forward hook.
+
+**Tier retentions (Balanced preset, default):**
+
+| Tier | Bucket size | Retention | Rollup interval |
+|---|---|---|---|
+| `traffic_raw` | 1 s | 10 min | 10 s |
+| `traffic_buckets_10s` | 10 s | 7 d | 1 min |
+| `traffic_buckets_1m` | 1 min | 14 d | 10 min |
+| `traffic_buckets_10m` | 10 min | 1 y | 1 h |
+| `traffic_buckets_1h` | 1 h | ∞ (never prune) | — |
+
+Compact preset differs only in retention: `_10s=3d`, `_1m=7d`, `_10m=90d`, `_1h=∞`. Storage: ~1.4 GB year 1 (Balanced) vs ~580 MB (Compact) at ~100 active destinations.
+
+**Tests added:** 26 new tests across 3 new test files:
+- `RollupOptionsPresetTests.cs` (7) — both presets' tier shapes, nullable terminal invariant, preset switching, bucket-seconds equality guard.
+- `TierSelectionTests.cs` (9) — live range, coarse resolution, medium/long/historical ranges, fallback cases, range-beyond-retention.
+- `RollupServiceTests.cs` (10) — empty raw, raw→10s single/multi-process, full cascade, **rollup invariant** (SUM equality across all retained tiers), watermark resume, retention prune, null-retention skip, partial bucket not rolled, first-tick catch-up.
+
+Existing tests updated: `SqliteTrafficStoreTests` (rename pass + `CreateBucket` default to `bucketSeconds: 1`), `TrafficEngineTests` (6 bucket-flush tests → 7 raw-flush tests adapted to 1-second cadence), `FakeTrafficStore` (interface alignment).
+
+**Design decisions:**
+- **Engine writes raw, service rolls up.** One write path (raw), one derivation path (cascades). The engine is now unaware of tiers; it just writes 1-second buckets and produces CounterSnapshot batches.
+- **Uniform schema across all five tiers.** Same columns everywhere. Tier selection is a table-name swap.
+- **Tier selection inside the store.** `ITrafficStore.Get*Async` signatures unchanged. `BeholderLocalService` and the gRPC protocol are unaware of tiering.
+- **Watermark = `MAX(bucket_start_ms) + target_bucket_ms`.** The naive `MAX` approach double-counted the last target bucket's source rows (caught by `Watermark_ResumesFromMaxTarget`). Fixed: watermark points to the NEXT expected target bucket.
+- **Two hand-tuned presets, not per-tier config.** Exposing individual tier retentions in `appsettings.json` creates invalid combinations that break tier selection. The two presets are hand-checked. Power users switch via `"Rollup": { "Preset": "Compact" }`; full customization deferred to a future settings page.
+- **Terminal tier retention is `TimeSpan?`.** Null means "never prune". Both presets use null on `_1h`. ~90 MB/year unbounded growth. Future `RetentionOptions.MaxDataAge` knob caps it.
+- **No data migration on upgrade.** Coarser tiers start empty and populate forward. Pre-existing `_10s` data queryable via its (now 7-day) retention window.
+- **Self-traffic filter interacts cleanly.** Filtered events never enter raw, so no Beholder-process rows exist in any tier.
+
+**Files NOT touched:** Any UI file, `.proto` files, `BroadcastService`, `BeholderLocalService`, `SelfTrafficFilter`, `RecordingOptions`.
 
 ---
 
@@ -246,13 +294,21 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 - **Historical data is the primary data, not secondary.** The original plan was to bolt a `TrafficRecorder` alongside the `Accumulator`. But the Accumulator was destroying per-destination detail — the very data the system exists to capture. Replacing it with `TrafficEngine` eliminated the false dichotomy between "live" and "historical" data. One pipeline, two output cadences.
 - **Unbounded in-memory state is an architectural bug.** The initial `DestinationAggregate` design had cumulative `TotalBytesIn/Out` fields that grow forever. The fix: store only tick deltas and bucket deltas in memory, evict idle entries, and let SQL aggregation serve cumulative queries.
 - **`ArgumentException.ThrowIfNullOrWhiteSpace` throws `ArgumentNullException` for null inputs.** xUnit `Assert.Throws<ArgumentException>` requires exact type match and will not catch a subclass. Null test cases must use separate `[Fact]` methods with `Assert.Throws<ArgumentNullException>`.
-- **Name tables for their tier, not their function.** `traffic_buckets_10s` (not `traffic_buckets`) documents that this is the first tier in a rollup cascade. When `traffic_buckets_1m` appears in Phase 4.6c, the naming is self-explanatory.
+- **Name tables for their tier, not their function.** `traffic_buckets_10s` (not `traffic_buckets`) documents that this is the first tier in a rollup cascade. When `traffic_buckets_1m` appears in Phase 4.6b (merged), the naming is self-explanatory.
 
 ### Phase 4.5
 
 - **Multi-tick test synchronization requires a settle signal.** The first `DriveTickAsync` call works because the accumulator hasn't entered its wait loop yet. Subsequent calls race: the accumulator may re-enter `WaitForEventOrTickAsync` and consume a signal before the test installs one. Fix: install a settle signal before `Advance` and wait for it after the batch, guaranteeing the accumulator is parked before the next call.
 - **xUnit v3 runs test classes in parallel by default.** No `[Collection]` attributes or `xunit.runner.json` overrides means all test classes execute concurrently. Any process-global side effect (connection pools, static state, temp file cleanup) will cause cross-test interference.
 - **Shared test doubles eliminate duplication without coupling.** Extracting `FakeServerCallContext`, `FakeFirewallController`, etc. into `TestDoubles/` removed 4 identical copies from 3 test files without creating inappropriate dependencies.
+
+### Phase 4.6b
+
+- **Watermark = MAX + bucket_ms, not just MAX.** Using `MAX(bucket_start_ms)` from the target tier as the lower bound for the next rollup re-rolls source rows from the last already-populated target bucket, double-counting them. The correct watermark is `MAX(bucket_start_ms) + target_bucket_ms` — the first NEW target bucket to populate. For an empty target, start from 0. Caught by `Watermark_ResumesFromMaxTarget` test (expected 400, got 500 before fix).
+- **Tier retentions should match the tier's natural query domain.** `_10s` serves queries from 30 min to ~5 hours via the tier-selection rule. Retaining it for 30 days (the Phase 4.6a default) wastes ~2 GB on rows nobody queries — 3× more than the entire rest of the cascade. Shortening `_10s` to 7 days (Balanced preset) cuts total year-1 storage from ~4.5 GB to ~1.4 GB with zero UI regression on any standard chart view.
+- **Raw-tier pruning shares a tick with cascade.** The rollup service cascades THEN prunes in the same tick. After a time advance past raw's 10-minute retention, raw is empty — but the cascade has already propagated the data to `_10s`. Post-cascade assertions must not query raw if the time advance exceeds raw retention.
+- **`INSERT ... SELECT ... GROUP BY` is the right cascade primitive.** Each rollup step is a single SQL statement: no intermediate materialization, no row-by-row iteration, no C# object construction for the moved data. SQLite's query planner handles the grouping and insertion efficiently, and the ACID transaction guarantees consistency if the daemon crashes mid-rollup.
+- **Presets beat individual config knobs.** Exposing per-tier retention in config creates invalid combinations that break the tier-selection contract. Two hand-checked presets (Balanced / Compact) give users a meaningful choice without the combinatorial risk. Full customization deferred to a future settings page with validation.
 
 ---
 
@@ -266,6 +322,7 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 | 4 | 2026-04-12 | gRPC service, broadcast, full daemon | Stale XML docs on `BeholderLocalService`; counter logging too verbose; `GetSnapshot` missing exception handling; `BeholderLocalService` not registered as singleton; `SqliteFirewallRuleStore` not behind interface; missing persist-failure rollback test; missing `VerifyChain` infrastructure test; duplicated test fakes across 3 files; `AlertKind` ordinal alignment unverified | Updated docs; `LogDebug`; added try/catch; singleton registration; extracted `IFirewallRuleStore`; added rollback test; added infra test; extracted shared test doubles; verified alignment |
 | 4.5 | 2026-04-12 | Test stability (flaky failures) | `AccumulatorTests` ~2% timeout in multi-tick tests (settle signal race); `SqliteConnection.ClearAllPools()` ~3% `ObjectDisposedException` under parallel execution | Settle signal protocol in `DriveTickAsync`; `Pooling=false` in test `ConnectionFactory`/`DatabaseInitializer`; removed all `ClearAllPools` calls |
 | 4.6a | 2026-04-13 | Historical traffic storage | `Accumulator` discarded all per-destination detail; no SQLite persistence; DNS cache in-memory only; `ArgumentNullException` vs `ArgumentException` in record test cases | Replaced `Accumulator` with `TrafficEngine`; added `traffic_buckets_10s` + `dns_cache` tables; 4 new query RPCs; bounded in-memory state with eviction; split null test cases into separate `[Fact]` methods |
+| 4.6b | 2026-04-15 | Full rollup cascade (5-tier) | Watermark double-count bug (`MAX` vs `MAX + bucket_ms`); raw-tier prune timing in invariant test assertion | Fixed watermark to next-bucket boundary; excluded pruned raw tier from invariant assertion; tier retentions tuned to natural query domains (7d/14d instead of 30d/90d) |
 
 ---
 
@@ -279,7 +336,6 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 - **Uplink test stub (Beholder.Tests.UplinkStub)** — project stub exists. Reference gRPC server for uplink integration testing. Phase 9.
 - **Alert pipeline (daemon side)** — `NewProcessDetector`, `BinaryHashMonitor`, `ChainIntegrityMonitor` not yet implemented. The `AlertKind` enum and `IAlertStore` interface are defined, but no daemon code generates alerts yet. Phase 7.
 - **TrafficEngineTests residual flakiness** — inherited from AccumulatorTests. The settle-signal fix eliminated most failures, but ~1-2% timeout rate may persist under extreme CPU contention. Monitor during future test runs.
-- **Tiered rollup storage (Phase 4.6b/c)** — Phase 4.6a implements only the `traffic_buckets_10s` tier (10s resolution, 30-day retention). Phase 4.6b will add `traffic_raw` (1s, 10 min retention) with raw→10s rollup. Phase 4.6c will add `traffic_buckets_1m`, `traffic_buckets_10m`, `traffic_buckets_1h` with full cascade. Until then, all queries hit the single `_10s` table regardless of requested time range.
 - **UI quality standards enforcement** — Phase 5.4 onward must comply with `docs/UI_QUALITY_STANDARDS.md`. Phases 5.1–5.3 are retroactively compliant (their quality issues were caught and fixed during manual review). Every future UI phase plan must include the verification and reference comparison sections defined in that document.
 - **LiveCharts2 Avalonia 12 support** — a dev build (`2.1.0-dev-247`) is installed in `Beholder.Ui` but not yet used in any view. Evaluate stability before building the Phase 8 map tab against it.
 - **Tmds.DBus.Protocol vulnerability** — force-upgraded to 0.92.0 via explicit `PackageReference` to avoid Avalonia 12's transitive pull of vulnerable 0.90.3. Monitor for Avalonia updates that resolve this transitively.
@@ -287,6 +343,25 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 ---
 
 ## 6. Remaining Phases
+
+### Phase 5.4.2 — Time-range selector UI
+
+Wires the Traffic tab's LAST-N dropdown (currently a placeholder displaying "LAST 5M") to the tiered query layer from Phase 4.6b. User picks `last 5m / 1h / 24h / 7d / 30d / custom`; the daemon picks the appropriate tier internally via `ITrafficStore`, the UI stays unaware of tier selection.
+
+**UI changes:** the selector becomes a live control; the chart reloads on selection change via a new historical query against the chosen range; the IN/OUT list columns scale their rolling-window sum to match the selected range (rolling-window semantics from Phase 5.4.1 are preserved — the window length is simply the user-selected range rather than the fixed 5 min).
+
+**Depends on:** Phase 4.6b landed. Before 4.6b, only the `_10s` tier exists and ranges beyond ~30 days cannot be served.
+
+### Checkpoint — Historical Traffic Feature-Complete
+
+Not a code deliverable. A project milestone marking the point at which the Traffic tab is feature-complete for historical exploration. At this point the user can: watch live traffic streaming at 1-second fidelity for the last 5 minutes, scrub back through any time range up to ~2 years via the range selector, see tier-aware aggregations for each range with the rollup invariant holding, and trust the data is free of Beholder's self-traffic.
+
+**Deferred items** — to be picked up in later phases or at the user's direction:
+- Event pins (mark "this is when I started the VPN") — deferred to a later UX pass.
+- Destination breakdown panel (hosts/ports inside a selected process) — deferred; data is available via `GetProcessDestinationsAsync` but no panel exists yet.
+- Per-tier retention tuning in `appsettings.json` — current values are hard-coded in `TrafficStorageOptions` C# defaults.
+
+**Decision point.** Natural pause to validate the historical-traffic story before moving to the Firewall tab (Phase 5.5 / 6.4) or revisiting any architectural questions surfaced during 4.6b / 5.4.2 implementation (e.g., rollup cadence, eviction timing under load, or the `TrafficStorageOptions` binding wart flagged in Phase 4.7's plan).
 
 ### Phase 5 — UI shell and daemon connection
 

@@ -80,8 +80,8 @@ verification.
 - `Counter` lines appear within ~2 seconds of generating traffic.
 - You see **one line per active process per second**, not dozens per second — roughly `N` lines per tick where `N` is the number of processes that moved bytes in that second.
 - Each `Counter` line has a real process name, nonzero Δ or total bytes, and a connection count.
-- A process with no activity in a given second produces no line that second — the Accumulator omits inactive processes from the batch by design.
-- Country is not shown in the Counter log template. GeoIP still runs in the Accumulator (per-country bytes-out is carried inside `CounterSnapshot.BytesOutByCountry`), but surfacing it is a UI-phase concern.
+- A process with no activity in a given second produces no line that second — the TrafficEngine omits inactive processes from the batch by design.
+- Country is not shown in the Counter log template. GeoIP still runs in the TrafficEngine (per-country bytes-out is carried inside `CounterSnapshot.BytesOutByCountry`), but surfacing it is a UI-phase concern.
 - Shutdown is silent (no stack traces), and restart works with no orphaned-session errors.
 
 ## Known non-issues

@@ -228,7 +228,75 @@ CREATE TABLE traffic_buckets_10s (
 -- Indexes: (process_path, bucket_start_ms), (bucket_start_ms), (country, bucket_start_ms)
 ```
 
-Phase 4.6a: this is the only tier. All historical queries hit this table regardless of time range. Phase 4.6b/c will add finer and coarser tiers with cascading rollup. The rollup invariant: `SUM(bytes)` over a time range returns identical totals regardless of which tier is consulted, because coarser tiers are built by summing finer-tier rows.
+One of five tiers in the rollup cascade. See "Storage Rollup Architecture" below for the cascade's shape, the rollup invariant, and tier-selection rules.
+
+### Storage Rollup Architecture
+
+Traffic data is stored across five tiers of progressively coarser time resolution. The engine writes 1-second buckets directly into `traffic_raw`; the `RollupService` background hosted service cascades rows upward through each adjacent pair on that tier's own cadence.
+
+```
+  traffic_raw           1 s buckets    ┐
+     │                                 │
+     ▼ rollup every 10 s               │
+  traffic_buckets_10s   10 s buckets   │  SELECT routes to the
+     │                                 │  coarsest tier whose
+     ▼ rollup every 1 min              │  bucketSeconds ≤ requested
+  traffic_buckets_1m    1 min buckets  │  resolution AND whose
+     │                                 │  retention covers the range
+     ▼ rollup every 10 min             │
+  traffic_buckets_10m   10 min buckets │
+     │                                 │
+     ▼ rollup every 1 hour             │
+  traffic_buckets_1h    1 hour buckets ┘  (terminal; retention = ∞ by default)
+```
+
+All five tiers share an identical column schema — tier selection is just a table-name swap. Indexes on `(process_path, bucket_start_ms)`, `(bucket_start_ms)`, and `(country, bucket_start_ms)` exist on every tier.
+
+**Rollup invariant.** For any time range `[t0, t1]` and any pair of tiers `A`, `B` where both retain the range, `SUM(bytes_in + bytes_out)` from `A` equals the same sum from `B`. The cascade preserves this by design: each rollup step is a single `INSERT ... SELECT ... GROUP BY process_path, process_name, remote_address, remote_port, target_bucket_start`, summing `bytes_in` / `bytes_out` across source rows. Enforced by `Beholder.Tests/RollupServiceTests.cs → RollupInvariant_Holds_AcrossAllTiers`.
+
+**Tier selection rule.** When a query arrives at `SqliteTrafficStore`, the store delegates to `TierSelector.Select(tiers, from, resolution, now)`:
+
+1. Find all tiers whose `BucketSeconds ≤ resolution.TotalSeconds` AND whose `Retention` covers `now - from`.
+2. Among those, return the **coarsest** (largest `BucketSeconds`), minimizing rows scanned.
+3. If no tier satisfies both constraints, fall back to the **finest** tier whose retention covers the range. The served data's granularity is the tier's native bucket size, not the caller's requested resolution.
+4. If no tier retains the range (impossible when a null-retention terminal tier exists), return the last tier.
+
+Queries without a resolution parameter (`GetProcessDestinationsAsync`, `GetCountryBreakdownAsync`) use a pseudo-resolution of `(to - from) / 300` with a 1-second floor, matching timeline-query tier selection for the same range.
+
+**Watermark.** The rollup service does not maintain a watermark table. Each cascade step queries `SELECT MAX(bucket_start_ms) FROM target_tier` to find where the target left off, then processes source rows with `bucket_start_ms >= watermark AND bucket_start_ms < aligned_now`, where `aligned_now = floor(now / target_bucket_ms) * target_bucket_ms`. This design is self-correcting across daemon restarts — the service always resumes from the target's own history — and adds only a microsecond `MAX` lookup per tick (the target tier is indexed on `bucket_start_ms`). Partial target buckets are never rolled; only fully-closed target windows cross the aligned-now boundary.
+
+**First-tick catch-up.** After startup, the first rollup tick runs every cascade pair regardless of each tier's `RollupInterval`. This absorbs rollup ticks that would have fired while the daemon was stopped. Subsequent ticks respect each source tier's interval (10 s / 1 min / 10 min / 1 hour for raw / `_10s` / `_1m` / `_10m` respectively; the terminal tier has zero interval).
+
+**Retention presets.** The shipped `RollupOptions` class provides two hand-tuned presets, selected via `Preset` bound from the `"Rollup"` section of `appsettings.json`:
+
+| Tier | Balanced (default) | Compact |
+|---|---|---|
+| `traffic_raw` | 10 min | 10 min |
+| `traffic_buckets_10s` | 7 days | 3 days |
+| `traffic_buckets_1m` | 14 days | 7 days |
+| `traffic_buckets_10m` | 365 days | 90 days |
+| `traffic_buckets_1h` | ∞ (never prune) | ∞ (never prune) |
+| **Year-1 footprint** | ~1.4 GB | ~580 MB |
+
+**Balanced** is for users who want full historical fidelity without thinking about storage. **Compact** is for users who'd rather pay less storage at the cost of shorter zoom-in headroom on older data. Both presets share identical bucket sizes; only retention differs.
+
+Per-tier retention is **not** individually user-configurable in Phase 4.6b. Individual overrides could create combinations that break the tier-selection contract (e.g., a user setting `_10s` to 60 days would shadow `_1m` for mid-range queries and waste query cost). The two presets are hand-checked to leave tier selection's routing intact. A future settings UI will expose only the preset picker, not per-tier knobs.
+
+**Terminal tier retention is nullable.** `RollupTier.Retention` is `TimeSpan?`; `null` means "never prune", and the rollup service skips pruning that tier entirely. Both presets use `null` on `_1h`, so the hourly tier grows unbounded by default (~90 MB/year at typical usage). Users who want a hard ceiling on history will use the planned `RetentionOptions.MaxDataAge` (see below).
+
+**Future `RetentionOptions` hook.** A planned future class — not implemented in Phase 4.6b — will expose a single user-facing "max data age" cap, defaulting to `null` (infinite). When set, it applies as a `min()` cap on every tier's preset-derived retention:
+
+```
+effective_retention[tier] = min(tier.Retention, RetentionOptions.MaxDataAge)
+```
+
+The two controls compose naturally: `Balanced + Infinite` (default) = keep everything forever at decreasing resolution; `Compact + 30 days` = aggressive storage floor with no data older than a month in any tier; `Balanced + 1 year` = detailed history with a hard ceiling. Do **not** add per-tier retention customization ahead of this work — the single `MaxDataAge` knob is the designed entry point.
+
+**No data migration on upgrade.** On first startup after Phase 4.6b lands, the new coarser tiers (`_1m` / `_10m` / `_1h`) are empty. They begin populating forward from that point. Existing `traffic_buckets_10s` data remains queryable via the `_10s` tier's retention window but is not backfilled into coarser tiers — the rollup cascade propagates naturally going forward.
+
+**Self-traffic filter interaction.** The Phase 4.7 self-traffic filter runs at ingestion before the `Channel<FlowEvent>`, so filtered events never enter any tier. Beholder's own processes are absent from every tier regardless of preset.
+
+**Cross-references.** See `Beholder.Daemon/RollupOptions.cs` for the preset definitions, `Beholder.Daemon/Storage/TierSelector.cs` for the selection rule, `Beholder.Daemon/Pipeline/RollupService.cs` for the cascade service, and `Beholder.Tests/RollupServiceTests.cs` / `TierSelectionTests.cs` / `RollupOptionsPresetTests.cs` for the invariant's enforcement.
 
 ### dns_cache (persistent hostname-to-IP mappings)
 

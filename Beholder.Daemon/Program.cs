@@ -65,6 +65,8 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<TrafficStorageOptions>();
     builder.Services.Configure<RecordingOptions>(
         builder.Configuration.GetSection("Recording"));
+    builder.Services.Configure<RollupOptions>(
+        builder.Configuration.GetSection("Rollup"));
 
     // Broadcast service must be registered BEFORE the pipeline so its StartAsync
     // runs first and subscribes to ISnapshotBatchSource.OnSnapshotBatch before
@@ -75,6 +77,11 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<FlowEventPipeline>();
     builder.Services.AddSingleton<ISnapshotBatchSource>(sp => sp.GetRequiredService<FlowEventPipeline>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<FlowEventPipeline>());
+
+    // RollupService must start after FlowEventPipeline so the first rollup
+    // tick runs against raw data the engine has already begun producing.
+    builder.Services.AddSingleton<RollupService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<RollupService>());
 
     builder.Services.AddSingleton<BeholderLocalService>();
 }

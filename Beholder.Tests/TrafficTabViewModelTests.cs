@@ -10,7 +10,7 @@ public class TrafficTabViewModelTests {
         var subscriber = new DaemonStreamSubscriber(
             fakeClient,
             NullLogger<DaemonStreamSubscriber>.Instance);
-        var service = new ProcessStateService(subscriber);
+        var service = new ProcessStateService(subscriber, fakeClient);
         return new TrafficTabViewModel(fakeClient, service);
     }
 

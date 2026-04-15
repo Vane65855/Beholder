@@ -10,14 +10,14 @@ public class ProcessStateServiceTests {
         var subscriber = new DaemonStreamSubscriber(
             fakeClient,
             NullLogger<DaemonStreamSubscriber>.Instance);
-        var service = new ProcessStateService(subscriber);
+        var service = new ProcessStateService(subscriber, fakeClient);
         return (service, subscriber);
     }
 
     [Fact]
     public void Ctor_NullSubscriber_Throws() =>
         Assert.Throws<ArgumentNullException>("subscriber",
-            () => new ProcessStateService(null!));
+            () => new ProcessStateService(null!, new FakeDaemonClient()));
 
     [Fact]
     public void OnCounterBatch_SingleProcess_TracksState() {

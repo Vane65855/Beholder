@@ -1,22 +1,35 @@
 using Beholder.Core;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Options;
 
 namespace Beholder.Daemon.Storage;
 
 /// <summary>
-/// SQLite-backed implementation of <see cref="ITrafficStore"/>. Stores per-destination
-/// traffic buckets in the <c>traffic_buckets_10s</c> table and serves aggregated queries
-/// for timelines, destination breakdowns, and country summaries.
+/// SQLite-backed implementation of <see cref="ITrafficStore"/>. Writes per-destination
+/// 1-second raw buckets into <c>traffic_raw</c>, and serves tier-aware aggregated
+/// queries over the full rollup cascade. Tier selection is delegated to
+/// <see cref="TierSelector"/>; the SQL body of each query method is identical
+/// across tiers — only the table name changes.
 /// </summary>
 internal sealed class SqliteTrafficStore : ITrafficStore {
     private readonly ConnectionFactory _connectionFactory;
+    private readonly IOptionsMonitor<RollupOptions> _options;
+    private readonly TimeProvider _timeProvider;
 
-    public SqliteTrafficStore(ConnectionFactory connectionFactory) {
+    public SqliteTrafficStore(
+        ConnectionFactory connectionFactory,
+        IOptionsMonitor<RollupOptions> options,
+        TimeProvider timeProvider
+    ) {
         ArgumentNullException.ThrowIfNull(connectionFactory);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         _connectionFactory = connectionFactory;
+        _options = options;
+        _timeProvider = timeProvider;
     }
 
-    public async Task WriteBucketsAsync(
+    public async Task WriteRawBucketsAsync(
         IReadOnlyList<TrafficBucket> buckets,
         CancellationToken cancellationToken
     ) {
@@ -29,7 +42,7 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO traffic_buckets_10s
+            INSERT INTO traffic_raw
                 (process_path, process_name, remote_address, remote_port,
                  hostname, country, bytes_in, bytes_out, bucket_start_ms, bucket_seconds)
             VALUES
@@ -80,12 +93,14 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         var resolutionMs = (long)resolution.TotalMilliseconds;
         if (resolutionMs <= 0) throw new ArgumentOutOfRangeException(nameof(resolution));
 
+        var tier = SelectTierForTimeline(from, resolution);
+
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT (bucket_start_ms / $resolutionMs) * $resolutionMs AS ts,
                    SUM(bytes_in), SUM(bytes_out)
-            FROM traffic_buckets_10s
+            FROM {tier.TableName}
             WHERE process_path = $processPath
               AND bucket_start_ms >= $fromMs
               AND bucket_start_ms < $toMs
@@ -108,16 +123,18 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
     ) {
         ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
 
+        var tier = SelectTierForRange(from, to);
+
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT remote_address,
                    MAX(hostname),
                    MAX(country),
                    SUM(bytes_in),
                    SUM(bytes_out),
                    COUNT(DISTINCT remote_port)
-            FROM traffic_buckets_10s
+            FROM {tier.TableName}
             WHERE process_path = $processPath
               AND bucket_start_ms >= $fromMs
               AND bucket_start_ms < $toMs
@@ -152,12 +169,14 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         var resolutionMs = (long)resolution.TotalMilliseconds;
         if (resolutionMs <= 0) throw new ArgumentOutOfRangeException(nameof(resolution));
 
+        var tier = SelectTierForTimeline(from, resolution);
+
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT (bucket_start_ms / $resolutionMs) * $resolutionMs AS ts,
                    SUM(bytes_in), SUM(bytes_out)
-            FROM traffic_buckets_10s
+            FROM {tier.TableName}
             WHERE bucket_start_ms >= $fromMs
               AND bucket_start_ms < $toMs
             GROUP BY ts
@@ -175,11 +194,13 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         DateTimeOffset to,
         CancellationToken cancellationToken
     ) {
+        var tier = SelectTierForRange(from, to);
+
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT country, SUM(bytes_in), SUM(bytes_out)
-            FROM traffic_buckets_10s
+            FROM {tier.TableName}
             WHERE bucket_start_ms >= $fromMs
               AND bucket_start_ms < $toMs
             GROUP BY country
@@ -200,13 +221,34 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         return results;
     }
 
-    public async Task<long> PruneAsync(DateTimeOffset cutoff, CancellationToken cancellationToken) {
-        using var connection = _connectionFactory.CreateConnection();
-        using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM traffic_buckets_10s WHERE bucket_start_ms < $cutoffMs;";
-        command.Parameters.AddWithValue("$cutoffMs", cutoff.ToUnixTimeMilliseconds());
+    private RollupTier SelectTierForTimeline(DateTimeOffset from, TimeSpan resolution) =>
+        TierSelector.Select(
+            _options.CurrentValue.Tiers,
+            from,
+            resolution,
+            _timeProvider.GetUtcNow());
 
-        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    /// <summary>
+    /// Tier selection for queries with no resolution parameter
+    /// (<see cref="GetProcessDestinationsAsync"/>, <see cref="GetCountryBreakdownAsync"/>).
+    /// Treats the query as if the caller wanted ~300 points of temporal
+    /// granularity — the same heuristic timeline queries use implicitly through
+    /// their resolution parameter. This keeps tier selection consistent between
+    /// timeline and aggregate queries over the same range, and avoids picking
+    /// the coarsest tier (which has the slowest rollup cadence and may be
+    /// missing recent data).
+    /// </summary>
+    private RollupTier SelectTierForRange(DateTimeOffset from, DateTimeOffset to) {
+        var now = _timeProvider.GetUtcNow();
+        var range = to - from;
+        if (range < TimeSpan.Zero) range = TimeSpan.Zero;
+        var pseudoResolution = TimeSpan.FromTicks(
+            Math.Max(range.Ticks / 300, TimeSpan.TicksPerSecond));
+        return TierSelector.Select(
+            _options.CurrentValue.Tiers,
+            from,
+            pseudoResolution,
+            now);
     }
 
     private static async Task<IReadOnlyList<TrafficTimePoint>> ReadTimePointsAsync(

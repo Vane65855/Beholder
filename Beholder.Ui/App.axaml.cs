@@ -33,7 +33,8 @@ public partial class App : Application {
                 _daemonClient,
                 loggerFactory.CreateLogger<DaemonStreamSubscriber>());
 
-            var processStateService = new ProcessStateService(_streamSubscriber);
+            var processStateService = new ProcessStateService(_streamSubscriber, _daemonClient);
+            _streamSubscriber.OnConnected = ct => processStateService.SeedAsync(ct);
             var statusStripVm = new StatusStripViewModel(processStateService);
 
             desktop.MainWindow = new MainWindow {

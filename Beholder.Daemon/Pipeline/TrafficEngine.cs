@@ -6,17 +6,19 @@ using Microsoft.Extensions.Logging;
 namespace Beholder.Daemon.Pipeline;
 
 /// <summary>
-/// Replaces the <c>Accumulator</c>: consumes <see cref="FlowEvent"/> records from a
-/// channel and produces TWO outputs from the same enriched event stream:
+/// Consumes <see cref="FlowEvent"/> records from a channel and produces TWO
+/// outputs from the same enriched event stream:
 ///
 /// 1. Per-second <see cref="CounterSnapshot"/> batches for the live IPC stream
-///    (in-memory, ephemeral), preserving the old Accumulator contract.
-/// 2. Per-10-second <see cref="TrafficBucket"/> rows persisted to SQLite, enabling
-///    all historical traffic queries.
+///    (in-memory, ephemeral).
+/// 2. Per-second <see cref="TrafficBucket"/> rows persisted to <c>traffic_raw</c>
+///    via <see cref="ITrafficStore.WriteRawBucketsAsync"/>. The rollup service
+///    cascades these into coarser tiers.
 ///
-/// In-memory state holds only the active working set: destinations currently
-/// accumulating into the open bucket, plus per-process session-scoped lifetime
-/// totals. Everything else is a SQL query against <c>traffic_buckets_10s</c>.
+/// The engine holds only the active working set in memory: destinations
+/// currently accumulating into the open raw bucket, plus per-process
+/// session-scoped lifetime totals. Everything else is a SQL query against the
+/// tiered storage.
 /// </summary>
 internal sealed class TrafficEngine {
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(1);
@@ -36,9 +38,7 @@ internal sealed class TrafficEngine {
     private readonly SemaphoreSlim _lock = new(1, 1);
     private TaskCompletionSource? _waitingForTick;
 
-    private int _ticksSinceLastBucketFlush;
-    private DateTimeOffset _currentBucketStart;
-    private DateTimeOffset _lastPruneTime;
+    private DateTimeOffset _currentRawBucketStart;
 
     public TrafficEngine(
         ChannelReader<FlowEvent> reader,
@@ -82,13 +82,12 @@ internal sealed class TrafficEngine {
     /// </summary>
     public async Task RunAsync(CancellationToken cancellationToken) {
         var now = _timeProvider.GetUtcNow();
-        _currentBucketStart = AlignToBucketBoundary(now, _options.BucketSeconds);
-        _lastPruneTime = now;
+        _currentRawBucketStart = AlignToSecondBoundary(now);
         var nextFlush = now + TickInterval;
 
         _logger.LogInformation(
-            "TrafficEngine loop starting with {TickInterval} tick, {BucketSeconds}s bucket",
-            TickInterval, _options.BucketSeconds);
+            "TrafficEngine loop starting with {TickInterval} tick, 1s raw flush",
+            TickInterval);
 
         try {
             while (!cancellationToken.IsCancellationRequested) {
@@ -101,23 +100,7 @@ internal sealed class TrafficEngine {
 
                 now = _timeProvider.GetUtcNow();
                 if (now >= nextFlush) {
-                    await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
-                    try {
-                        FlushTick(now);
-                    } finally {
-                        _lock.Release();
-                    }
-
-                    _ticksSinceLastBucketFlush++;
-
-                    if (_ticksSinceLastBucketFlush >= _options.BucketSeconds) {
-                        await FlushBucketAsync(now, cancellationToken).ConfigureAwait(false);
-                        _ticksSinceLastBucketFlush = 0;
-                        _currentBucketStart = AlignToBucketBoundary(now, _options.BucketSeconds);
-                    }
-
-                    await MaybePruneAsync(now, cancellationToken).ConfigureAwait(false);
-
+                    await FlushTickAndRawAsync(now, cancellationToken).ConfigureAwait(false);
                     nextFlush = now + TickInterval;
                     continue;
                 }
@@ -127,14 +110,8 @@ internal sealed class TrafficEngine {
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             // Expected on shutdown.
         } finally {
-            // Final flush: persist any remaining bucket data before stopping.
-            await _lock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
-            try {
-                FlushTick(_timeProvider.GetUtcNow());
-            } finally {
-                _lock.Release();
-            }
-            await FlushBucketAsync(_timeProvider.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
+            // Final flush: persist any remaining raw data before stopping.
+            await FlushTickAndRawAsync(_timeProvider.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
         }
 
         _logger.LogInformation("TrafficEngine loop stopped");
@@ -175,8 +152,8 @@ internal sealed class TrafficEngine {
 
         dest.TickBytesIn += flowEvent.BytesIn;
         dest.TickBytesOut += flowEvent.BytesOut;
-        dest.BucketBytesIn += flowEvent.BytesIn;
-        dest.BucketBytesOut += flowEvent.BytesOut;
+        dest.RawBytesIn += flowEvent.BytesIn;
+        dest.RawBytesOut += flowEvent.BytesOut;
         dest.LastActivity = _timeProvider.GetUtcNow();
         dest.Country = flowEvent.Country;
 
@@ -199,10 +176,64 @@ internal sealed class TrafficEngine {
         totals.LastActivity = _timeProvider.GetUtcNow();
     }
 
-    private void FlushTick(DateTimeOffset timestamp) {
-        var snapshots = BuildSnapshotsForActiveProcesses(timestamp);
-        ResetTickDeltas();
+    private async Task FlushTickAndRawAsync(DateTimeOffset timestamp, CancellationToken cancellationToken) {
+        List<TrafficBucket>? rawBuckets = null;
+        List<(string Address, string Hostname)>? dnsEntries = null;
+        IReadOnlyList<CounterSnapshot>? snapshots;
+
+        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try {
+            snapshots = BuildSnapshotsForActiveProcesses(timestamp);
+
+            // Build one raw row per destination that accumulated bytes during
+            // this tick, then zero out the per-tick counters.
+            foreach (var dest in _destinations.Values) {
+                if (dest.RawBytesIn == 0 && dest.RawBytesOut == 0) continue;
+
+                rawBuckets ??= new List<TrafficBucket>();
+                var hostname = _dnsCache.Resolve(IPAddress.Parse(dest.RemoteAddress));
+
+                rawBuckets.Add(new TrafficBucket(
+                    id: 0,
+                    processPath: dest.ProcessPath,
+                    processName: dest.ProcessName,
+                    remoteAddress: dest.RemoteAddress,
+                    remotePort: dest.RemotePort,
+                    hostname: hostname,
+                    country: dest.Country,
+                    bytesIn: dest.RawBytesIn,
+                    bytesOut: dest.RawBytesOut,
+                    bucketStart: _currentRawBucketStart,
+                    bucketSeconds: 1));
+
+                if (hostname is not null) {
+                    dnsEntries ??= new List<(string, string)>();
+                    dnsEntries.Add((dest.RemoteAddress, hostname));
+                }
+
+                dest.RawBytesIn = 0;
+                dest.RawBytesOut = 0;
+            }
+
+            ResetTickDeltas();
+            _currentRawBucketStart = AlignToSecondBoundary(timestamp);
+
+            EvictIdleDestinations(timestamp);
+            EvictIdleProcessTotals(timestamp);
+        } finally {
+            _lock.Release();
+        }
+
         if (snapshots is not null) OnSnapshotBatch?.Invoke(snapshots);
+
+        if (rawBuckets is not null) {
+            await _trafficStore.WriteRawBucketsAsync(rawBuckets, cancellationToken).ConfigureAwait(false);
+            _logger.LogDebug("Flushed {BucketCount} raw traffic buckets to SQLite", rawBuckets.Count);
+        }
+
+        if (dnsEntries is not null) {
+            await _dnsCacheStore.UpsertBatchAsync(dnsEntries, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private List<CounterSnapshot>? BuildSnapshotsForActiveProcesses(DateTimeOffset timestamp) {
@@ -297,56 +328,6 @@ internal sealed class TrafficEngine {
         }
     }
 
-    private async Task FlushBucketAsync(DateTimeOffset now, CancellationToken cancellationToken) {
-        List<TrafficBucket>? buckets = null;
-        List<(string Address, string Hostname)>? dnsEntries = null;
-
-        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try {
-            foreach (var dest in _destinations.Values) {
-                if (dest.BucketBytesIn == 0 && dest.BucketBytesOut == 0) continue;
-
-                buckets ??= new List<TrafficBucket>();
-                var hostname = _dnsCache.Resolve(IPAddress.Parse(dest.RemoteAddress));
-
-                buckets.Add(new TrafficBucket(
-                    id: 0,
-                    processPath: dest.ProcessPath,
-                    processName: dest.ProcessName,
-                    remoteAddress: dest.RemoteAddress,
-                    remotePort: dest.RemotePort,
-                    hostname: hostname,
-                    country: dest.Country,
-                    bytesIn: dest.BucketBytesIn,
-                    bytesOut: dest.BucketBytesOut,
-                    bucketStart: _currentBucketStart,
-                    bucketSeconds: _options.BucketSeconds));
-
-                if (hostname is not null) {
-                    dnsEntries ??= new List<(string, string)>();
-                    dnsEntries.Add((dest.RemoteAddress, hostname));
-                }
-
-                dest.BucketBytesIn = 0;
-                dest.BucketBytesOut = 0;
-            }
-
-            EvictIdleDestinations(now);
-            EvictIdleProcessTotals(now);
-        } finally {
-            _lock.Release();
-        }
-
-        if (buckets is not null) {
-            await _trafficStore.WriteBucketsAsync(buckets, cancellationToken).ConfigureAwait(false);
-            _logger.LogDebug("Flushed {BucketCount} traffic buckets to SQLite", buckets.Count);
-        }
-
-        if (dnsEntries is not null) {
-            await _dnsCacheStore.UpsertBatchAsync(dnsEntries, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
     private void EvictIdleDestinations(DateTimeOffset now) {
         var idleThreshold = now - TimeSpan.FromMinutes(_options.IdleDestinationTimeoutMinutes);
         var toRemove = new List<DestinationKey>();
@@ -354,8 +335,8 @@ internal sealed class TrafficEngine {
         foreach (var (key, dest) in _destinations) {
             if (dest.LastActivity >= idleThreshold) continue;
 
-            // Flush any remaining bucket bytes before eviction — never lose data
-            if (dest.BucketBytesIn > 0 || dest.BucketBytesOut > 0) continue;
+            // Flush any remaining raw bytes before eviction — never lose data
+            if (dest.RawBytesIn > 0 || dest.RawBytesOut > 0) continue;
 
             toRemove.Add(key);
         }
@@ -383,21 +364,6 @@ internal sealed class TrafficEngine {
         }
     }
 
-    private async Task MaybePruneAsync(DateTimeOffset now, CancellationToken cancellationToken) {
-        var pruneInterval = TimeSpan.FromHours(_options.PruneIntervalHours);
-        if (now - _lastPruneTime < pruneInterval) return;
-
-        _lastPruneTime = now;
-        var cutoff = now - TimeSpan.FromDays(_options.RetentionDays);
-
-        var trafficDeleted = await _trafficStore.PruneAsync(cutoff, cancellationToken).ConfigureAwait(false);
-        var dnsDeleted = await _dnsCacheStore.PruneAsync(cutoff, cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation(
-            "Pruned {TrafficRows} traffic rows and {DnsRows} DNS cache entries older than {Cutoff}",
-            trafficDeleted, dnsDeleted, cutoff);
-    }
-
     private async Task WaitForEventOrTickAsync(TimeSpan waitBudget, CancellationToken cancellationToken) {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var waitTask = _reader.WaitToReadAsync(linkedCts.Token).AsTask();
@@ -418,10 +384,9 @@ internal sealed class TrafficEngine {
         cancellationToken.ThrowIfCancellationRequested();
     }
 
-    private static DateTimeOffset AlignToBucketBoundary(DateTimeOffset time, int bucketSeconds) {
+    private static DateTimeOffset AlignToSecondBoundary(DateTimeOffset time) {
         var epochMs = time.ToUnixTimeMilliseconds();
-        var bucketMs = bucketSeconds * 1000L;
-        var aligned = (epochMs / bucketMs) * bucketMs;
+        var aligned = (epochMs / 1000L) * 1000L;
         return DateTimeOffset.FromUnixTimeMilliseconds(aligned);
     }
 
@@ -443,8 +408,8 @@ internal sealed class TrafficEngine {
 
         public long TickBytesIn { get; set; }
         public long TickBytesOut { get; set; }
-        public long BucketBytesIn { get; set; }
-        public long BucketBytesOut { get; set; }
+        public long RawBytesIn { get; set; }
+        public long RawBytesOut { get; set; }
         public DateTimeOffset LastActivity { get; set; }
 
         public HashSet<(IPAddress Address, int Port)> ActiveEndpoints { get; } = new();

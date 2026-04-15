@@ -237,88 +237,70 @@ public class TrafficEngineTests {
         Assert.Contains(@"C:\b.exe", paths);
     }
 
-    // --- 10-second bucket / SQLite persistence tests ---
+    // --- 1-second raw flush / SQLite persistence tests ---
 
     [Fact]
-    public async Task BucketFlush_WritesTrafficBucketsToStore() {
+    public async Task RawFlush_WritesOneBucketPerTickPerDestination() {
         var trafficStore = new FakeTrafficStore();
         await using var fixture = Fixture.Start(trafficStore: trafficStore);
 
-        // Drive 10 ticks (10 seconds) to trigger a bucket flush
-        for (var i = 0; i < 10; i++) {
-            await fixture.DriveTickAsync(BuildFlow(bytesIn: 100, bytesOut: 50));
-        }
+        await fixture.DriveTickAsync(BuildFlow(bytesIn: 100, bytesOut: 50));
 
-        Assert.NotEmpty(trafficStore.WrittenBuckets);
-        var bucket = trafficStore.WrittenBuckets[0];
+        var bucket = Assert.Single(trafficStore.WrittenBuckets);
         Assert.Equal(@"C:\Windows\System32\curl.exe", bucket.ProcessPath);
         Assert.Equal("curl.exe", bucket.ProcessName);
-        Assert.Equal(1000, bucket.BytesIn);
-        Assert.Equal(500, bucket.BytesOut);
-        Assert.Equal(10, bucket.BucketSeconds);
+        Assert.Equal(100, bucket.BytesIn);
+        Assert.Equal(50, bucket.BytesOut);
+        Assert.Equal(1, bucket.BucketSeconds);
     }
 
     [Fact]
-    public async Task BucketFlush_MultipleDestinations_WritesMultipleBuckets() {
+    public async Task RawFlush_MultipleDestinations_WritesOneBucketPerDestinationPerTick() {
         var trafficStore = new FakeTrafficStore();
         await using var fixture = Fixture.Start(trafficStore: trafficStore);
 
-        for (var i = 0; i < 10; i++) {
-            await fixture.DriveTickAsync(
-                BuildFlow(remoteIp: "1.1.1.1", bytesIn: 100, bytesOut: 50),
-                BuildFlow(remoteIp: "2.2.2.2", bytesIn: 200, bytesOut: 100));
-        }
+        await fixture.DriveTickAsync(
+            BuildFlow(remoteIp: "1.1.1.1", bytesIn: 100, bytesOut: 50),
+            BuildFlow(remoteIp: "2.2.2.2", bytesIn: 200, bytesOut: 100));
 
-        Assert.True(trafficStore.WrittenBuckets.Count >= 2);
-        var addr1 = trafficStore.WrittenBuckets.FirstOrDefault(b => b.RemoteAddress == "1.1.1.1");
-        var addr2 = trafficStore.WrittenBuckets.FirstOrDefault(b => b.RemoteAddress == "2.2.2.2");
-        Assert.NotNull(addr1);
-        Assert.NotNull(addr2);
-        Assert.Equal(1000, addr1.BytesIn);
-        Assert.Equal(2000, addr2.BytesIn);
+        Assert.Equal(2, trafficStore.WrittenBuckets.Count);
+        var addr1 = trafficStore.WrittenBuckets.Single(b => b.RemoteAddress == "1.1.1.1");
+        var addr2 = trafficStore.WrittenBuckets.Single(b => b.RemoteAddress == "2.2.2.2");
+        Assert.Equal(100, addr1.BytesIn);
+        Assert.Equal(200, addr2.BytesIn);
     }
 
     [Fact]
-    public async Task BucketFlush_ResetsDeltas_NextBucketStartsFresh() {
+    public async Task RawFlush_AcrossMultipleTicks_ProducesOneBucketPerTick() {
         var trafficStore = new FakeTrafficStore();
         await using var fixture = Fixture.Start(trafficStore: trafficStore);
 
-        // First bucket: 10 ticks
-        for (var i = 0; i < 10; i++) {
-            await fixture.DriveTickAsync(BuildFlow(bytesIn: 100, bytesOut: 50));
-        }
-        var firstBucketCount = trafficStore.WrittenBuckets.Count;
-        Assert.True(firstBucketCount > 0);
+        // Drive three ticks with different bytes each time.
+        await fixture.DriveTickAsync(BuildFlow(bytesIn: 100, bytesOut: 50));
+        await fixture.DriveTickAsync(BuildFlow(bytesIn: 200, bytesOut: 100));
+        await fixture.DriveTickAsync(BuildFlow(bytesIn: 300, bytesOut: 150));
 
-        // Second bucket: 10 more ticks with different bytes
-        for (var i = 0; i < 10; i++) {
-            await fixture.DriveTickAsync(BuildFlow(bytesIn: 200, bytesOut: 100));
-        }
-
-        var secondBuckets = trafficStore.WrittenBuckets.Skip(firstBucketCount).ToList();
-        Assert.NotEmpty(secondBuckets);
-        var secondBucket = secondBuckets[0];
-        Assert.Equal(2000, secondBucket.BytesIn);
-        Assert.Equal(1000, secondBucket.BytesOut);
+        Assert.Equal(3, trafficStore.WrittenBuckets.Count);
+        Assert.Equal(100, trafficStore.WrittenBuckets[0].BytesIn);
+        Assert.Equal(200, trafficStore.WrittenBuckets[1].BytesIn);
+        Assert.Equal(300, trafficStore.WrittenBuckets[2].BytesIn);
     }
 
     [Fact]
-    public async Task BucketFlush_JoinsHostnameFromDnsCache() {
+    public async Task RawFlush_JoinsHostnameFromDnsCache() {
         var dnsCache = new FakeDnsCache();
         dnsCache.Add("1.1.1.1", "one.one.one.one");
         var trafficStore = new FakeTrafficStore();
         await using var fixture = Fixture.Start(trafficStore: trafficStore, dnsCache: dnsCache);
 
-        for (var i = 0; i < 10; i++) {
-            await fixture.DriveTickAsync(BuildFlow(remoteIp: "1.1.1.1", bytesIn: 100));
-        }
+        await fixture.DriveTickAsync(BuildFlow(remoteIp: "1.1.1.1", bytesIn: 100));
 
-        Assert.NotEmpty(trafficStore.WrittenBuckets);
-        Assert.Equal("one.one.one.one", trafficStore.WrittenBuckets[0].Hostname);
+        var bucket = Assert.Single(trafficStore.WrittenBuckets);
+        Assert.Equal("one.one.one.one", bucket.Hostname);
     }
 
     [Fact]
-    public async Task BucketFlush_PersistsDnsCacheEntries() {
+    public async Task RawFlush_PersistsDnsCacheEntries() {
         var dnsCache = new FakeDnsCache();
         dnsCache.Add("1.1.1.1", "one.one.one.one");
         var dnsCacheStore = new FakeDnsCacheStore();
@@ -326,44 +308,21 @@ public class TrafficEngineTests {
         await using var fixture = Fixture.Start(
             trafficStore: trafficStore, dnsCacheStore: dnsCacheStore, dnsCache: dnsCache);
 
-        for (var i = 0; i < 10; i++) {
-            await fixture.DriveTickAsync(BuildFlow(remoteIp: "1.1.1.1", bytesIn: 100));
-        }
+        await fixture.DriveTickAsync(BuildFlow(remoteIp: "1.1.1.1", bytesIn: 100));
 
         Assert.Contains(dnsCacheStore.UpsertedEntries, e =>
             e.Address == "1.1.1.1" && e.Hostname == "one.one.one.one");
     }
 
     [Fact]
-    public async Task BucketFlush_NullHostname_NoHostnameInBucket() {
+    public async Task RawFlush_NullHostname_NoHostnameInBucket() {
         var trafficStore = new FakeTrafficStore();
         await using var fixture = Fixture.Start(trafficStore: trafficStore);
 
-        for (var i = 0; i < 10; i++) {
-            await fixture.DriveTickAsync(BuildFlow(remoteIp: "1.1.1.1", bytesIn: 100));
-        }
+        await fixture.DriveTickAsync(BuildFlow(remoteIp: "1.1.1.1", bytesIn: 100));
 
-        Assert.NotEmpty(trafficStore.WrittenBuckets);
-        Assert.Null(trafficStore.WrittenBuckets[0].Hostname);
-    }
-
-    [Fact]
-    public async Task TickDeltas_ResetIndependently_FromBucketDeltas() {
-        var trafficStore = new FakeTrafficStore();
-        await using var fixture = Fixture.Start(trafficStore: trafficStore);
-
-        // Drive 1 tick — tick deltas reset, bucket deltas still accumulating
-        var firstBatch = await fixture.DriveTickAsync(BuildFlow(bytesIn: 100));
-        var firstSnapshot = Assert.Single(firstBatch);
-        Assert.Equal(100, firstSnapshot.DeltaBytesIn);
-
-        // Drive another tick — tick delta is fresh, bucket is still accumulating
-        var secondBatch = await fixture.DriveTickAsync(BuildFlow(bytesIn: 200));
-        var secondSnapshot = Assert.Single(secondBatch);
-        Assert.Equal(200, secondSnapshot.DeltaBytesIn);
-
-        // No bucket flush yet (only 2 ticks)
-        Assert.Empty(trafficStore.WrittenBuckets);
+        var bucket = Assert.Single(trafficStore.WrittenBuckets);
+        Assert.Null(bucket.Hostname);
     }
 
     // --- Constructor validation ---

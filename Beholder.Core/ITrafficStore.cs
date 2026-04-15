@@ -2,27 +2,44 @@ namespace Beholder.Core;
 
 /// <summary>
 /// Persistence and query interface for historical per-destination traffic data.
-/// Implementations store traffic in time-bucketed rows and serve aggregated queries
-/// for timeline charts, destination breakdowns, and geographic analysis.
-///
-/// Phase 4.6a: all queries hit the single <c>traffic_buckets_10s</c> table.
-/// Phase 4.6b/c will add tier-selection logic based on requested time range and
-/// resolution, routing queries to the most efficient tier.
-///
+/// The store writes raw 1-second buckets (via <see cref="WriteRawBucketsAsync"/>)
+/// and serves tier-aware aggregated queries for timeline charts, destination
+/// breakdowns, and geographic analysis.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Tier-aware queries: the store picks the coarsest rollup tier whose bucket
+/// size is ≤ the requested resolution AND whose retention covers the requested
+/// range. Callers do not need to know about tiering — query method signatures
+/// accept a range and resolution, and the store routes internally.
+/// </para>
+/// <para>
 /// Rollup invariant: queries that aggregate across tiers MUST preserve additive
 /// correctness. <c>SUM(bytes)</c> over a time range returns identical totals
-/// regardless of which tier(s) are consulted, because coarser tiers are built by
-/// summing finer tiers. See <c>docs/ARCHITECTURE.md</c> "Storage Rollup
-/// Architecture" for details.
-/// </summary>
+/// regardless of which tier(s) are consulted, because coarser tiers are built
+/// by summing finer tiers. See <c>docs/ARCHITECTURE.md</c> "Storage Rollup
+/// Architecture" for the invariant's precise statement and the tier-selection
+/// rule's full behavior, including fallback cases.
+/// </para>
+/// <para>
+/// Retention pruning is not the store's responsibility. The rollup service
+/// owns the per-tier prune schedule (null-retention tiers are never pruned).
+/// </para>
+/// </remarks>
 public interface ITrafficStore {
-    /// <summary>Persists a batch of micro-aggregated traffic buckets in a single transaction.</summary>
-    Task WriteBucketsAsync(IReadOnlyList<TrafficBucket> buckets, CancellationToken cancellationToken);
+    /// <summary>
+    /// Persists a batch of per-destination 1-second raw buckets in a single
+    /// transaction. These rows land in <c>traffic_raw</c> and are cascaded
+    /// into coarser tiers by the rollup service.
+    /// </summary>
+    Task WriteRawBucketsAsync(IReadOnlyList<TrafficBucket> buckets, CancellationToken cancellationToken);
 
     /// <summary>
     /// Returns a time series of traffic for a single process, re-aggregated into
     /// intervals of <paramref name="resolution"/>. Each point contains the sum of
     /// bytes in/out for all destinations of this process within that interval.
+    /// The store picks the most efficient tier internally based on
+    /// <paramref name="from"/>, <paramref name="to"/>, and <paramref name="resolution"/>.
     /// </summary>
     Task<IReadOnlyList<TrafficTimePoint>> GetProcessTimelineAsync(
         string processPath,
@@ -33,7 +50,8 @@ public interface ITrafficStore {
 
     /// <summary>
     /// Returns all distinct destinations contacted by a process in a time range,
-    /// with aggregated byte totals and connection (distinct port) counts.
+    /// with aggregated byte totals and connection (distinct port) counts. Tier
+    /// selection is retention-only (no resolution parameter).
     /// </summary>
     Task<IReadOnlyList<DestinationSummary>> GetProcessDestinationsAsync(
         string processPath,
@@ -43,7 +61,8 @@ public interface ITrafficStore {
 
     /// <summary>
     /// Returns a time series of traffic across all processes, re-aggregated into
-    /// intervals of <paramref name="resolution"/>.
+    /// intervals of <paramref name="resolution"/>. Tier selection matches
+    /// <see cref="GetProcessTimelineAsync"/>.
     /// </summary>
     Task<IReadOnlyList<TrafficTimePoint>> GetAggregateTimelineAsync(
         DateTimeOffset from,
@@ -53,16 +72,10 @@ public interface ITrafficStore {
 
     /// <summary>
     /// Returns per-country traffic totals for a time range, suitable for the map
-    /// tab's geographic heat map.
+    /// tab's geographic heat map. Tier selection is retention-only.
     /// </summary>
     Task<IReadOnlyList<CountryTrafficSummary>> GetCountryBreakdownAsync(
         DateTimeOffset from,
         DateTimeOffset to,
         CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Deletes traffic data older than <paramref name="cutoff"/>. Returns the
-    /// number of rows deleted. Idempotent.
-    /// </summary>
-    Task<long> PruneAsync(DateTimeOffset cutoff, CancellationToken cancellationToken);
 }

@@ -1,11 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Threading;
-using System.Threading.Tasks;
 using Avalonia.Media;
 using Avalonia.Threading;
-using Beholder.Protocol.Local;
 using Beholder.Ui.Controls;
 using Beholder.Ui.Helpers;
 using Beholder.Ui.Models;
@@ -20,7 +17,6 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
     private readonly Dictionary<string, ProcessListItem> _processLookup = new(StringComparer.Ordinal);
     private readonly ProcessListItem _allProcessesItem;
     private IReadOnlyDictionary<string, ProcessState>? _lastStates;
-    private bool _historicalDataLoaded;
 
     [ObservableProperty]
     private bool _isLoading = true;
@@ -61,8 +57,9 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             if (status.State == ConnectionState.Connected) {
                 HasError = false;
                 ErrorMessage = string.Empty;
-                if (!_historicalDataLoaded)
-                    _ = LoadHistoricalDataAsync();
+                // Historical data seeding is handled by ProcessStateService.SeedAsync,
+                // which runs before the live stream starts and fires ProcessStatesUpdated.
+                // The chart and process list populate from that event automatically.
             } else if (status.State is ConnectionState.Disconnected or ConnectionState.Reconnecting) {
                 HasError = true;
                 ErrorMessage = "Daemon disconnected \u2014 showing last known data.";
@@ -224,46 +221,4 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         return (download, upload);
     }
 
-    private async Task LoadHistoricalDataAsync() {
-        try {
-            IsLoading = true;
-            var now = DateTimeOffset.UtcNow;
-            var from = now.AddMinutes(-5);
-
-            var request = new GetAggregateTimelineRequest {
-                FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000,
-                ToUnixNs = now.ToUnixTimeMilliseconds() * 1_000_000,
-                ResolutionMs = 10_000,
-            };
-
-            var response = await _daemonClient.GetAggregateTimelineAsync(request, CancellationToken.None);
-            _historicalDataLoaded = true;
-
-            if (response.Points.Count == 0) {
-                IsEmpty = true;
-                IsLoading = false;
-                return;
-            }
-
-            var downloadValues = new long[response.Points.Count];
-            var uploadValues = new long[response.Points.Count];
-            for (var i = 0; i < response.Points.Count; i++) {
-                downloadValues[i] = response.Points[i].BytesIn;
-                uploadValues[i] = response.Points[i].BytesOut;
-            }
-
-            // Same semantic flip as RebuildChartData — see DarkTheme.axaml.
-            var downloadColor = ThemeColorHelper.Resolve("ChartOutboundStrokeColor");
-            var uploadColor = ThemeColorHelper.Resolve("ChartInboundStrokeColor");
-            ChartData = [
-                new ChartSeries("Download", downloadValues, downloadColor),
-                new ChartSeries("Upload", uploadValues, uploadColor),
-            ];
-            IsLoading = false;
-        } catch (Exception) {
-            // Historical data is best-effort — live streaming will fill in.
-            _historicalDataLoaded = true;
-            IsLoading = false;
-        }
-    }
 }

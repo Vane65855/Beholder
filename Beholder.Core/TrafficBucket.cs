@@ -1,10 +1,13 @@
 namespace Beholder.Core;
 
 /// <summary>
-/// A single persisted row in the traffic_buckets_10s table: the aggregate of all
-/// traffic between one process and one (remote address, port) destination during a
-/// single 10-second time window. This is the first tier of the rollup cascade
-/// (Phase 4.6a). Coarser tiers (1 min, 10 min, 1 hr) will be added in Phase 4.6c.
+/// A single persisted row in any tier of the rollup cascade: the aggregate of
+/// all traffic between one process and one (remote address, port) destination
+/// during a single time window. <see cref="BucketSeconds"/> identifies the tier
+/// (1 = raw, 10/60/600/3600 = rolled tiers). The raw tier is written directly
+/// by the engine; coarser tiers are populated by the rollup service via
+/// <c>INSERT ... SELECT</c> cascades. See <c>docs/ARCHITECTURE.md</c>
+/// "Storage Rollup Architecture" for the cascade shape and rollup invariant.
 /// </summary>
 public sealed record TrafficBucket {
     /// <summary>Database row identifier (0 for unsaved buckets).</summary>

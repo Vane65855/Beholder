@@ -56,6 +56,22 @@ public sealed class DatabaseInitializer {
 
     private static void CreateTables(SqliteConnection connection) {
         Execute(connection, """
+            CREATE TABLE IF NOT EXISTS traffic_raw (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                process_path    TEXT    NOT NULL,
+                process_name    TEXT    NOT NULL,
+                remote_address  TEXT    NOT NULL,
+                remote_port     INTEGER NOT NULL,
+                hostname        TEXT,
+                country         TEXT    NOT NULL,
+                bytes_in        INTEGER NOT NULL,
+                bytes_out       INTEGER NOT NULL,
+                bucket_start_ms INTEGER NOT NULL,
+                bucket_seconds  INTEGER NOT NULL DEFAULT 1
+            );
+            """);
+
+        Execute(connection, """
             CREATE TABLE IF NOT EXISTS traffic_buckets_10s (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 process_path    TEXT    NOT NULL,
@@ -68,6 +84,54 @@ public sealed class DatabaseInitializer {
                 bytes_out       INTEGER NOT NULL,
                 bucket_start_ms INTEGER NOT NULL,
                 bucket_seconds  INTEGER NOT NULL DEFAULT 10
+            );
+            """);
+
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS traffic_buckets_1m (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                process_path    TEXT    NOT NULL,
+                process_name    TEXT    NOT NULL,
+                remote_address  TEXT    NOT NULL,
+                remote_port     INTEGER NOT NULL,
+                hostname        TEXT,
+                country         TEXT    NOT NULL,
+                bytes_in        INTEGER NOT NULL,
+                bytes_out       INTEGER NOT NULL,
+                bucket_start_ms INTEGER NOT NULL,
+                bucket_seconds  INTEGER NOT NULL DEFAULT 60
+            );
+            """);
+
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS traffic_buckets_10m (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                process_path    TEXT    NOT NULL,
+                process_name    TEXT    NOT NULL,
+                remote_address  TEXT    NOT NULL,
+                remote_port     INTEGER NOT NULL,
+                hostname        TEXT,
+                country         TEXT    NOT NULL,
+                bytes_in        INTEGER NOT NULL,
+                bytes_out       INTEGER NOT NULL,
+                bucket_start_ms INTEGER NOT NULL,
+                bucket_seconds  INTEGER NOT NULL DEFAULT 600
+            );
+            """);
+
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS traffic_buckets_1h (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                process_path    TEXT    NOT NULL,
+                process_name    TEXT    NOT NULL,
+                remote_address  TEXT    NOT NULL,
+                remote_port     INTEGER NOT NULL,
+                hostname        TEXT,
+                country         TEXT    NOT NULL,
+                bytes_in        INTEGER NOT NULL,
+                bytes_out       INTEGER NOT NULL,
+                bucket_start_ms INTEGER NOT NULL,
+                bucket_seconds  INTEGER NOT NULL DEFAULT 3600
             );
             """);
 
@@ -136,9 +200,25 @@ public sealed class DatabaseInitializer {
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_event_log_kind ON event_log(kind);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_firewall_rules_process_path ON firewall_rules(process_path);");
 
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_raw_process_time ON traffic_raw(process_path, bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_raw_time ON traffic_raw(bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_raw_country_time ON traffic_raw(country, bucket_start_ms);");
+
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_process_time ON traffic_buckets_10s(process_path, bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_time ON traffic_buckets_10s(bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_country_time ON traffic_buckets_10s(country, bucket_start_ms);");
+
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1m_process_time ON traffic_buckets_1m(process_path, bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1m_time ON traffic_buckets_1m(bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1m_country_time ON traffic_buckets_1m(country, bucket_start_ms);");
+
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_10m_process_time ON traffic_buckets_10m(process_path, bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_10m_time ON traffic_buckets_10m(bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_10m_country_time ON traffic_buckets_10m(country, bucket_start_ms);");
+
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1h_process_time ON traffic_buckets_1h(process_path, bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1h_time ON traffic_buckets_1h(bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1h_country_time ON traffic_buckets_1h(country, bucket_start_ms);");
     }
 
     private static void Execute(SqliteConnection connection, string sql) {

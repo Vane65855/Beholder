@@ -17,6 +17,14 @@ internal sealed class DaemonStreamSubscriber : IAsyncDisposable {
     public event Action<FirewallRuleChange>? RuleChangeReceived;
     public event Action<AlertEvent>? AlertReceived;
 
+    /// <summary>
+    /// Async callback invoked after the daemon connection is established but
+    /// before the live event stream starts. Used by <c>ProcessStateService</c>
+    /// to seed per-process state from historical data so the UI doesn't show
+    /// "0 B" on reconnect. Runs on the subscriber's background thread.
+    /// </summary>
+    public Func<CancellationToken, Task>? OnConnected { get; set; }
+
     public DaemonStreamSubscriber(
         IDaemonClient daemonClient,
         ILogger<DaemonStreamSubscriber> logger) {
@@ -53,6 +61,8 @@ internal sealed class DaemonStreamSubscriber : IAsyncDisposable {
     private async Task ConsumeLoopAsync(CancellationToken ct) {
         while (!ct.IsCancellationRequested) {
             await WaitForConnected(ct);
+            if (OnConnected is not null)
+                await OnConnected(ct);
             await ConsumeStream(ct);
         }
     }
