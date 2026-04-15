@@ -164,7 +164,7 @@ internal sealed class TrafficChartControl : Control {
             // Fill
             var fillGeometry = new StreamGeometry();
             using (var ctx = fillGeometry.Open()) {
-                FillSmoothArea(ctx, points, baselineY);
+                FillSmoothArea(ctx, points, top, baselineY);
             }
             var fillColor = series.Color;
             var fillBrush = new SolidColorBrush(Color.FromArgb(77, fillColor.R, fillColor.G, fillColor.B));
@@ -173,7 +173,7 @@ internal sealed class TrafficChartControl : Control {
             // Stroke (top edge only)
             var strokeGeometry = new StreamGeometry();
             using (var ctx = strokeGeometry.Open()) {
-                StrokeSmoothPath(ctx, points);
+                StrokeSmoothPath(ctx, points, top, baselineY);
             }
             var strokeBrush = new SolidColorBrush(fillColor);
             context.DrawGeometry(null, new Pen(strokeBrush, 1.5), strokeGeometry);
@@ -182,9 +182,12 @@ internal sealed class TrafficChartControl : Control {
 
     /// <summary>
     /// Strokes a Catmull-Rom spline through the given points (converted to cubic Beziers).
-    /// Falls back to straight lines when there are fewer than 3 points.
+    /// Falls back to straight lines when there are fewer than 3 points. Control point Y
+    /// values are clamped to <c>[top, baselineY]</c> to prevent the spline from
+    /// overshooting the data envelope — see <see cref="ClampY"/>.
     /// </summary>
-    private static void StrokeSmoothPath(StreamGeometryContext ctx, Point[] points) {
+    private static void StrokeSmoothPath(StreamGeometryContext ctx, Point[] points,
+        double top, double baselineY) {
         if (points.Length == 0) return;
         ctx.BeginFigure(points[0], false);
         if (points.Length == 1) {
@@ -202,8 +205,12 @@ internal sealed class TrafficChartControl : Control {
             var p1 = points[i];
             var p2 = points[i + 1];
             var p3 = i + 2 < points.Length ? points[i + 2] : points[i + 1];
-            var c1 = new Point(p1.X + (p2.X - p0.X) / 6, p1.Y + (p2.Y - p0.Y) / 6);
-            var c2 = new Point(p2.X - (p3.X - p1.X) / 6, p2.Y - (p3.Y - p1.Y) / 6);
+            var c1 = new Point(
+                p1.X + (p2.X - p0.X) / 6,
+                ClampY(p1.Y + (p2.Y - p0.Y) / 6, top, baselineY));
+            var c2 = new Point(
+                p2.X - (p3.X - p1.X) / 6,
+                ClampY(p2.Y - (p3.Y - p1.Y) / 6, top, baselineY));
             ctx.CubicBezierTo(c1, c2, p2);
         }
         ctx.EndFigure(false);
@@ -211,8 +218,11 @@ internal sealed class TrafficChartControl : Control {
 
     /// <summary>
     /// Builds a closed filled area below a Catmull-Rom spline, anchored to the baseline.
+    /// Control point Y values are clamped to <c>[top, baselineY]</c> — see
+    /// <see cref="ClampY"/>.
     /// </summary>
-    private static void FillSmoothArea(StreamGeometryContext ctx, Point[] points, double baselineY) {
+    private static void FillSmoothArea(StreamGeometryContext ctx, Point[] points,
+        double top, double baselineY) {
         if (points.Length == 0) return;
 
         ctx.BeginFigure(new Point(points[0].X, baselineY), true);
@@ -224,8 +234,12 @@ internal sealed class TrafficChartControl : Control {
                 var p1 = points[i];
                 var p2 = points[i + 1];
                 var p3 = i + 2 < points.Length ? points[i + 2] : points[i + 1];
-                var c1 = new Point(p1.X + (p2.X - p0.X) / 6, p1.Y + (p2.Y - p0.Y) / 6);
-                var c2 = new Point(p2.X - (p3.X - p1.X) / 6, p2.Y - (p3.Y - p1.Y) / 6);
+                var c1 = new Point(
+                    p1.X + (p2.X - p0.X) / 6,
+                    ClampY(p1.Y + (p2.Y - p0.Y) / 6, top, baselineY));
+                var c2 = new Point(
+                    p2.X - (p3.X - p1.X) / 6,
+                    ClampY(p2.Y - (p3.Y - p1.Y) / 6, top, baselineY));
                 ctx.CubicBezierTo(c1, c2, p2);
             }
         } else if (points.Length == 2) {
@@ -235,6 +249,18 @@ internal sealed class TrafficChartControl : Control {
         ctx.LineTo(new Point(points[^1].X, baselineY));
         ctx.EndFigure(true);
     }
+
+    /// <summary>
+    /// Clamps a Y coordinate to the chart's drawable range. In screen space,
+    /// <paramref name="top"/> is the smaller Y (visually higher — max traffic)
+    /// and <paramref name="baseline"/> is the larger Y (visually lower — zero
+    /// traffic). Used to prevent Catmull-Rom → Bezier control points from
+    /// projecting past the data envelope on sharp transitions, which would
+    /// otherwise cause the spline to dip below the 0 B/s baseline (or bulge
+    /// above the chart maximum).
+    /// </summary>
+    private static double ClampY(double y, double top, double baseline) =>
+        Math.Clamp(y, top, baseline);
 
     private static IBrush ResolveBrush(string tokenName) {
         var app = Avalonia.Application.Current;
