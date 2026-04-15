@@ -45,6 +45,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new TrafficStorageOptions(),
+            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         var alertStore = new SqliteAlertStore(connectionFactory, NullLogger<SqliteAlertStore>.Instance);
 
@@ -155,6 +156,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new TrafficStorageOptions(),
+            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         var connectionFactory = new ConnectionFactory(_databasePath, pooling: false);
         var alertStore = new SqliteAlertStore(connectionFactory, NullLogger<SqliteAlertStore>.Instance);
@@ -228,6 +230,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new TrafficStorageOptions(),
+            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         var alertStore = new SqliteAlertStore(
             new ConnectionFactory(_databasePath, pooling: false), NullLogger<SqliteAlertStore>.Instance);

@@ -63,6 +63,8 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<SqliteDnsCacheStore>();
     builder.Services.AddSingleton<IDnsCacheStore>(sp => sp.GetRequiredService<SqliteDnsCacheStore>());
     builder.Services.AddSingleton<TrafficStorageOptions>();
+    builder.Services.Configure<RecordingOptions>(
+        builder.Configuration.GetSection("Recording"));
 
     // Broadcast service must be registered BEFORE the pipeline so its StartAsync
     // runs first and subscribes to ISnapshotBatchSource.OnSnapshotBatch before

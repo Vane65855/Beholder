@@ -41,6 +41,7 @@ public sealed class VerifyChainTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new TrafficStorageOptions(),
+            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
 
         _service = new BeholderLocalService(
@@ -142,6 +143,7 @@ public sealed class VerifyChainTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new TrafficStorageOptions(),
+            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
 
         var service = new BeholderLocalService(

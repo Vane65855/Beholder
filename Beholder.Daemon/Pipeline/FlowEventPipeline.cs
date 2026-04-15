@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Beholder.Core;
+using Microsoft.Extensions.Options;
 
 namespace Beholder.Daemon.Pipeline;
 
@@ -17,6 +18,7 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5);
 
     private readonly IFlowSource _flowSource;
+    private readonly IOptionsMonitor<RecordingOptions> _recordingOptions;
     private readonly ILogger<FlowEventPipeline> _logger;
     private readonly Channel<FlowEvent> _channel;
     private readonly TrafficEngine _engine;
@@ -48,6 +50,7 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
         IDnsCacheStore dnsCacheStore,
         IDnsCache dnsCache,
         TrafficStorageOptions options,
+        IOptionsMonitor<RecordingOptions> recordingOptions,
         ILogger<FlowEventPipeline> logger,
         ILoggerFactory loggerFactory
     ) {
@@ -57,10 +60,12 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
         ArgumentNullException.ThrowIfNull(dnsCacheStore);
         ArgumentNullException.ThrowIfNull(dnsCache);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(recordingOptions);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(loggerFactory);
 
         _flowSource = flowSource;
+        _recordingOptions = recordingOptions;
         _logger = logger;
 
         _channel = Channel.CreateBounded<FlowEvent>(new BoundedChannelOptions(ChannelCapacity) {
@@ -149,6 +154,13 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
     }
 
     private void OnFlowEventReceived(FlowEvent flowEvent) {
+        // Drop Beholder's own traffic before it enters any pipeline stage.
+        // CurrentValue is read per-event so flipping the flag in appsettings
+        // takes effect on the next event without a daemon restart.
+        if (_recordingOptions.CurrentValue.FilterSelfTraffic
+            && SelfTrafficFilter.IsSelfProcess(flowEvent.ProcessPath))
+            return;
+
         if (!_channel.Writer.TryWrite(flowEvent)) {
             _logger.LogWarning(
                 "Flow event channel write failed — pipeline is in an unexpected state");

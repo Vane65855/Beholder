@@ -120,6 +120,24 @@ New remote IP observed in FlowEvent
 
 Resolution happens in the daemon, once per unique IP. The resolved country code is attached to the FlowEvent before it enters the Channel<T>. The UI never sees raw IPs without geo annotation.
 
+### Recording Policy
+
+The daemon applies a self-traffic filter at the ingestion boundary — the callback that receives events from `IFlowSource`, before they enter the bounded `Channel<FlowEvent>`. Any `FlowEvent` whose executable filename matches a known Beholder binary (`Beholder.Daemon`, `Beholder.Ui`, with or without `.exe`) is dropped. Filtered events never reach the `TrafficEngine`, `SqliteTrafficStore`, `BroadcastService`, or the UI.
+
+The filter is controlled by a single config flag in `appsettings.json`:
+
+```json
+"Recording": {
+  "FilterSelfTraffic": true
+}
+```
+
+Default is `true`. Rationale: without the filter, daemon↔UI gRPC chatter adds roughly 50 MB/month to `traffic_buckets_10s` at default retention, making Beholder the top recorded process in its own database. The filter is a storage-efficiency measure, not obfuscation; setting the flag to `false` records everything including self-traffic, which is useful for debugging and data-hoarding users.
+
+The filter is bound via `IOptionsMonitor<RecordingOptions>` so a live reload takes effect on the next flow event without a daemon restart. Toggling the flag does not retroactively prune existing rows — filtered events are never persisted, so "turning it off" takes effect immediately for incoming events, and "turning it on" leaves any previously recorded self-traffic in SQLite until the normal retention window expires.
+
+The v1 filter is deliberately one switch. Future phases may add granular controls (per-path exclusion lists, localhost-only, port ranges) behind the same `Recording` config section.
+
 ### Alert Generation
 
 Only three alert types exist:

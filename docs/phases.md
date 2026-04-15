@@ -1,8 +1,8 @@
 # Beholder NMT — Project Status & Phase Plan
 
-**Last updated:** 2026-04-13
-**Current checkpoint:** Phase 4.6a (historical traffic storage)
-**Test count:** 379
+**Last updated:** 2026-04-15
+**Current checkpoint:** Phase 4.7 (self-traffic filter)
+**Test count:** 434
 
 ---
 
@@ -178,6 +178,32 @@ Validates request → calls `IFirewallController.AddRuleAsync` → persists to `
 - Rollup invariant: `SUM(bytes)` over a time range must be identical regardless of which tier is consulted. Coarser tiers are built by summing finer-tier rows.
 - Destination eviction flushes non-zero bucket bytes to SQLite before removing — never evict data that has not been persisted.
 - Process lifetime totals are NOT reconstructed from SQLite on restart. They start from zero; the UI already handles daemon-reset detection.
+
+---
+
+### Phase 4.7 — Self-traffic filter ✅
+
+**Purpose:** Stop the daemon from recording its own gRPC chatter with the UI. Without the filter, `Beholder.Daemon` and `Beholder.Ui` are the #1 recorded processes in `traffic_buckets_10s`, accumulating ~50 MB/month of noise at default retention.
+
+**Key components:**
+- `Beholder.Daemon/RecordingOptions.cs` — New options class bound from the `"Recording"` section of `appsettings.json`. Single flag: `FilterSelfTraffic` (default `true`).
+- `Beholder.Daemon/Pipeline/SelfTrafficFilter.cs` — Static helper with an `OrdinalIgnoreCase` `HashSet<string>` of known Beholder executable filenames (`Beholder.Daemon[.exe]`, `Beholder.Ui[.exe]`) and an `IsSelfProcess(processPath)` method.
+- `Beholder.Daemon/Pipeline/FlowEventPipeline.cs` — Injects `IOptionsMonitor<RecordingOptions>`; `OnFlowEventReceived` early-returns when the filter is enabled and the event's process matches. Events never reach the channel, engine, store, or broadcast path.
+- `Beholder.Daemon/Program.cs` — `Configure<RecordingOptions>(Configuration.GetSection("Recording"))` registration. First option class in the daemon bound via `Configure<T>()`; `TrafficStorageOptions` remains a plain singleton for now.
+- `Beholder.Daemon/appsettings.json` — Added `"Recording": { "FilterSelfTraffic": true }` section.
+
+**Tests added:** 7 `SelfTrafficFilterTests` directly unit-testing `IsSelfProcess` — exe match, UI match, unrelated process, case-insensitive, Linux no-extension (daemon + UI), substring-of-known-name rejection.
+
+**Design decisions:**
+- **Filter at ingestion, not at storage.** The check sits in `FlowEventPipeline.OnFlowEventReceived`, before the bounded `Channel<FlowEvent>`. This guarantees filtered data is invisible to `TrafficEngine`, `SqliteTrafficStore`, `BroadcastService`, in-memory counters, and the UI — in one place.
+- **Filename match, not PID or full path.** Works across Debug/Release builds, installation paths, service vs. console runs, and future Linux/macOS deployments with zero config changes. False-positive risk (unrelated binary named exactly `Beholder.Daemon.exe`) is negligible.
+- **`IOptionsMonitor`, not `IOptions`.** Per-event cost is one virtual-call + one field read, trivially cheap. The benefit is that a future settings UI can flip the flag live without restarting the daemon.
+- **Testable helper, not inline pipeline code.** `SelfTrafficFilter` is a pure static class with one reason to change (the filter list), unit-testable directly without pipeline plumbing. The seven tests in `SelfTrafficFilterTests.cs` map 1:1 to the matching cases and serve as the regression guard against anyone replacing `HashSet.Contains` with a loose string search.
+- **JSON config, not TOML.** The daemon uses ASP.NET Core's `appsettings.json` loader via `WebApplication.CreateBuilder`. No TOML infrastructure exists in the repo; adding the `"Recording"` section to `appsettings.json` is zero-infrastructure. If TOML is adopted later, the section name and shape carry over unchanged.
+
+**Files NOT touched:** `TrafficEngine.cs`, `SqliteTrafficStore.cs`, `BroadcastService.cs`, any UI or protocol file — the filter is invisible to every layer downstream of ingestion, and to every layer upstream of the protocol wire.
+
+**Future work:** The v1 filter is deliberately one switch. Granular recording policy (per-path exclusion lists, localhost-only, port ranges) is deferred to the Settings UI phase and will live behind the same `"Recording"` config section.
 
 ---
 
