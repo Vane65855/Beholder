@@ -52,10 +52,13 @@ public partial class TimeRangeDropdown : UserControl {
 
     private void OnCustomApply(object? sender, RoutedEventArgs e) {
         if (FromPicker.SelectedDate is DateTime from && ToPicker.SelectedDate is DateTime to) {
-            var fromOffset = new DateTimeOffset(from, TimeSpan.Zero);
-            var toOffset = new DateTimeOffset(to.AddDays(1).AddSeconds(-1), TimeSpan.Zero);
-            if (toOffset > fromOffset) {
-                SelectedRange = TimeRangeSelection.FromCustom(fromOffset, toOffset);
+            try {
+                SelectedRange = TimeRangeSelection.FromLocalCalendarDates(from, to);
+            } catch (ArgumentException) {
+                // User picked an inverted range (toDate < fromDate). Don't
+                // update the selection; let the dropdown return to preset
+                // mode. A future UX pass can surface inline error text; for
+                // now, silent ignore matches the prior behavior.
             }
         }
 

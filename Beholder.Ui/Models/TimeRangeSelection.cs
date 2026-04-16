@@ -62,6 +62,36 @@ public sealed class TimeRangeSelection {
     }
 
     /// <summary>
+    /// Build a Custom <see cref="TimeRangeSelection"/> from two local calendar
+    /// dates the user picked (e.g., from <c>CalendarDatePicker.SelectedDate</c>,
+    /// which returns an <see cref="DateTimeKind.Unspecified"/> <see cref="DateTime"/>
+    /// representing a wall-clock date in local time). The returned range covers
+    /// the full local days <c>[fromDate 00:00, toDate 23:59:59.9999999]</c> and is
+    /// converted to <see cref="DateTimeOffset"/> using each instant's local UTC
+    /// offset — correct across DST transitions between the two dates, unlike a
+    /// single "now-offset" wrap.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="toDate"/> is earlier (by calendar day) than
+    /// <paramref name="fromDate"/>.
+    /// </exception>
+    public static TimeRangeSelection FromLocalCalendarDates(DateTime fromDate, DateTime toDate) {
+        if (toDate.Date < fromDate.Date)
+            throw new ArgumentException(
+                $"toDate ({toDate:yyyy-MM-dd}) must be on or after fromDate ({fromDate:yyyy-MM-dd}).",
+                nameof(toDate));
+
+        // SpecifyKind to Local so DateTimeOffset(DateTime) picks up the offset
+        // at each specific instant (handles DST) rather than "now-offset".
+        var localFrom = DateTime.SpecifyKind(fromDate.Date, DateTimeKind.Local);
+        var localTo = DateTime.SpecifyKind(
+            toDate.Date.AddDays(1).AddTicks(-1),  // 23:59:59.9999999 of toDate
+            DateTimeKind.Local);
+
+        return FromCustom(new DateTimeOffset(localFrom), new DateTimeOffset(localTo));
+    }
+
+    /// <summary>
     /// Display labels for each preset, used by the dropdown's item list.
     /// </summary>
     public static string GetPresetLabel(TimeRangePreset preset) => preset switch {
