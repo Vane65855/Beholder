@@ -7,11 +7,10 @@
              x:DataType="vm:TrafficTabViewModel"
              Background="{DynamicResource BackgroundRoot}">
 
-    <Grid ColumnDefinitions="Auto,*">
+    <Grid ColumnDefinitions="280,*">
 
         <!-- ── Left: Process List Panel ──────────────────────────────── -->
         <Border Grid.Column="0"
-                MinWidth="200" MaxWidth="350"
                 Background="{DynamicResource BackgroundPanel}"
                 BorderBrush="{DynamicResource BorderSubtle}"
                 BorderThickness="0,0,1,0">

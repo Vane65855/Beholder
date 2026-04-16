@@ -37,5 +37,6 @@ internal interface IDaemonClient : IAsyncDisposable {
     Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(GetAggregateTimelineRequest request, CancellationToken ct);
     Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(GetProcessDestinationsRequest request, CancellationToken ct);
     Task<GetCountryBreakdownResponse> GetCountryBreakdownAsync(GetCountryBreakdownRequest request, CancellationToken ct);
+    Task<GetProcessSummariesResponse> GetProcessSummariesAsync(GetProcessSummariesRequest request, CancellationToken ct);
     Grpc.Core.AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken ct);
 }

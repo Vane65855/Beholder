@@ -10,24 +10,27 @@ namespace Beholder.Daemon.Storage;
 internal static class TierSelector {
     /// <summary>
     /// Picks the coarsest tier whose <see cref="RollupTier.BucketSeconds"/> is
-    /// less than or equal to the requested <paramref name="resolution"/>, AND
-    /// whose <see cref="RollupTier.Retention"/> covers the range
-    /// <c>[from, now]</c>. Ties broken toward the coarser tier (fewer rows
-    /// scanned).
+    /// less than or equal to the requested <paramref name="resolution"/>. Ties
+    /// broken toward the coarser tier (fewer rows scanned).
     /// </summary>
     /// <remarks>
-    /// Fallback rules when no tier satisfies both constraints:
-    /// <list type="number">
-    /// <item>Return the finest tier whose retention covers the range. The
-    /// returned tier's <see cref="RollupTier.BucketSeconds"/> may be coarser
-    /// than <paramref name="resolution"/>, so the caller receives data at the
-    /// tier's native bucket size, not at the requested resolution.</item>
-    /// <item>If no tier's retention covers the range (either all tiers have
-    /// shorter retention, or a tier has <c>null</c> retention which is treated
-    /// as infinite and always covers), return the last tier in the list.
-    /// Terminal tiers with <c>null</c> retention always match the covers-range
-    /// check.</item>
-    /// </list>
+    /// <para>
+    /// Retention is NOT used to filter tiers. A tier's retention cap limits how
+    /// far back that tier has data — but <c>WHERE bucket_start_ms &gt;= from</c>
+    /// naturally returns only the rows that actually exist, so querying a
+    /// shorter-retention tier for a longer range just yields whatever data the
+    /// tier has (typically the most recent portion of the range at full
+    /// fidelity). This is strictly better than falling back to a coarser tier
+    /// that happens to have infinite retention: the user wants the finest
+    /// granularity available for whatever data the daemon has, not the coarsest
+    /// guaranteed-complete tier.
+    /// </para>
+    /// <para>
+    /// Fallback when no tier has <c>BucketSeconds ≤ resolution</c> (very fine
+    /// resolution asked against only-coarse tiers): return the finest tier
+    /// (first in the list). The caller receives data at the tier's native
+    /// bucket size, not at the requested resolution.
+    /// </para>
     /// </remarks>
     public static RollupTier Select(
         IReadOnlyList<RollupTier> tiers,
@@ -38,29 +41,46 @@ internal static class TierSelector {
         ArgumentNullException.ThrowIfNull(tiers);
         if (tiers.Count == 0) throw new ArgumentException("Tier list cannot be empty.", nameof(tiers));
 
-        var range = now - from;
-        if (range < TimeSpan.Zero) range = TimeSpan.Zero;
-
         RollupTier? best = null;
         foreach (var tier in tiers) {
             if (tier.BucketSeconds > resolution.TotalSeconds) continue;
-            if (!TierCoversRange(tier, range)) continue;
             if (best is null || tier.BucketSeconds > best.BucketSeconds) best = tier;
         }
         if (best is not null) return best;
 
-        // No tier matches both the resolution and range constraints. Fall back
-        // to the finest tier whose retention covers the range. Iterated in
-        // finest-to-coarsest order (the list's native order).
-        foreach (var tier in tiers) {
-            if (TierCoversRange(tier, range)) return tier;
-        }
-
-        // Shouldn't happen when a null-retention terminal tier exists, but
-        // handle it defensively: return the last tier.
-        return tiers[^1];
+        // Requested resolution is finer than any tier's bucket size. Return
+        // the finest tier available; caller gets data at that tier's granularity.
+        return tiers[0];
     }
 
-    private static bool TierCoversRange(RollupTier tier, TimeSpan range) =>
-        tier.Retention is null || tier.Retention.Value >= range;
+    /// <summary>
+    /// Picks the finest tier whose retention covers the given age. Used by
+    /// stitched multi-tier timeline queries to assign each output bucket to
+    /// the most precise tier that still has data for that bucket's age.
+    /// Null-retention tiers are treated as infinite and always cover any age.
+    /// </summary>
+    /// <remarks>
+    /// For a 2-year "All Time" query under Balanced, this routes:
+    /// <list type="bullet">
+    /// <item>age ≤ 10 min → <c>traffic_raw</c></item>
+    /// <item>age ≤ 7 days → <c>traffic_buckets_10s</c></item>
+    /// <item>age ≤ 14 days → <c>traffic_buckets_1m</c></item>
+    /// <item>age ≤ 1 year → <c>traffic_buckets_10m</c></item>
+    /// <item>age &gt; 1 year → <c>traffic_buckets_1h</c> (null retention)</item>
+    /// </list>
+    /// </remarks>
+    public static RollupTier SelectTierForAge(
+        IReadOnlyList<RollupTier> tiers,
+        TimeSpan age
+    ) {
+        ArgumentNullException.ThrowIfNull(tiers);
+        if (tiers.Count == 0) throw new ArgumentException("Tier list cannot be empty.", nameof(tiers));
+
+        foreach (var tier in tiers) {
+            if (tier.Retention is null || tier.Retention.Value >= age) return tier;
+        }
+
+        // No tier covers the age — defensive fallback to terminal tier.
+        return tiers[^1];
+    }
 }

@@ -303,4 +303,25 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
                 $"Failed to get country breakdown: {ex.Message}"));
         }
     }
+
+    public override async Task<Local.GetProcessSummariesResponse> GetProcessSummaries(
+        Local.GetProcessSummariesRequest request, ServerCallContext context
+    ) {
+        try {
+            var from = request.FromUnixNs.FromUnixTimeNanoseconds();
+            var to = request.ToUnixNs.FromUnixTimeNanoseconds();
+
+            var summaries = await _trafficStore.GetProcessSummariesAsync(
+                from, to, context.CancellationToken)
+                .ConfigureAwait(false);
+
+            var response = new Local.GetProcessSummariesResponse();
+            foreach (var summary in summaries) response.Summaries.Add(summary.ToProto());
+            return response;
+        } catch (Exception ex) when (ex is not RpcException) {
+            _logger.LogError(ex, "GetProcessSummaries failed");
+            throw new RpcException(new Status(StatusCode.Internal,
+                $"Failed to get process summaries: {ex.Message}"));
+        }
+    }
 }

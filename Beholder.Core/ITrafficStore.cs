@@ -71,6 +71,18 @@ public interface ITrafficStore {
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Returns all distinct processes with traffic in the given time range,
+    /// with aggregated byte totals. Unlike <c>GetSnapshot</c> (which only
+    /// returns processes the engine currently tracks in memory), this query
+    /// hits the tiered storage so historically-active processes appear even
+    /// after the engine has evicted them.
+    /// </summary>
+    Task<IReadOnlyList<ProcessTrafficSummary>> GetProcessSummariesAsync(
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Returns per-country traffic totals for a time range, suitable for the map
     /// tab's geographic heat map. Tier selection is retention-only.
     /// </summary>

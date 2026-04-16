@@ -312,14 +312,26 @@ internal sealed class TrafficChartControl : Control {
         return Brushes.Gray;
     }
 
+    /// <summary>
+    /// Rounds <paramref name="value"/> UP to the nearest "nice" axis maximum.
+    /// The nice set is {1, 1.5, 2, 3, 5, 7, 10} × 10^N. A finer-grained set
+    /// than the classic {1, 2, 5, 10} prevents 2× Y-axis jumps when a peak
+    /// bucket's value nudges across a 10^N boundary between queries — without
+    /// the intermediate 1.5/3/7 steps, a tiny value drift from 9.9e9 to 1.0e10
+    /// would flip the Y-axis from 1×10^10 to 2×10^10, which is visually jarring
+    /// even though the underlying data barely changed.
+    /// </summary>
     private static double NiceMax(double value) {
         if (value <= 0) return 1;
         var magnitude = Math.Pow(10, Math.Floor(Math.Log10(value)));
         var normalized = value / magnitude;
         double nice;
         if (normalized <= 1) nice = 1;
+        else if (normalized <= 1.5) nice = 1.5;
         else if (normalized <= 2) nice = 2;
+        else if (normalized <= 3) nice = 3;
         else if (normalized <= 5) nice = 5;
+        else if (normalized <= 7) nice = 7;
         else nice = 10;
         return nice * magnitude;
     }

@@ -153,9 +153,13 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             var from = range.From;
             var to = range.To;
             var spanMs = (long)(to - from).TotalMilliseconds;
+
+            // Target ~300 output buckets across the requested range. The daemon
+            // stitches multi-tier data across the range (finest tier for recent
+            // portions, coarsest for oldest), so the returned timeline is
+            // already optimally fidelity-balanced — no adaptive re-query needed.
             var resolutionMs = Math.Max(spanMs / 300, 1000);
 
-            // Query aggregate timeline for the chart
             var timelineRequest = new GetAggregateTimelineRequest {
                 FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000,
                 ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000,
@@ -175,7 +179,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
                 return;
             }
 
-            // Build chart data from the historical query
+            // Build chart data from the (possibly re-queried) historical response
             var downloadColor = ThemeColorHelper.Resolve("ChartOutboundStrokeColor");
             var uploadColor = ThemeColorHelper.Resolve("ChartInboundStrokeColor");
 
@@ -186,14 +190,45 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
                 uploadValues[i] = timelineResponse.Points[i].BytesOut;
             }
 
-            ChartDataSpan = to - from;
+            // Use the actual data extent for the X-axis, not the requested range.
+            var dataFirstMs = timelineResponse.Points[0].TimestampUnixNs / 1_000_000;
+            var dataLastMs = timelineResponse.Points[^1].TimestampUnixNs / 1_000_000;
+            var dataSpanMs = dataLastMs - dataFirstMs;
+
+            // Pad single-point responses so the chart renders a sharp spike
+            // instead of nothing. Layout: the burst sits ~1/11 of the way from
+            // the left (one lead-in zero, one burst point, nine trailing zeros),
+            // producing a sharp up-and-down peak on the left with empty trailing
+            // space. Reads as "this happened at the start of the window."
+            // Without padding, the bezier code early-returns for N<=1 points
+            // and axis labels hide for tickCount<2.
+            if (downloadValues.Length == 1) {
+                var burstIn = downloadValues[0];
+                var burstOut = uploadValues[0];
+                downloadValues = [0L, burstIn, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L];
+                uploadValues = [0L, burstOut, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L];
+                // Total span = 10 × bucket width (one bucket for the spike plus
+                // nine buckets of trailing empty space).
+                dataSpanMs = Math.Max(resolutionMs * 10, 10_000);
+            }
+
+            ChartDataSpan = TimeSpan.FromMilliseconds(Math.Max(dataSpanMs, 1000));
+
             ChartData = [
                 new ChartSeries("Download", downloadValues, downloadColor),
                 new ChartSeries("Upload", uploadValues, uploadColor),
             ];
 
-            // Query per-process totals for the process list
-            var snapshot = await _daemonClient.GetSnapshotAsync(CancellationToken.None);
+            // Query per-process totals for the process list. Uses the new
+            // GetProcessSummaries RPC which queries the tiered storage directly,
+            // so processes that the engine evicted from memory (idle >1 hour) still
+            // appear — unlike GetSnapshot which only returns currently-tracked processes.
+            var summariesRequest = new GetProcessSummariesRequest {
+                FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000,
+                ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000,
+            };
+            var summariesResponse = await _daemonClient.GetProcessSummariesAsync(
+                summariesRequest, CancellationToken.None);
             if (SelectedTimeRange != range) return;
 
             // Clear and rebuild the process list with historical totals
@@ -203,38 +238,14 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             long allHistIn = 0;
             long allHistOut = 0;
 
-            foreach (var snap in snapshot.Snapshots) {
-                var procRequest = new GetProcessTimelineRequest {
-                    ProcessPath = snap.ProcessPath,
-                    FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000,
-                    ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000,
-                    ResolutionMs = spanMs,
-                };
+            foreach (var summary in summariesResponse.Summaries) {
+                allHistIn += summary.TotalBytesIn;
+                allHistOut += summary.TotalBytesOut;
 
-                try {
-                    var procResponse = await _daemonClient.GetProcessTimelineAsync(
-                        procRequest, CancellationToken.None);
-                    if (SelectedTimeRange != range) return;
-
-                    long totalIn = 0;
-                    long totalOut = 0;
-                    foreach (var point in procResponse.Points) {
-                        totalIn += point.BytesIn;
-                        totalOut += point.BytesOut;
-                    }
-
-                    if (totalIn + totalOut == 0) continue;
-
-                    allHistIn += totalIn;
-                    allHistOut += totalOut;
-
-                    var item = new ProcessListItem(snap.ProcessPath, snap.ProcessName);
-                    item.UpdateTraffic(totalIn, totalOut);
-                    _processLookup[snap.ProcessPath] = item;
-                    ProcessList.Add(item);
-                } catch {
-                    // Per-process query is best-effort
-                }
+                var item = new ProcessListItem(summary.ProcessPath, summary.ProcessName);
+                item.UpdateTraffic(summary.TotalBytesIn, summary.TotalBytesOut);
+                _processLookup[summary.ProcessPath] = item;
+                ProcessList.Add(item);
             }
 
             _allProcessesItem.UpdateTraffic(allHistIn, allHistOut);
@@ -274,8 +285,90 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             SelectedProcess = _allProcessesItem;
             return;
         }
-        if (_lastStates is not null && SelectedTimeRange.IsLive)
-            RebuildChartData(_lastStates);
+        if (SelectedTimeRange.IsLive) {
+            if (_lastStates is not null)
+                RebuildChartData(_lastStates);
+        } else {
+            // In historical mode, re-query the chart for the selected process
+            // (or the aggregate if "All processes" is selected).
+            _ = LoadHistoricalChartForProcessAsync(SelectedTimeRange, value);
+        }
+    }
+
+    private async Task LoadHistoricalChartForProcessAsync(
+        TimeRangeSelection range, ProcessListItem selected) {
+        try {
+            var from = range.From;
+            var to = range.To;
+            var spanMs = (long)(to - from).TotalMilliseconds;
+
+            // Target ~300 output buckets. The daemon stitches multi-tier data,
+            // so no adaptive re-query is needed.
+            var resolutionMs = Math.Max(spanMs / 300, 1000);
+
+            IReadOnlyList<TrafficTimePoint> points;
+
+            if (selected.IsAll) {
+                var request = new GetAggregateTimelineRequest {
+                    FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000,
+                    ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000,
+                    ResolutionMs = resolutionMs,
+                };
+                var aggResponse = await _daemonClient.GetAggregateTimelineAsync(
+                    request, CancellationToken.None);
+                points = aggResponse.Points;
+            } else {
+                var request = new GetProcessTimelineRequest {
+                    ProcessPath = selected.ProcessPath,
+                    FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000,
+                    ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000,
+                    ResolutionMs = resolutionMs,
+                };
+                var procResponse = await _daemonClient.GetProcessTimelineAsync(
+                    request, CancellationToken.None);
+                points = procResponse.Points;
+            }
+
+            if (SelectedTimeRange != range || SelectedProcess != selected) return;
+
+            if (points.Count == 0) {
+                ChartData = [];
+                return;
+            }
+
+            var downloadColor = ThemeColorHelper.Resolve("ChartOutboundStrokeColor");
+            var uploadColor = ThemeColorHelper.Resolve("ChartInboundStrokeColor");
+
+            var downloadValues = new long[points.Count];
+            var uploadValues = new long[points.Count];
+            for (var i = 0; i < points.Count; i++) {
+                downloadValues[i] = points[i].BytesIn;
+                uploadValues[i] = points[i].BytesOut;
+            }
+
+            var dataFirstMs = points[0].TimestampUnixNs / 1_000_000;
+            var dataLastMs = points[^1].TimestampUnixNs / 1_000_000;
+            var dataSpanMs = dataLastMs - dataFirstMs;
+
+            // Single-point padding: burst on the left, nine trailing zeros
+            // for empty space. See LoadHistoricalRangeAsync for the full rationale.
+            if (downloadValues.Length == 1) {
+                var burstIn = downloadValues[0];
+                var burstOut = uploadValues[0];
+                downloadValues = [0L, burstIn, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L];
+                uploadValues = [0L, burstOut, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L];
+                dataSpanMs = Math.Max(resolutionMs * 10, 10_000);
+            }
+
+            ChartDataSpan = TimeSpan.FromMilliseconds(Math.Max(dataSpanMs, 1000));
+
+            ChartData = [
+                new ChartSeries("Download", downloadValues, downloadColor),
+                new ChartSeries("Upload", uploadValues, uploadColor),
+            ];
+        } catch {
+            // Best-effort — chart stays on its previous state
+        }
     }
 
     private void RemoveProcess(string processPath) {

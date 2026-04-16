@@ -116,22 +116,27 @@ public class SqliteTrafficStoreTests : IDisposable {
 
     [Fact]
     public async Task GetProcessTimelineAsync_GroupsByResolution() {
-        // Write four raw buckets at 0s/2s/5s/12s. Query at 9-second resolution
-        // so the tier selector picks traffic_raw (raw passes the bucket rule at
-        // 1 ≤ 9; _10s fails at 10 > 9). SQL GROUP BY re-bucketizes into two
-        // 9-second output windows: [0-9s) covers the first three source rows,
-        // [9-18s) covers the fourth.
+        // Write four raw buckets at 0s/2s/5s/2700s. Query at 9-second resolution.
+        // The store's adapter clamps effective resolution to min(requested,
+        // extent/300). Extent = 2700s, extent/300 = 9s, so effective stays at
+        // the requested 9s. SQL GROUP BY re-bucketizes into two 9-second output
+        // windows: [0-9s) covers the first three source rows, [2700-2709s)
+        // covers the fourth.
+        //
+        // BaseTime (2026-04-13 12:00 UTC) is exactly divisible by 9000 ms so
+        // bucket boundaries align to the row timestamps — keeps the assertions
+        // deterministic across runs.
         var buckets = new[] {
             CreateBucket(bytesIn: 100, bytesOut: 50, bucketStart: BaseTime),
             CreateBucket(bytesIn: 200, bytesOut: 100, bucketStart: BaseTime.AddSeconds(2)),
             CreateBucket(bytesIn: 300, bytesOut: 150, bucketStart: BaseTime.AddSeconds(5)),
-            CreateBucket(bytesIn: 400, bytesOut: 200, bucketStart: BaseTime.AddSeconds(12))
+            CreateBucket(bytesIn: 400, bytesOut: 200, bucketStart: BaseTime.AddSeconds(2700))
         };
         await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
 
         var timeline = await _store.GetProcessTimelineAsync(
             "C:/app/firefox.exe",
-            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(20),
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(2710),
             TimeSpan.FromSeconds(9),
             CancellationToken.None);
 
@@ -293,5 +298,174 @@ public class SqliteTrafficStoreTests : IDisposable {
             _store.GetAggregateTimelineAsync(
                 BaseTime, BaseTime.AddHours(1),
                 TimeSpan.FromSeconds(-1), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetAggregateTimelineAsync_StitchesAcrossTiers() {
+        // Verify the stitched multi-tier query: each time slice of the range is
+        // served by the finest tier whose retention covers that slice. Under the
+        // Balanced preset at BaseTime:
+        //   - raw (retention 10min) serves [now-10min, now)
+        //   - _10s (retention 7d) serves [now-7d, now-10min)
+        //   - _1m (retention 14d) serves [now-14d, now-7d)
+        // Seed one distinguishable row in each tier, query the full 14d range,
+        // and verify all three rows appear at their expected timestamps.
+        var databasePath = Path.Combine(_tempDir, "beholder.db");
+        var connectionFactory = new ConnectionFactory(databasePath, pooling: false);
+
+        // Raw: 5 minutes ago (inside raw's 10-min slice)
+        await InsertDirectAsync(connectionFactory, "traffic_raw",
+            bucketStart: BaseTime.AddMinutes(-5), bucketSeconds: 1,
+            bytesIn: 111, bytesOut: 11);
+
+        // _10s: 1 day ago (inside _10s's [10min, 7d] slice)
+        await InsertDirectAsync(connectionFactory, "traffic_buckets_10s",
+            bucketStart: BaseTime.AddDays(-1), bucketSeconds: 10,
+            bytesIn: 222, bytesOut: 22);
+
+        // _1m: 10 days ago (inside _1m's [7d, 14d] slice)
+        await InsertDirectAsync(connectionFactory, "traffic_buckets_1m",
+            bucketStart: BaseTime.AddDays(-10), bucketSeconds: 60,
+            bytesIn: 333, bytesOut: 33);
+
+        var timeline = await _store.GetAggregateTimelineAsync(
+            BaseTime.AddDays(-14), BaseTime,
+            TimeSpan.FromMinutes(1),
+            CancellationToken.None);
+
+        Assert.Equal(3, timeline.Count);
+
+        // Ordered by timestamp (oldest → newest). Verify each tier's row came
+        // from the correct tier by checking the byte values we seeded.
+        Assert.Equal(333, timeline[0].BytesIn);  // from _1m
+        Assert.Equal(33, timeline[0].BytesOut);
+        Assert.Equal(222, timeline[1].BytesIn);  // from _10s
+        Assert.Equal(22, timeline[1].BytesOut);
+        Assert.Equal(111, timeline[2].BytesIn);  // from raw
+        Assert.Equal(11, timeline[2].BytesOut);
+    }
+
+    [Fact]
+    public async Task GetAggregateTimelineAsync_SameDataDifferentRanges_ReturnsIdenticalArrays() {
+        // Locks in the "same data → same chart" guarantee. The daemon picks
+        // effectiveResolutionMs purely from actual data extent (ignoring the
+        // caller's resolutionMs hint), so three different request windows that
+        // all wrap the same underlying data return identical arrays.
+        //
+        // Scenario: two rows in the _10s tier (2d4h span). Query "last 7d" /
+        // "last 30d" / "all time" (56y). All three queries hit the _10s slice
+        // [now-7d, now-10min) which is identical across the three requests,
+        // see the same (dataMin, dataMax), pick the same nice bucket width,
+        // and return identical output.
+        //
+        // Both rows go into _10s (not _1m) because Balanced's _10s slice spans
+        // [now-7d, now-10min), which is where BOTH BaseTime-2d and BaseTime-4h
+        // fall. Seeding a row in _1m at BaseTime-2d would NOT be visible to
+        // the stitch — the _1m slice is [now-14d, now-7d), which BaseTime-2d
+        // is newer than and thus excluded.
+        var factory = new ConnectionFactory(Path.Combine(_tempDir, "beholder.db"), pooling: false);
+        await InsertDirectAsync(factory, "traffic_buckets_10s",
+            bucketStart: BaseTime.AddDays(-2),
+            bucketSeconds: 10, bytesIn: 1000, bytesOut: 100);
+        await InsertDirectAsync(factory, "traffic_buckets_10s",
+            bucketStart: BaseTime.AddHours(-4),
+            bucketSeconds: 10, bytesIn: 2000, bytesOut: 200);
+
+        // Three ranges, same underlying data. Caller-side resolutions match
+        // what the UI computes today: range / 300. The daemon ignores these
+        // values for bucket-width purposes.
+        var last7d = await _store.GetAggregateTimelineAsync(
+            BaseTime.AddDays(-7), BaseTime,
+            TimeSpan.FromMilliseconds(TimeSpan.FromDays(7).TotalMilliseconds / 300),
+            CancellationToken.None);
+        var last30d = await _store.GetAggregateTimelineAsync(
+            BaseTime.AddDays(-30), BaseTime,
+            TimeSpan.FromMilliseconds(TimeSpan.FromDays(30).TotalMilliseconds / 300),
+            CancellationToken.None);
+        var allTime = await _store.GetAggregateTimelineAsync(
+            DateTimeOffset.UnixEpoch, BaseTime,
+            TimeSpan.FromMilliseconds((BaseTime - DateTimeOffset.UnixEpoch).TotalMilliseconds / 300),
+            CancellationToken.None);
+
+        // All three responses must be byte-for-byte equal.
+        Assert.Equal(last7d.Count, last30d.Count);
+        Assert.Equal(last7d.Count, allTime.Count);
+
+        for (int i = 0; i < last7d.Count; i++) {
+            Assert.Equal(last7d[i].Timestamp, last30d[i].Timestamp);
+            Assert.Equal(last7d[i].Timestamp, allTime[i].Timestamp);
+            Assert.Equal(last7d[i].BytesIn, last30d[i].BytesIn);
+            Assert.Equal(last7d[i].BytesIn, allTime[i].BytesIn);
+            Assert.Equal(last7d[i].BytesOut, last30d[i].BytesOut);
+            Assert.Equal(last7d[i].BytesOut, allTime[i].BytesOut);
+        }
+    }
+
+    [Fact]
+    public async Task GetAggregateTimelineAsync_TimeDriftWithinMinute_ReturnsIdenticalArrays() {
+        // Locks in the minute-snapping of nowMs. Two queries taken 30 seconds
+        // apart (same minute) see the same snapped nowMs, so their slice
+        // boundaries are identical, extent is identical, and output is
+        // byte-for-byte identical. Without minute-snapping, the slice
+        // boundaries shift with each tick and the GROUP BY grid drifts,
+        // causing the chart's peak bucket to flicker across NiceMax
+        // decade boundaries.
+        var factory = new ConnectionFactory(Path.Combine(_tempDir, "beholder.db"), pooling: false);
+        await InsertDirectAsync(factory, "traffic_buckets_10s",
+            bucketStart: BaseTime.AddDays(-2),
+            bucketSeconds: 10, bytesIn: 1000, bytesOut: 100);
+        await InsertDirectAsync(factory, "traffic_buckets_10s",
+            bucketStart: BaseTime.AddHours(-4),
+            bucketSeconds: 10, bytesIn: 2000, bytesOut: 200);
+
+        var first = await _store.GetAggregateTimelineAsync(
+            BaseTime.AddDays(-7), BaseTime,
+            TimeSpan.FromMilliseconds(TimeSpan.FromDays(7).TotalMilliseconds / 300),
+            CancellationToken.None);
+
+        // Advance the clock by 30 seconds — still inside the same minute.
+        _timeProvider.Advance(TimeSpan.FromSeconds(30));
+
+        var second = await _store.GetAggregateTimelineAsync(
+            BaseTime.AddDays(-7), BaseTime,
+            TimeSpan.FromMilliseconds(TimeSpan.FromDays(7).TotalMilliseconds / 300),
+            CancellationToken.None);
+
+        Assert.Equal(first.Count, second.Count);
+        for (int i = 0; i < first.Count; i++) {
+            Assert.Equal(first[i].Timestamp, second[i].Timestamp);
+            Assert.Equal(first[i].BytesIn, second[i].BytesIn);
+            Assert.Equal(first[i].BytesOut, second[i].BytesOut);
+        }
+    }
+
+    /// <summary>
+    /// Writes a single row directly into the given tier table, bypassing the
+    /// rollup service. Used by multi-tier stitch tests to seed tier tables
+    /// independently without spinning up the full rollup pipeline.
+    /// </summary>
+    private static async Task InsertDirectAsync(
+        ConnectionFactory factory,
+        string tableName,
+        DateTimeOffset bucketStart,
+        int bucketSeconds,
+        long bytesIn,
+        long bytesOut
+    ) {
+        using var connection = factory.CreateConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            INSERT INTO {tableName}
+                (process_path, process_name, remote_address, remote_port,
+                 hostname, country, bytes_in, bytes_out, bucket_start_ms, bucket_seconds)
+            VALUES
+                ('C:/app/firefox.exe', 'firefox.exe', '93.184.216.34', 443,
+                 'example.com', 'US', $bytesIn, $bytesOut, $bucketStartMs, $bucketSeconds);
+            """;
+        command.Parameters.AddWithValue("$bytesIn", bytesIn);
+        command.Parameters.AddWithValue("$bytesOut", bytesOut);
+        command.Parameters.AddWithValue("$bucketStartMs", bucketStart.ToUnixTimeMilliseconds());
+        command.Parameters.AddWithValue("$bucketSeconds", bucketSeconds);
+        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 }

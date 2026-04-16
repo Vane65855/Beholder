@@ -155,6 +155,13 @@ internal sealed class DaemonClient : IDaemonClient {
         return await _client!.GetCountryBreakdownAsync(request, cancellationToken: ct);
     }
 
+    public async Task<GetProcessSummariesResponse> GetProcessSummariesAsync(
+        GetProcessSummariesRequest request, CancellationToken ct) {
+        ArgumentNullException.ThrowIfNull(request);
+        EnsureConnected();
+        return await _client!.GetProcessSummariesAsync(request, cancellationToken: ct);
+    }
+
     public AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken ct) {
         EnsureConnected();
         return _client!.Subscribe(new SubscribeRequest(), cancellationToken: ct);

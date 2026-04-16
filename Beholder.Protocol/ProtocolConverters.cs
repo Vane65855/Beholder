@@ -143,6 +143,16 @@ internal static class ProtocolConverters {
         };
     }
 
+    /// <summary>Maps a process traffic summary onto its wire equivalent.</summary>
+    public static Local.ProcessTrafficSummaryProto ToProto(this Core.ProcessTrafficSummary source) {
+        return new Local.ProcessTrafficSummaryProto {
+            ProcessPath = source.ProcessPath,
+            ProcessName = source.ProcessName,
+            TotalBytesIn = source.TotalBytesIn,
+            TotalBytesOut = source.TotalBytesOut,
+        };
+    }
+
     // ---- Traffic query adapters (Proto → Core) ----
 
     /// <summary>Converts Unix nanoseconds (millisecond precision) back to a DateTimeOffset.</summary>

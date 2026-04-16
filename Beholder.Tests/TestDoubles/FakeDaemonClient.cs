@@ -73,6 +73,10 @@ internal sealed class FakeDaemonClient : IDaemonClient {
         GetCountryBreakdownRequest request, CancellationToken ct) =>
         Task.FromResult(new GetCountryBreakdownResponse());
 
+    public Task<GetProcessSummariesResponse> GetProcessSummariesAsync(
+        GetProcessSummariesRequest request, CancellationToken ct) =>
+        Task.FromResult(new GetProcessSummariesResponse());
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
