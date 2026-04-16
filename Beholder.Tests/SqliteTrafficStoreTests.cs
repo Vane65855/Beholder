@@ -284,6 +284,96 @@ public class SqliteTrafficStoreTests : IDisposable {
         Assert.Contains(breakdown, c => c.Country == CountryCode.Unknown);
     }
 
+    // ---- GetProcessSummariesAsync ----
+
+    [Fact]
+    public async Task GetProcessSummariesAsync_AggregatesPerProcess_ReturnsOneRowPerProcess() {
+        var buckets = new[] {
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         bytesIn: 100, bytesOut: 50, remoteAddress: "1.1.1.1"),
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         bytesIn: 200, bytesOut: 100, remoteAddress: "2.2.2.2"),
+            CreateBucket(processPath: "C:/app/chrome.exe", processName: "chrome.exe",
+                         bytesIn: 400, bytesOut: 200, remoteAddress: "3.3.3.3"),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var summaries = await _store.GetProcessSummariesAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), CancellationToken.None);
+
+        Assert.Equal(2, summaries.Count);
+
+        var firefox = summaries.First(s => s.ProcessPath == "C:/app/firefox.exe");
+        Assert.Equal("firefox.exe", firefox.ProcessName);
+        Assert.Equal(300, firefox.TotalBytesIn);
+        Assert.Equal(150, firefox.TotalBytesOut);
+
+        var chrome = summaries.First(s => s.ProcessPath == "C:/app/chrome.exe");
+        Assert.Equal("chrome.exe", chrome.ProcessName);
+        Assert.Equal(400, chrome.TotalBytesIn);
+        Assert.Equal(200, chrome.TotalBytesOut);
+    }
+
+    [Fact]
+    public async Task GetProcessSummariesAsync_OrdersByTotalBytesDesc() {
+        // The SQL ORDER BY is SUM(bytes_in) + SUM(bytes_out) DESC — highest total first.
+        var buckets = new[] {
+            CreateBucket(processPath: "C:/app/low.exe",  processName: "low.exe",
+                         bytesIn: 10, bytesOut: 5),
+            CreateBucket(processPath: "C:/app/high.exe", processName: "high.exe",
+                         bytesIn: 1000, bytesOut: 500),
+            CreateBucket(processPath: "C:/app/mid.exe",  processName: "mid.exe",
+                         bytesIn: 100, bytesOut: 50),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var summaries = await _store.GetProcessSummariesAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), CancellationToken.None);
+
+        Assert.Equal(3, summaries.Count);
+        Assert.Equal("C:/app/high.exe", summaries[0].ProcessPath);
+        Assert.Equal("C:/app/mid.exe",  summaries[1].ProcessPath);
+        Assert.Equal("C:/app/low.exe",  summaries[2].ProcessPath);
+    }
+
+    [Fact]
+    public async Task GetProcessSummariesAsync_FiltersByRange_ExcludesOutsideBuckets() {
+        var buckets = new[] {
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         bytesIn: 100, bytesOut: 50, bucketStart: BaseTime),
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         bytesIn: 999, bytesOut: 999,
+                         bucketStart: BaseTime.AddHours(2)),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var summaries = await _store.GetProcessSummariesAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), CancellationToken.None);
+
+        Assert.Single(summaries);
+        Assert.Equal(100, summaries[0].TotalBytesIn);
+        Assert.Equal(50,  summaries[0].TotalBytesOut);
+    }
+
+    [Fact]
+    public async Task GetProcessSummariesAsync_EmptyRange_ReturnsEmpty() {
+        var bucket = CreateBucket();
+        await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
+
+        var summaries = await _store.GetProcessSummariesAsync(
+            BaseTime.AddHours(1), BaseTime.AddHours(2), CancellationToken.None);
+
+        Assert.Empty(summaries);
+    }
+
+    [Fact]
+    public async Task GetProcessSummariesAsync_NoData_ReturnsEmpty() {
+        var summaries = await _store.GetProcessSummariesAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), CancellationToken.None);
+
+        Assert.Empty(summaries);
+    }
+
     [Fact]
     public async Task GetProcessTimelineAsync_InvalidResolution_Throws() {
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
