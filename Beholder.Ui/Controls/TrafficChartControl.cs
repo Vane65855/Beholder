@@ -21,6 +21,32 @@ internal sealed class TrafficChartControl : Control {
     private const int MaxYTicks = 5;
     private const int MaxXTicks = 6;
 
+    // Typeface is content-independent. Cached statically so FormattedText
+    // construction at each tick avoids the FontManager resolution inside.
+    private static readonly Typeface s_axisLabelTypeface = new(
+        "Segoe UI", FontStyle.Normal, FontWeight.Normal);
+
+    // Theme-resolved brushes/pens. Null until first use; cleared on
+    // ResourcesChanged so a future theme swap re-resolves on the next render.
+    private IBrush? _gridlineBrush;
+    private IBrush? _axisLabelBrush;
+    private Pen? _gridlinePen;
+
+    private IBrush GridlineBrush => _gridlineBrush ??= ResolveBrush("ChartGridline");
+    private IBrush AxisLabelBrush => _axisLabelBrush ??= ResolveBrush("ChartAxisLabel");
+    private Pen GridlinePen => _gridlinePen ??= new Pen(GridlineBrush, 1);
+
+    // Per-series-color cache. Practical cardinality is 2 (Download teal,
+    // Upload purple); bounded by the 12-entry series palette if future phases
+    // introduce per-process colors.
+    private readonly Dictionary<Color, SeriesResources> _seriesCache = new();
+
+    // Reusable geometry buffers. Grown on demand; never shrunk. Shared across
+    // series within a single render — safe because each series's span view
+    // is bounded to that series's values.Count.
+    private Point[] _pointsBuffer = [];
+    private double[] _peakBuffer = [];
+
     public static readonly StyledProperty<IReadOnlyList<ChartSeries>?> SeriesDataProperty =
         AvaloniaProperty.Register<TrafficChartControl, IReadOnlyList<ChartSeries>?>(nameof(SeriesData));
 
@@ -61,12 +87,9 @@ internal sealed class TrafficChartControl : Control {
 
         if (chartWidth < 10 || chartHeight < 10) return;
 
-        var gridlinePen = new Pen(ResolveBrush("ChartGridline"), 1);
-        var axisLabelBrush = ResolveBrush("ChartAxisLabel");
-
         var series = SeriesData;
         if (series is null || series.Count == 0) {
-            DrawAxes(context, chartLeft, chartTop, chartRight, chartBottom, gridlinePen);
+            DrawAxes(context, chartLeft, chartTop, chartRight, chartBottom, GridlinePen);
             return;
         }
 
@@ -82,21 +105,24 @@ internal sealed class TrafficChartControl : Control {
             // array (see TrafficTabViewModel.LoadHistoricalRangeAsync), but this guard
             // is the defense-in-depth safety net for any path that bypasses padding.
             // Consistent with DrawTimeLabels' own tickCount < 2 early-return.
-            DrawAxes(context, chartLeft, chartTop, chartRight, chartBottom, gridlinePen);
+            DrawAxes(context, chartLeft, chartTop, chartRight, chartBottom, GridlinePen);
             return;
         }
 
-        // Compute per-sample peak across overlaid series (not sum — they're not stacked)
-        var peak = new double[maxSamples];
+        // Compute per-sample peak across overlaid series (not sum — they're not stacked).
+        // _peakBuffer is reused across renders; grow if the series widened, and clear
+        // the active slice because a reused buffer may hold stale values.
+        if (_peakBuffer.Length < maxSamples) _peakBuffer = new double[maxSamples];
+        Array.Clear(_peakBuffer, 0, maxSamples);
         foreach (var s in series) {
             for (var i = 0; i < s.Values.Count; i++) {
-                if (s.Values[i] > peak[i]) peak[i] = s.Values[i];
+                if (s.Values[i] > _peakBuffer[i]) _peakBuffer[i] = s.Values[i];
             }
         }
 
         var maxValue = 0.0;
-        foreach (var v in peak) {
-            if (v > maxValue) maxValue = v;
+        for (var i = 0; i < maxSamples; i++) {
+            if (_peakBuffer[i] > maxValue) maxValue = _peakBuffer[i];
         }
         if (maxValue < 1) maxValue = 1;
 
@@ -105,18 +131,18 @@ internal sealed class TrafficChartControl : Control {
 
         // Draw gridlines and Y axis labels
         DrawGridlines(context, chartLeft, chartTop, chartRight, chartBottom,
-            chartHeight, maxValue, gridlinePen, axisLabelBrush);
+            chartHeight, maxValue, GridlinePen, AxisLabelBrush);
 
         // Draw X axis labels (time)
         DrawTimeLabels(context, chartLeft, chartBottom, chartWidth,
-            maxSamples, DataSpan, axisLabelBrush);
+            maxSamples, DataSpan, AxisLabelBrush);
 
         // Draw overlaid area series
         DrawAreas(context, series, chartLeft, chartTop, chartWidth, chartHeight,
             maxSamples, maxValue);
 
         // Draw border
-        DrawAxes(context, chartLeft, chartTop, chartRight, chartBottom, gridlinePen);
+        DrawAxes(context, chartLeft, chartTop, chartRight, chartBottom, GridlinePen);
     }
 
     private static void DrawAxes(DrawingContext context, double left, double top,
@@ -128,7 +154,6 @@ internal sealed class TrafficChartControl : Control {
     private static void DrawGridlines(DrawingContext context, double left, double top,
         double right, double bottom, double height, double maxValue,
         Pen pen, IBrush labelBrush) {
-        var typeface = new Typeface("Segoe UI", FontStyle.Normal, FontWeight.Normal);
         for (var i = 0; i <= MaxYTicks; i++) {
             var ratio = i / (double)MaxYTicks;
             var y = bottom - ratio * height;
@@ -138,14 +163,13 @@ internal sealed class TrafficChartControl : Control {
             var value = (long)(ratio * maxValue);
             var label = ByteFormatter.FormatRate(value);
             var text = new FormattedText(label, System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, typeface, 10, labelBrush);
+                FlowDirection.LeftToRight, s_axisLabelTypeface, 10, labelBrush);
             context.DrawText(text, new Point(left - text.Width - 6, y - text.Height / 2));
         }
     }
 
     private static void DrawTimeLabels(DrawingContext context, double left, double bottom,
         double width, int sampleCount, TimeSpan? dataSpan, IBrush labelBrush) {
-        var typeface = new Typeface("Segoe UI", FontStyle.Normal, FontWeight.Normal);
         var tickCount = Math.Min(MaxXTicks, sampleCount);
         if (tickCount < 2) return;
 
@@ -158,7 +182,7 @@ internal sealed class TrafficChartControl : Control {
             var secondsAgo = (1.0 - ratio) * totalSeconds;
             var label = FormatTimeLabel(secondsAgo, totalSeconds);
             var text = new FormattedText(label, System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, typeface, 10, labelBrush);
+                FlowDirection.LeftToRight, s_axisLabelTypeface, 10, labelBrush);
             var x = left + ratio * width - text.Width / 2;
             context.DrawText(text, new Point(x, bottom + 6));
         }
@@ -189,10 +213,14 @@ internal sealed class TrafficChartControl : Control {
         return $"-{days}d {hours}h";
     }
 
-    private static void DrawAreas(DrawingContext context, IReadOnlyList<ChartSeries> seriesList,
+    private void DrawAreas(DrawingContext context, IReadOnlyList<ChartSeries> seriesList,
         double left, double top, double width, double height,
         int maxSamples, double maxValue) {
         var baselineY = top + height;
+
+        // Reusable points buffer, shared across series within this render.
+        // Grow on demand; maxSamples is the upper bound across all series.
+        if (_pointsBuffer.Length < maxSamples) _pointsBuffer = new Point[maxSamples];
 
         foreach (var series in seriesList) {
             var values = series.Values;
@@ -201,30 +229,29 @@ internal sealed class TrafficChartControl : Control {
             // Build chart-space points for this series. Right-align: skip leading zeros
             // implicitly by using the same x-step as maxSamples.
             var offset = maxSamples - values.Count;
-            var points = new Point[values.Count];
             for (var i = 0; i < values.Count; i++) {
                 var sampleIndex = offset + i;
                 var x = left + (sampleIndex / (double)(maxSamples - 1)) * width;
                 var y = top + height - (values[i] / maxValue) * height;
-                points[i] = new Point(x, y);
+                _pointsBuffer[i] = new Point(x, y);
             }
+            var points = new ReadOnlySpan<Point>(_pointsBuffer, 0, values.Count);
+
+            var resources = GetSeriesResources(series.Color);
 
             // Fill
             var fillGeometry = new StreamGeometry();
             using (var ctx = fillGeometry.Open()) {
                 FillSmoothArea(ctx, points, top, baselineY);
             }
-            var fillColor = series.Color;
-            var fillBrush = new SolidColorBrush(Color.FromArgb(77, fillColor.R, fillColor.G, fillColor.B));
-            context.DrawGeometry(fillBrush, null, fillGeometry);
+            context.DrawGeometry(resources.Fill, null, fillGeometry);
 
             // Stroke (top edge only)
             var strokeGeometry = new StreamGeometry();
             using (var ctx = strokeGeometry.Open()) {
                 StrokeSmoothPath(ctx, points, top, baselineY);
             }
-            var strokeBrush = new SolidColorBrush(fillColor);
-            context.DrawGeometry(null, new Pen(strokeBrush, 1.5), strokeGeometry);
+            context.DrawGeometry(null, resources.Pen, strokeGeometry);
         }
     }
 
@@ -234,7 +261,7 @@ internal sealed class TrafficChartControl : Control {
     /// values are clamped to <c>[top, baselineY]</c> to prevent the spline from
     /// overshooting the data envelope — see <see cref="ClampY"/>.
     /// </summary>
-    private static void StrokeSmoothPath(StreamGeometryContext ctx, Point[] points,
+    private static void StrokeSmoothPath(StreamGeometryContext ctx, ReadOnlySpan<Point> points,
         double top, double baselineY) {
         if (points.Length == 0) return;
         ctx.BeginFigure(points[0], false);
@@ -269,7 +296,7 @@ internal sealed class TrafficChartControl : Control {
     /// Control point Y values are clamped to <c>[top, baselineY]</c> — see
     /// <see cref="ClampY"/>.
     /// </summary>
-    private static void FillSmoothArea(StreamGeometryContext ctx, Point[] points,
+    private static void FillSmoothArea(StreamGeometryContext ctx, ReadOnlySpan<Point> points,
         double top, double baselineY) {
         if (points.Length == 0) return;
 
@@ -317,6 +344,39 @@ internal sealed class TrafficChartControl : Control {
             return brush;
         return Brushes.Gray;
     }
+
+    private SeriesResources GetSeriesResources(Color color) {
+        if (_seriesCache.TryGetValue(color, out var cached)) return cached;
+        var stroke = new SolidColorBrush(color);
+        var fillColor = Color.FromArgb(77, color.R, color.G, color.B);
+        var fill = new SolidColorBrush(fillColor);
+        var pen = new Pen(stroke, 1.5);
+        cached = new SeriesResources(fill, stroke, pen);
+        _seriesCache[color] = cached;
+        return cached;
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e) {
+        base.OnAttachedToVisualTree(e);
+        ResourcesChanged += OnResourcesChanged;
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e) {
+        base.OnDetachedFromVisualTree(e);
+        ResourcesChanged -= OnResourcesChanged;
+    }
+
+    private void OnResourcesChanged(object? sender, ResourcesChangedEventArgs e) {
+        // Theme or resource dictionary changed — cached brushes/pens may now
+        // reference stale colors. Clear and let the next Render re-resolve.
+        _gridlineBrush = null;
+        _axisLabelBrush = null;
+        _gridlinePen = null;
+        _seriesCache.Clear();
+        InvalidateVisual();
+    }
+
+    private readonly record struct SeriesResources(IBrush Fill, IBrush Stroke, Pen Pen);
 
     /// <summary>
     /// Rounds <paramref name="value"/> UP to the nearest "nice" axis maximum.
