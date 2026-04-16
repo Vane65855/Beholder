@@ -238,14 +238,14 @@ Traffic data is stored across five tiers of progressively coarser time resolutio
   traffic_raw           1 s buckets    ┐
      │                                 │
      ▼ rollup every 10 s               │
-  traffic_buckets_10s   10 s buckets   │  SELECT routes to the
-     │                                 │  coarsest tier whose
-     ▼ rollup every 1 min              │  bucketSeconds ≤ requested
-  traffic_buckets_1m    1 min buckets  │  resolution AND whose
-     │                                 │  retention covers the range
-     ▼ rollup every 10 min             │
-  traffic_buckets_10m   10 min buckets │
+  traffic_buckets_10s   10 s buckets   │  Timeline reads STITCH across
+     │                                 │  all tiers: recent time slices
+     ▼ rollup every 1 min              │  served by the finest-retention
+  traffic_buckets_1m    1 min buckets  │  tier that covers them.
      │                                 │
+     ▼ rollup every 10 min             │  Single-tier aggregate reads
+  traffic_buckets_10m   10 min buckets │  pick the coarsest tier whose
+     │                                 │  bucketSeconds ≤ resolution.
      ▼ rollup every 1 hour             │
   traffic_buckets_1h    1 hour buckets ┘  (terminal; retention = ∞ by default)
 ```
@@ -254,14 +254,38 @@ All five tiers share an identical column schema — tier selection is just a tab
 
 **Rollup invariant.** For any time range `[t0, t1]` and any pair of tiers `A`, `B` where both retain the range, `SUM(bytes_in + bytes_out)` from `A` equals the same sum from `B`. The cascade preserves this by design: each rollup step is a single `INSERT ... SELECT ... GROUP BY process_path, process_name, remote_address, remote_port, target_bucket_start`, summing `bytes_in` / `bytes_out` across source rows. Enforced by `Beholder.Tests/RollupServiceTests.cs → RollupInvariant_Holds_AcrossAllTiers`.
 
-**Tier selection rule.** When a query arrives at `SqliteTrafficStore`, the store delegates to `TierSelector.Select(tiers, from, resolution, now)`:
+**Read-side: two different selection rules, depending on the query type.**
 
-1. Find all tiers whose `BucketSeconds ≤ resolution.TotalSeconds` AND whose `Retention` covers `now - from`.
-2. Among those, return the **coarsest** (largest `BucketSeconds`), minimizing rows scanned.
-3. If no tier satisfies both constraints, fall back to the **finest** tier whose retention covers the range. The served data's granularity is the tier's native bucket size, not the caller's requested resolution.
-4. If no tier retains the range (impossible when a null-retention terminal tier exists), return the last tier.
+*Single-tier queries* (`GetProcessDestinationsAsync`, `GetCountryBreakdownAsync`, `GetProcessSummariesAsync`) — queries that return an aggregate summary over a range, not a timeline. These delegate to `TierSelector.Select(tiers, from, resolution, now)`:
 
-Queries without a resolution parameter (`GetProcessDestinationsAsync`, `GetCountryBreakdownAsync`) use a pseudo-resolution of `(to - from) / 300` with a 1-second floor, matching timeline-query tier selection for the same range.
+1. Find the coarsest tier whose `BucketSeconds ≤ resolution.TotalSeconds` (fewer rows scanned).
+2. If no tier matches, fall back to the finest tier (first in the list). The caller receives data at the tier's native bucket size.
+
+Retention is **not** a filter here. A tier's retention cap limits how far back that tier has data, but `WHERE bucket_start_ms >= from` naturally returns only the rows that actually exist, so querying a shorter-retention tier for a longer range just yields whatever data the tier has (typically the most recent portion of the range at full fidelity). This is strictly better than falling back to a coarser tier that happens to have infinite retention — the user wants the finest granularity available for whatever data exists, not the coarsest guaranteed-complete tier.
+
+Queries without a resolution parameter (`GetProcessDestinationsAsync`, `GetCountryBreakdownAsync`, `GetProcessSummariesAsync`) use a pseudo-resolution of `(to - from) / 300` with a 1-second floor, so tier choice stays consistent with timeline queries over the same range.
+
+*Timeline queries* (`GetAggregateTimelineAsync`, `GetProcessTimelineAsync`) — these use a **stitched multi-tier** query that partitions the request range into non-overlapping slices, one per tier, and serves each slice from its finest-retention tier. Walking finest → coarsest:
+
+- `traffic_raw` serves `[now − 10 min, now)`
+- `traffic_buckets_10s` serves `[now − 7 d, now − 10 min)`
+- `traffic_buckets_1m` serves `[now − 14 d, now − 7 d)`
+- `traffic_buckets_10m` serves `[now − 1 y, now − 14 d)`
+- `traffic_buckets_1h` serves everything older (retention `null`)
+
+(Boundaries are Balanced preset; Compact preset has shorter retentions but the partitioning logic is identical.) Each slice issues one SQL query against its tier's table; results merge by output-bucket timestamp in C#. Recent events stay sharp; older data degrades smoothly within the same chart. Helper `TierSelector.SelectTierForAge(tiers, age)` returns the finest tier whose retention covers a given age — used when the slicing logic asks "what's the tier for this slice's age?".
+
+**Bucket-width stability for timeline queries.** The stitched query computes the output-bucket width purely from actual data extent inside the request range:
+
+```
+effectiveResolutionMs = smallest entry of NiceResolutionsMs ≥ (extent / 400)
+```
+
+with `NiceResolutionsMs = [1s, 5s, 10s, 30s, 1min, 5min, 10min, 30min, 1h, 6h, 1day]`. The caller's `resolution_ms` parameter is accepted for backward compatibility but intentionally ignored here — honoring it would make the same underlying data produce different-width buckets at 7d vs 30d vs All Time, violating "same data → same chart."
+
+**`nowMs` is snapped to the start of the current minute** before any slice boundary is computed. Queries issued inside the same wall-clock minute share slice boundaries exactly and return byte-identical arrays on unchanged data — so rapid re-queries (e.g., user switching between range presets) don't introduce drift that `NiceMax` in the chart would amplify to 2× Y-axis jumps.
+
+See `Beholder.Daemon/Storage/SqliteTrafficStore.cs → StitchMultiTierTimelineAsync` for the implementation and `Beholder.Tests/SqliteTrafficStoreTests.cs → GetAggregateTimelineAsync_StitchesAcrossTiers / SameDataDifferentRanges / TimeDriftWithinMinute` for the guarantees.
 
 **Watermark.** The rollup service does not maintain a watermark table. Each cascade step queries `SELECT MAX(bucket_start_ms) FROM target_tier` to find where the target left off, then processes source rows with `bucket_start_ms >= watermark AND bucket_start_ms < aligned_now`, where `aligned_now = floor(now / target_bucket_ms) * target_bucket_ms`. This design is self-correcting across daemon restarts — the service always resumes from the target's own history — and adds only a microsecond `MAX` lookup per tick (the target tier is indexed on `bucket_start_ms`). Partial target buckets are never rolled; only fully-closed target windows cross the aligned-now boundary.
 
@@ -296,7 +320,7 @@ The two controls compose naturally: `Balanced + Infinite` (default) = keep every
 
 **Self-traffic filter interaction.** The Phase 4.7 self-traffic filter runs at ingestion before the `Channel<FlowEvent>`, so filtered events never enter any tier. Beholder's own processes are absent from every tier regardless of preset.
 
-**Cross-references.** See `Beholder.Daemon/RollupOptions.cs` for the preset definitions, `Beholder.Daemon/Storage/TierSelector.cs` for the selection rule, `Beholder.Daemon/Pipeline/RollupService.cs` for the cascade service, and `Beholder.Tests/RollupServiceTests.cs` / `TierSelectionTests.cs` / `RollupOptionsPresetTests.cs` for the invariant's enforcement.
+**Cross-references.** See `Beholder.Daemon/RollupOptions.cs` for the preset definitions, `Beholder.Daemon/Storage/TierSelector.cs` for `Select` and `SelectTierForAge`, `Beholder.Daemon/Storage/SqliteTrafficStore.cs → StitchMultiTierTimelineAsync` for the stitched timeline read path, `Beholder.Daemon/Pipeline/RollupService.cs` for the cascade service, and `Beholder.Tests/RollupServiceTests.cs` / `TierSelectionTests.cs` / `RollupOptionsPresetTests.cs` / `SqliteTrafficStoreTests.cs` for the invariant's enforcement and the stitched-query guarantees.
 
 ### dns_cache (persistent hostname-to-IP mappings)
 

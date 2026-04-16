@@ -214,7 +214,8 @@ Persistent across all tabs. Left-to-right:
 
 1. **Brand block** — Beholder logo icon + "BEHOLDER NMT" in `TextPrimary`, followed by version string and daemon status indicator (e.g., "v0.1.0 · daemon: online"). The status text uses `StatusOnline` or `StatusOffline` color.
 2. **Tab bar** — center-aligned. Tab labels in ALL CAPS with the active tab decorated with `[ BRACKETS ]` and underline in `AccentPrimary`. Tabs: TRAFFIC, FIREWALL, ALERTS, MAP, SCANNER.
-3. **Time range selector** — far right. Dropdown or segmented control: "LAST 5M", "LAST 24H", etc. `TextSecondary` color, `BorderStrong` outline.
+
+The time-range selector is **not** in the global nav. It lives inside the Traffic tab's own top bar, left of the GRAPH/COLS toggle, so it stays visible when switching between GRAPH/COLS/MAP sub-views within Traffic but doesn't take up horizontal space on tabs that don't need it. The control is a dropdown button (`TimeRangeDropdown`) labeled with the active selection (e.g., `1 Hour ▾`) and a flyout containing seven options grouped as `5 Minutes / 1 Hour / 24 Hours` · `Last 7 Days / Last 30 Days / All Time` · `Custom...`. The `5 Minutes` option streams live from the circular buffers; all others trigger a historical query and render a point-in-time snapshot.
 
 ### Bottom Status Strip
 

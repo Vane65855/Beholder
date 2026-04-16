@@ -1,14 +1,14 @@
 # Beholder NMT — Project Status & Phase Plan
 
-**Last updated:** 2026-04-15
-**Current checkpoint:** Phase 5.4.1 (Traffic tab corrective fixes)
-**Test count:** 457
+**Last updated:** 2026-04-16
+**Current checkpoint:** Phase 5.4.3 (Historical query fidelity and stability)
+**Test count:** 472
 
 ---
 
 ## 1. Status Summary
 
-As of 2026-04-13, the daemon captures per-process network telemetry via ETW on Windows, enriches flows with DB-IP country codes, and now persists per-destination traffic to SQLite via a new `TrafficEngine` that replaced the `Accumulator`. The engine produces two outputs from the same event stream: per-second `CounterSnapshot` batches for the live IPC stream (unchanged from Phase 2) and per-10-second `TrafficBucket` rows in `traffic_buckets_10s` for historical queries. Four new gRPC RPCs (`GetProcessTimeline`, `GetProcessDestinations`, `GetAggregateTimeline`, `GetCountryBreakdown`) serve aggregated traffic data from SQLite. DNS hostname mappings are persisted to a `dns_cache` table, surviving daemon restarts. The gRPC IPC surface now has nine RPCs total. 379 tests pass deterministically. Next up: Phase 5 (UI shell and daemon connection).
+As of 2026-04-16, the daemon captures per-process network telemetry via ETW on Windows, enriches flows with DB-IP country codes, and persists per-destination traffic to SQLite through a five-tier rollup cascade (`traffic_raw` → `_10s` → `_1m` → `_10m` → `_1h`). Historical timeline RPCs use a stitched multi-tier query that serves each time slice from the finest-retention tier that covers it — recent data at 1-second fidelity, older data smoothly coarser. The UI shell ships a Traffic tab with a time-range dropdown (5 Minutes live + 1 Hour / 24 Hours / 7 Days / 30 Days / All Time / Custom historical) and a chart that guarantees "same data → same shape" regardless of which range preset is selected. Five `Get*` RPCs serve aggregated traffic data from SQLite. DNS hostname mappings are persisted to a `dns_cache` table, surviving daemon restarts. The gRPC IPC surface now has ten RPCs total. 472 tests pass deterministically. Next up: Phase 6 (remaining tab content, starting with the Firewall tab) or Phase 5.5 (settings page exposing the retention preset picker).
 
 ---
 
@@ -283,6 +283,61 @@ Existing tests updated: `SqliteTrafficStoreTests` (rename pass + `CreateBucket` 
 
 ---
 
+### Phase 5.4.2 — Time-range selector UI ✅
+
+**Purpose:** Wire the Traffic tab's placeholder LAST-N button to the tiered query layer from Phase 4.6b. User picks `5 Minutes / 1 Hour / 24 Hours / Last 7 Days / Last 30 Days / All Time / Custom`; the `5 Minutes` option streams live from the circular buffers; all other presets trigger a historical query against the daemon and render a point-in-time snapshot.
+
+**Key components:**
+- `Beholder.Ui/Models/TimeRangeSelection.cs` — new `TimeRangePreset` enum (7 values) and `TimeRangeSelection` record exposing `From`, `To`, `Label`, `IsLive`, plus static `FromPreset` and `FromCustom` factories. All time math is in this one type.
+- `Beholder.Ui/Controls/TimeRangeDropdown.axaml[.cs]` — reusable `UserControl` encapsulating the dropdown button + flyout + custom date-range picker. Exposes a `SelectedRange` bindable property. Internal state machine: preset list ↔ custom picker panel.
+- `Beholder.Ui/Views/Tabs/TrafficTabView.axaml` — adds the dropdown to the top bar, shifted GRAPH/COLS to column 2. `ColumnDefinitions="*,Auto,Auto"`, 12 px margin separating the dropdown from GRAPH/COLS.
+- `Beholder.Ui/ViewModels/TrafficTabViewModel.cs` — `SelectedTimeRange` observable property defaulting to `Last5Minutes`; `OnSelectedTimeRangeChanged` routes to `LoadHistoricalRangeAsync` for historical presets or resumes live rebuilding for `Last5Minutes`. New `LoadHistoricalRangeAsync` method queries `GetAggregateTimelineAsync` + `GetProcessSummariesAsync` and populates the chart and process list from the response. `UpdateFromStates` gains an early return when not in live mode, so live ticks don't overwrite the historical snapshot.
+- `Beholder.Ui/Controls/TrafficChartControl.cs` — added `DataSpan` property. `DrawTimeLabels` adapts label format based on total span: `-M:SS` for ≤10 min, `-Hh Mm` for ≤24 h, `-Nd Hh` for longer. No more hard-coded 5-minute assumption.
+
+**New daemon-side RPC:** `GetProcessSummaries` (added this phase because `GetSnapshot` only surfaces processes currently tracked by the engine — historical views need every process that had traffic in the range, including those evicted after 1 h idle). Single SQL query against the tier-selected table: `SELECT process_path, process_name, SUM(bytes_in), SUM(bytes_out) FROM {tier} WHERE bucket_start_ms BETWEEN from AND to GROUP BY process_path, process_name ORDER BY ... DESC`. Replaces the `GetSnapshot + N × GetProcessTimeline` approach that previously fed the historical process list.
+
+**Tests added:** `TrafficTabViewModelTests` — range switching (live → historical → live round-trip), historical-mode guard (live tick doesn't rebuild chart), historical process list populated from summaries response, custom range applies correctly.
+
+**Design decisions:**
+- **Two modes, one ViewModel.** Live (`Last5Minutes`) uses the existing circular-buffer path. All other presets issue a one-shot query and freeze the chart on the result. Live ticks continue reaching `ProcessStateService` (the status strip keeps updating) but `UpdateFromStates` no-ops for chart/list purposes while in historical mode. Avoids the conceptual mismatch of reusing a 300-entry 1-second buffer for a 30-day range.
+- **Daemon owns tier selection.** The UI sends `(from, to, resolutionMs)`; the daemon picks the tier. `resolutionMs` is computed UI-side as `(to - from) / 300`, clamped to 1 s, targeting ~300 output buckets. (Phase 5.4.3 later demoted this from "target" to "advisory hint".)
+- **X-axis from actual data extent, not requested range.** If a user picks "Last 30 Days" on a daemon with 3 days of data, the chart shows 3 days across its full width — not 3 days crammed into the right 10 % of a 30-day X-axis. Implemented by reading the first/last timestamps from the response and setting `ChartDataSpan` accordingly.
+- **Single-point spike padding.** When the historical query returns one point (e.g., one bucket of bursty traffic), the UI pads to `[0, burst, 0, 0, 0, 0, 0, 0, 0, 0, 0]` (11 entries, burst at index 1) so the chart renders a sharp spike on the left instead of an empty canvas. The bezier code early-returns on N≤1 and the axis label code hides below tickCount<2; this workaround preserves both without branching the chart control.
+- **Dropdown, not segmented control.** Seven presets + custom would overflow a segmented strip. A dropdown with grouped items (quick recent / longer historical / custom) reads naturally and leaves the top-bar geometry stable.
+
+**Files NOT touched:** `ProcessStateService.cs` (live stream unaffected), `StatusStripViewModel.cs` (still reads from service), daemon pipeline. The phase is UI-side + one new RPC + corresponding protocol/converter/test-double changes.
+
+---
+
+### Phase 5.4.3 — Historical query fidelity and stability ✅
+
+**Purpose:** Fix three closely-related defects surfaced while using Phase 5.4.2 against real data: (a) `All Time` rendered blank, (b) the same underlying data produced visibly different charts at 7d / 30d / All Time, and (c) even after (b) was fixed, the Y-axis visibly jumped 2× when switching ranges. All three failures trace back to how historical queries select tiers and compute output bucket widths. This phase replaces the original single-tier-per-query selection with a multi-tier stitched query, switches bucket-width computation from request-driven to data-extent-driven, and quantizes both the bucket width and the chart's Y-axis to stable discrete sets.
+
+**Key components:**
+
+- `Beholder.Daemon/Storage/TierSelector.cs` — `Select` simplified: drops the retention check, picks the coarsest tier whose `BucketSeconds ≤ resolution`, falls back to the finest tier when nothing matches. The old retention gate was causing `All Time` to pick `_1h` (only tier with `null` retention) which was empty on new daemons, producing blank charts. New method `SelectTierForAge(tiers, age)` returns the **finest** tier whose retention covers the given age — used by the stitched query below.
+- `Beholder.Daemon/Storage/SqliteTrafficStore.cs` — `GetAggregateTimelineAsync` and `GetProcessTimelineAsync` delegate to a new private helper `StitchMultiTierTimelineAsync`. The helper partitions the query's time window into non-overlapping slices, finest tier first: `raw` serves `[now−10min, now)`, `_10s` serves `[now−7d, now−10min)`, `_1m` serves `[now−14d, now−7d)`, and so on back to `_1h`. Each slice's SQL runs only against its tier's table. Results are merged by output-bucket timestamp in C#. Recent data is served at 1-second native fidelity; older data progressively coarser. One SQL query per participating tier, not one per output bucket.
+- Same file — new helper `ComputeDataExtentAsync` scans `MIN/MAX(bucket_start_ms)` across each participating slice's tier, clipped to the slice bounds. Returns the overall data extent within the request range, or `null` when no tier has data. Used to drive bucket-width selection.
+- Same file — new static `NiceResolutionsMs = [1s, 5s, 10s, 30s, 1min, 5min, 10min, 30min, 1h, 6h, 1day]`. Effective bucket width is the smallest entry ≥ `extent/400`, floored at 1 s. Caller's `resolutionMs` is intentionally ignored — this is what makes 7d / 30d / All Time on the same data produce byte-identical arrays.
+- Same file — `nowMs` is snapped down to the start of the current minute before any slice boundary is computed. Rapid re-queries within the same minute share slice bounds exactly.
+- `Beholder.Ui/Controls/TrafficChartControl.cs` — `NiceMax` expanded from `{1, 2, 5, 10}` to `{1, 1.5, 2, 3, 5, 7, 10}`. Worst-case Y-axis jump at a `10^N` boundary drops from 2× to ~1.4×, so tiny residual drift in peak-bucket values doesn't produce visually jarring flips.
+- `Beholder.Ui/ViewModels/TrafficTabViewModel.cs` — removed the adaptive re-query loop (single-point → widen resolution → retry). The daemon now returns well-shaped output in one round-trip because the bucket-width rule is data-driven. Single-point padding (from 5.4.2) is retained for the genuine 1-row edge case.
+
+**Tests added:**
+- `TierSelectionTests.cs` — 6 `SelectTierForAge` tests covering each tier boundary under Balanced, plus zero-age and beyond-all-finite-retentions cases. 2 existing `Select` tests updated to the simplified retention-free rule. 1 new `Select_AllTimeCoarseResolution_PicksFinerTierWhenAvailable` locks in the fix for "All Time shows different chart shape than Last 30 Days".
+- `SqliteTrafficStoreTests.cs` — `GetAggregateTimelineAsync_StitchesAcrossTiers` seeds one distinguishable row in each of raw/`_10s`/`_1m` and verifies the stitched response pulls each from its correct slice. `GetAggregateTimelineAsync_SameDataDifferentRanges_ReturnsIdenticalArrays` seeds a 2-day extent in `_10s` and asserts 7d/30d/All Time return byte-identical arrays. `GetAggregateTimelineAsync_TimeDriftWithinMinute_ReturnsIdenticalArrays` asserts that advancing the fake clock 30 s within the same minute produces identical output. `GetProcessTimelineAsync_GroupsByResolution` updated: data spread widened to 2700 s so `extent/400` lands naturally at the 9-second grid the test originally exercised.
+- Net test count: 457 → 472 (+15).
+
+**Design decisions:**
+- **Stitch instead of pick-one-tier.** A single-tier query for "All Time" forced a choice between fine-but-short-retention (no older data) and coarse-but-complete (no recent detail). Stitching eliminates the tradeoff: the chart's right edge is raw 1-second detail while the left edge degrades smoothly to hourly — the way users think about "zoomed out view of everything." Cost is ≤5 SQL queries instead of 1, all indexed; still sub-millisecond over local pipe.
+- **Ignore the caller's `resolutionMs` for bucket-width purposes.** Honoring it re-introduced the original bug: different request ranges computed different widths for the same data. The parameter is kept in the RPC for backward compatibility (treated as a hint the daemon is free to ignore), but bucket width is derived entirely from `extent/400` rounded to `NiceResolutionsMs`. This is what makes "same data → same chart" hold as a contract, not an approximation.
+- **Minute-snap for rapid-switch stability.** Without snapping, clicking 7d → 30d → All Time within seconds produced three slightly different grids (slice boundaries drifted with sub-second `nowMs`). With minute snapping, any two queries in the same wall-clock minute are bit-identical. The 1-minute ceiling on drift is invisible at chart zoom levels spanning hours/days.
+- **Wider `NiceMax` set.** The peak-bucket value sitting at the `10^10` B/s boundary was oscillating between `9.99×10^9` (rounds to nice=10, Y-max = 9.31 GB/s) and `1.01×10^10` (rounds to nice=2 at the next decade, Y-max = 18.63 GB/s) — exactly 2×. Adding intermediate `{1.5, 3, 7}` reduces the worst-case boundary jump to ~1.4× and matches how commercial monitoring tools typically scale. Belt-and-suspenders fix: even if the daemon's output still has tiny per-query variance, the chart doesn't amplify it to a visible 2× flip.
+
+**Files NOT touched:** Proto schemas, `RollupOptions`, `RollupService` (rollup-side invariant was already correct — the bugs were purely in read-side query composition), `TimeRangeSelection.cs`, any UI view XAML. Contract-level RPC signatures unchanged — `resolutionMs` still accepted, just reinterpreted.
+
+---
+
 ## 3. Phase-by-Phase Lessons Learned
 
 ### Phase 0
@@ -338,6 +393,21 @@ Existing tests updated: `SqliteTrafficStoreTests` (rename pass + `CreateBucket` 
 - **`INSERT ... SELECT ... GROUP BY` is the right cascade primitive.** Each rollup step is a single SQL statement: no intermediate materialization, no row-by-row iteration, no C# object construction for the moved data. SQLite's query planner handles the grouping and insertion efficiently, and the ACID transaction guarantees consistency if the daemon crashes mid-rollup.
 - **Presets beat individual config knobs.** Exposing per-tier retention in config creates invalid combinations that break the tier-selection contract. Two hand-checked presets (Balanced / Compact) give users a meaningful choice without the combinatorial risk. Full customization deferred to a future settings page with validation.
 
+### Phase 5.4.2
+
+- **Two modes in one view are clearer than one unified mode.** Trying to make the chart + process list seamlessly flow between live streaming and historical snapshots creates a conceptual mismatch: a 300-entry 1-second circular buffer cannot meaningfully represent 24 hours of history, and live ticks arriving during historical viewing either overwrite the snapshot or need to be silently dropped. Splitting into explicit live vs historical modes, with a single `IsLive` predicate driving the branching, made the logic trivially correct.
+- **Chart X-axis should track actual data extent, not requested range.** Users who pick "Last 30 Days" on a daemon with 3 days of data expect to see 3 days, not 3 days crammed into the right 10 % of a 30-day axis. Read the first/last timestamps from the response and compute `ChartDataSpan` from those, not from `to - from`.
+- **`GetSnapshot` is in-memory; `GetProcessSummaries` is on-disk.** The engine evicts processes after 1 hour idle, so historical views that use `GetSnapshot` for the process list silently hide processes that had traffic in the range but happen to be idle now. A dedicated summaries RPC that aggregates against the tier tables is the right abstraction for any list derived from historical data.
+
+### Phase 5.4.3
+
+- **Stitched multi-tier beats pick-one-tier for any "zoomed-out" chart.** A single tier at "All Time" forces a choice between fine-but-short-retention (nothing old) and coarse-but-complete (no recent detail). Stitching serves each time slice from the finest tier that retains it — the chart's right edge is per-second detail while the left edge degrades smoothly to hourly. Five indexed sub-queries compose client-side at negligible cost over local IPC.
+- **Same data → same chart requires a data-driven bucket width, not a request-driven one.** Computing `effectiveResolutionMs` from `(to - from)/300` makes 7d / 30d / All Time on the same underlying data produce three different grids, three different sums per bucket, and three different chart shapes. Deriving bucket width from the actual data extent inside the range (`extent/400` rounded to a nice discrete set, caller's hint ignored) restores "same data → same chart" as a hard contract, not an approximation.
+- **Discrete "nice" bucket widths are necessary for query-to-query stability.** When bucket width is a continuous function of extent, sub-second drift in `nowMs` between queries shifts the GROUP BY grid by a few ms, re-assigning source rows to slightly different output buckets. A discrete set `{1s, 5s, 10s, 30s, 1min, 5min, 10min, 30min, 1h, 6h, 1day}` absorbs that drift — small extent changes stay inside the same nice bucket until they cross a threshold.
+- **Minute-snap `nowMs` inside the query.** Slice boundaries (`nowMs − 10min`, `nowMs − 7d`, etc.) shift with every millisecond of real time if not snapped. Rounding `nowMs` down to the start of the current minute makes all queries issued in the same wall-clock minute bit-identical on the same data. The 1-minute ceiling on drift is invisible at historical-chart zoom levels.
+- **`NiceMax` `{1, 2, 5, 10}` amplifies sub-percent value drift to 2× visual jumps.** A peak bucket value sitting at `10^N` flips between `Y-max = 10 × 10^(N−1)` and `Y-max = 2 × 10^N` — exactly 2× — when the value nudges across the decade boundary. Expanding to `{1, 1.5, 2, 3, 5, 7, 10}` caps the worst-case jump at ~1.4× and matches how commercial tools (Grafana, Datadog) scale.
+- **Caller parameters can be demoted to hints without breaking the RPC contract.** The IPC proto still accepts `resolution_ms`; the daemon simply ignores it for bucket-width purposes now. This avoids a protocol breaking change while fixing the semantics — the caller's old behavior (send whatever resolution) is still accepted, just reinterpreted.
+
 ---
 
 ## 4. Checkpoint Review History
@@ -351,6 +421,8 @@ Existing tests updated: `SqliteTrafficStoreTests` (rename pass + `CreateBucket` 
 | 4.5 | 2026-04-12 | Test stability (flaky failures) | `AccumulatorTests` ~2% timeout in multi-tick tests (settle signal race); `SqliteConnection.ClearAllPools()` ~3% `ObjectDisposedException` under parallel execution | Settle signal protocol in `DriveTickAsync`; `Pooling=false` in test `ConnectionFactory`/`DatabaseInitializer`; removed all `ClearAllPools` calls |
 | 4.6a | 2026-04-13 | Historical traffic storage | `Accumulator` discarded all per-destination detail; no SQLite persistence; DNS cache in-memory only; `ArgumentNullException` vs `ArgumentException` in record test cases | Replaced `Accumulator` with `TrafficEngine`; added `traffic_buckets_10s` + `dns_cache` tables; 4 new query RPCs; bounded in-memory state with eviction; split null test cases into separate `[Fact]` methods |
 | 4.6b | 2026-04-15 | Full rollup cascade (5-tier) | Watermark double-count bug (`MAX` vs `MAX + bucket_ms`); raw-tier prune timing in invariant test assertion | Fixed watermark to next-bucket boundary; excluded pruned raw tier from invariant assertion; tier retentions tuned to natural query domains (7d/14d instead of 30d/90d) |
+| 5.4.2 | 2026-04-16 | Time-range selector UI + `GetProcessSummaries` RPC | Historical process list hid evicted processes; chart X-axis stretched to requested range instead of data extent; single-point responses rendered as empty canvas | New `GetProcessSummaries` RPC queries tier tables directly; `ChartDataSpan` computed from first/last response timestamps; single-point padding to 11-entry array with burst at index 1 |
+| 5.4.3 | 2026-04-16 | Historical query fidelity and stability | "All Time" blank (old retention-gated tier selector picked empty `_1h`); 7d/30d/All Time produced different charts on identical data; Y-axis flipped 2× on rapid re-switching due to `NiceMax` decade-boundary quantization | Stitched multi-tier query partitions range across tier slices; bucket width driven by `extent/400` rounded to discrete `NiceResolutionsMs`; `nowMs` snapped to minute; `NiceMax` expanded to `{1, 1.5, 2, 3, 5, 7, 10}` |
 
 ---
 
@@ -371,14 +443,6 @@ Existing tests updated: `SqliteTrafficStoreTests` (rename pass + `CreateBucket` 
 ---
 
 ## 6. Remaining Phases
-
-### Phase 5.4.2 — Time-range selector UI
-
-Wires the Traffic tab's LAST-N dropdown (currently a placeholder displaying "LAST 5M") to the tiered query layer from Phase 4.6b. User picks `last 5m / 1h / 24h / 7d / 30d / custom`; the daemon picks the appropriate tier internally via `ITrafficStore`, the UI stays unaware of tier selection.
-
-**UI changes:** the selector becomes a live control; the chart reloads on selection change via a new historical query against the chosen range; the IN/OUT list columns scale their rolling-window sum to match the selected range (rolling-window semantics from Phase 5.4.1 are preserved — the window length is simply the user-selected range rather than the fixed 5 min).
-
-**Depends on:** Phase 4.6b landed. Before 4.6b, only the `_10s` tier exists and ranges beyond ~30 days cannot be served.
 
 ### Checkpoint — Historical Traffic Feature-Complete
 
