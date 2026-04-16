@@ -75,7 +75,13 @@ internal sealed class TrafficChartControl : Control {
         foreach (var s in series) {
             if (s.Values.Count > maxSamples) maxSamples = s.Values.Count;
         }
-        if (maxSamples == 0) {
+        if (maxSamples < 2) {
+            // A single sample produces NaN x-coordinates in DrawAreas' sample-index
+            // math (0 / (1 − 1) = NaN), which then corrupts the StreamGeometry passed
+            // to DrawGeometry. Upstream callers pad single-point responses to a spike
+            // array (see TrafficTabViewModel.LoadHistoricalRangeAsync), but this guard
+            // is the defense-in-depth safety net for any path that bypasses padding.
+            // Consistent with DrawTimeLabels' own tickCount < 2 early-return.
             DrawAxes(context, chartLeft, chartTop, chartRight, chartBottom, gridlinePen);
             return;
         }
