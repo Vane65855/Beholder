@@ -156,13 +156,6 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
     }
 
     /// <summary>
-    /// Stitched multi-tier timeline query. Each time slice of the range is
-    /// served by the finest tier whose retention covers that slice's age —
-    /// recent portions from raw 1-second data, older portions progressively
-    /// coarser. Output is a uniform-bucket array aligned to <paramref name="resolutionMs"/>
-    /// so <see cref="TrafficChartControl"/> can render it with uniform X-axis spacing.
-    /// </summary>
-    /// <summary>
     /// Discrete set of "nice" output-bucket widths. Effective resolution is
     /// rounded UP into this set so that small drifts in extent (e.g. from new
     /// live data arriving between queries) don't shift the GROUP BY grid by a
@@ -187,6 +180,15 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         24 * 60 * 60_000L,     // 1 day
     ];
 
+    /// <summary>
+    /// Stitched multi-tier timeline query. Each time slice of the range is
+    /// served by the finest tier whose retention covers that slice's age —
+    /// recent portions from raw 1-second data, older portions progressively
+    /// coarser. Output is a uniform-bucket array aligned to the effective
+    /// bucket width so <see cref="TrafficChartControl"/> can render it with
+    /// uniform X-axis spacing. Caller's <paramref name="resolutionMs"/> is
+    /// advisory only — bucket width is derived from actual data extent.
+    /// </summary>
     private async Task<IReadOnlyList<TrafficTimePoint>> StitchMultiTierTimelineAsync(
         DateTimeOffset from,
         DateTimeOffset to,
@@ -444,13 +446,6 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         return results;
     }
 
-    private RollupTier SelectTierForTimeline(DateTimeOffset from, TimeSpan resolution) =>
-        TierSelector.Select(
-            _options.CurrentValue.Tiers,
-            from,
-            resolution,
-            _timeProvider.GetUtcNow());
-
     /// <summary>
     /// Tier selection for queries with no resolution parameter
     /// (<see cref="GetProcessDestinationsAsync"/>, <see cref="GetCountryBreakdownAsync"/>).
@@ -472,22 +467,6 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
             from,
             pseudoResolution,
             now);
-    }
-
-    private static async Task<IReadOnlyList<TrafficTimePoint>> ReadTimePointsAsync(
-        SqliteCommand command,
-        CancellationToken cancellationToken
-    ) {
-        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        var results = new List<TrafficTimePoint>();
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
-            results.Add(new TrafficTimePoint(
-                timestamp: DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(0)),
-                bytesIn: reader.GetInt64(1),
-                bytesOut: reader.GetInt64(2)
-            ));
-        }
-        return results;
     }
 
     private static CountryCode ParseCountryCode(string value) {
