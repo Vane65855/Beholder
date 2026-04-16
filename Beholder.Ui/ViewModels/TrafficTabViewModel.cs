@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Beholder.Protocol.Local;
 using Beholder.Ui.Controls;
 using Beholder.Ui.Helpers;
 using Beholder.Ui.Models;
@@ -36,6 +39,17 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
     [ObservableProperty]
     private IReadOnlyList<ChartSeries>? _chartData;
 
+    /// <summary>
+    /// Total wall-clock span of the current chart data. Null for live mode
+    /// (TrafficChartControl defaults to 1-sample-per-second labeling).
+    /// Set to the queried range's duration for historical views.
+    /// </summary>
+    [ObservableProperty]
+    private TimeSpan? _chartDataSpan;
+
+    [ObservableProperty]
+    private TimeRangeSelection _selectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last5Minutes);
+
     public ObservableCollection<ProcessListItem> ProcessList { get; } = [];
 
     public TrafficTabViewModel(IDaemonClient daemonClient, ProcessStateService processStateService) {
@@ -57,9 +71,6 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             if (status.State == ConnectionState.Connected) {
                 HasError = false;
                 ErrorMessage = string.Empty;
-                // Historical data seeding is handled by ProcessStateService.SeedAsync,
-                // which runs before the live stream starts and fires ProcessStatesUpdated.
-                // The chart and process list populate from that event automatically.
             } else if (status.State is ConnectionState.Disconnected or ConnectionState.Reconnecting) {
                 HasError = true;
                 ErrorMessage = "Daemon disconnected \u2014 showing last known data.";
@@ -72,9 +83,27 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         Dispatcher.UIThread.Post(() => UpdateFromStates(states));
     }
 
+    partial void OnSelectedTimeRangeChanged(TimeRangeSelection value) {
+        if (value.IsLive) {
+            // Switching back to live mode — rebuild chart from the current
+            // circular buffer state immediately.
+            ChartDataSpan = null;
+            if (_lastStates is not null) {
+                UpdateFromStates(_lastStates);
+            }
+        } else {
+            // Switching to historical mode — query the daemon for the selected range.
+            _ = LoadHistoricalRangeAsync(value);
+        }
+    }
+
     internal void UpdateFromStates(IReadOnlyDictionary<string, ProcessState> states) {
         _lastStates = states;
         IsLoading = false;
+
+        // In historical mode, live ticks still flow for the status strip, but
+        // the chart and process list are frozen on the historical snapshot.
+        if (!SelectedTimeRange.IsLive) return;
 
         if (states.Count == 0) {
             IsEmpty = true;
@@ -98,11 +127,6 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             allRecentOut += recentOut;
 
             if (recentIn + recentOut == 0) {
-                // Process is idle across its whole recent window — drop it from
-                // the display list. The aggregate totals above already included
-                // its zero contribution, and RebuildChartData/AggregateAll still
-                // iterates the `states` dictionary directly, so the chart's
-                // "All processes" view is unaffected by this display filter.
                 RemoveProcess(kvp.Key);
                 continue;
             }
@@ -121,6 +145,109 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         RebuildChartData(states);
     }
 
+    private async Task LoadHistoricalRangeAsync(TimeRangeSelection range) {
+        try {
+            IsLoading = true;
+            IsEmpty = false;
+
+            var from = range.From;
+            var to = range.To;
+            var spanMs = (long)(to - from).TotalMilliseconds;
+            var resolutionMs = Math.Max(spanMs / 300, 1000);
+
+            // Query aggregate timeline for the chart
+            var timelineRequest = new GetAggregateTimelineRequest {
+                FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000,
+                ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000,
+                ResolutionMs = resolutionMs,
+            };
+
+            var timelineResponse = await _daemonClient.GetAggregateTimelineAsync(
+                timelineRequest, CancellationToken.None);
+
+            // Check that the user hasn't switched away while we were querying
+            if (SelectedTimeRange != range) return;
+
+            if (timelineResponse.Points.Count == 0) {
+                IsEmpty = true;
+                IsLoading = false;
+                ChartData = [];
+                return;
+            }
+
+            // Build chart data from the historical query
+            var downloadColor = ThemeColorHelper.Resolve("ChartOutboundStrokeColor");
+            var uploadColor = ThemeColorHelper.Resolve("ChartInboundStrokeColor");
+
+            var downloadValues = new long[timelineResponse.Points.Count];
+            var uploadValues = new long[timelineResponse.Points.Count];
+            for (var i = 0; i < timelineResponse.Points.Count; i++) {
+                downloadValues[i] = timelineResponse.Points[i].BytesIn;
+                uploadValues[i] = timelineResponse.Points[i].BytesOut;
+            }
+
+            ChartDataSpan = to - from;
+            ChartData = [
+                new ChartSeries("Download", downloadValues, downloadColor),
+                new ChartSeries("Upload", uploadValues, uploadColor),
+            ];
+
+            // Query per-process totals for the process list
+            var snapshot = await _daemonClient.GetSnapshotAsync(CancellationToken.None);
+            if (SelectedTimeRange != range) return;
+
+            // Clear and rebuild the process list with historical totals
+            _processLookup.Clear();
+            while (ProcessList.Count > 1) ProcessList.RemoveAt(ProcessList.Count - 1);
+
+            long allHistIn = 0;
+            long allHistOut = 0;
+
+            foreach (var snap in snapshot.Snapshots) {
+                var procRequest = new GetProcessTimelineRequest {
+                    ProcessPath = snap.ProcessPath,
+                    FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000,
+                    ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000,
+                    ResolutionMs = spanMs,
+                };
+
+                try {
+                    var procResponse = await _daemonClient.GetProcessTimelineAsync(
+                        procRequest, CancellationToken.None);
+                    if (SelectedTimeRange != range) return;
+
+                    long totalIn = 0;
+                    long totalOut = 0;
+                    foreach (var point in procResponse.Points) {
+                        totalIn += point.BytesIn;
+                        totalOut += point.BytesOut;
+                    }
+
+                    if (totalIn + totalOut == 0) continue;
+
+                    allHistIn += totalIn;
+                    allHistOut += totalOut;
+
+                    var item = new ProcessListItem(snap.ProcessPath, snap.ProcessName);
+                    item.UpdateTraffic(totalIn, totalOut);
+                    _processLookup[snap.ProcessPath] = item;
+                    ProcessList.Add(item);
+                } catch {
+                    // Per-process query is best-effort
+                }
+            }
+
+            _allProcessesItem.UpdateTraffic(allHistIn, allHistOut);
+            SortProcessList();
+            IsLoading = false;
+        } catch (Exception) {
+            // Historical query failed — show error state
+            IsLoading = false;
+            HasError = true;
+            ErrorMessage = "Failed to load historical data.";
+        }
+    }
+
     private void SortProcessList() {
         // CRITICAL: never use indexer assignment (ProcessList[x] = y) on this
         // ObservableCollection — it fires NotifyCollectionChangedAction.Replace,
@@ -129,8 +256,6 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         // exclusively so identity is preserved and selection follows the item.
         if (ProcessList.Count <= 2) return;
 
-        // Index 0 (_allProcessesItem) is pinned. Sort indices 1.. by SortKey desc
-        // into a plain List copy, then reorder ProcessList via Move calls.
         var sorted = new List<ProcessListItem>(ProcessList.Count - 1);
         for (var i = 1; i < ProcessList.Count; i++)
             sorted.Add(ProcessList[i]);
@@ -146,15 +271,10 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
 
     partial void OnSelectedProcessChanged(ProcessListItem? value) {
         if (value is null) {
-            // Selection was cleared — typically because the selected process
-            // went idle and was removed from ProcessList, so Avalonia's
-            // SelectingItemsControl wrote null back. Fall back to the pinned
-            // "All processes" entry; this reassignment re-enters the handler
-            // with the ALL item and takes the rebuild branch below.
             SelectedProcess = _allProcessesItem;
             return;
         }
-        if (_lastStates is not null)
+        if (_lastStates is not null && SelectedTimeRange.IsLive)
             RebuildChartData(_lastStates);
     }
 
@@ -167,8 +287,6 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         var selected = SelectedProcess;
         var showAll = selected is null || selected.IsAll;
 
-        // ChartOutboundStroke = teal (download). ChartInboundStroke = purple (upload).
-        // Token names are legacy — see DarkTheme.axaml §Data Visualization.
         var downloadColor = ThemeColorHelper.Resolve("ChartOutboundStrokeColor");
         var uploadColor = ThemeColorHelper.Resolve("ChartInboundStrokeColor");
 
@@ -200,7 +318,6 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
 
     private static (long[] Download, long[] Upload) AggregateAll(
         IReadOnlyDictionary<string, ProcessState> states) {
-        // Right-align: find max buffer length, treat missing older samples as 0.
         var max = 0;
         foreach (var s in states.Values) {
             if (s.RecentDeltaIn.Count > max) max = s.RecentDeltaIn.Count;
@@ -220,5 +337,4 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         }
         return (download, upload);
     }
-
 }

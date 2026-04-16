@@ -124,9 +124,9 @@
         <!-- ── Right: Chart Area ─────────────────────────────────────── -->
         <DockPanel Grid.Column="1" Margin="0">
 
-            <!-- Top bar: chart title + view switcher -->
+            <!-- Top bar: chart title + range selector + view switcher -->
             <Grid DockPanel.Dock="Top"
-                  ColumnDefinitions="*,Auto"
+                  ColumnDefinitions="*,Auto,Auto"
                   Margin="16,10,16,6">
                 <TextBlock Grid.Column="0"
                            Text="TRAFFIC  ·  BYTES/SEC"
@@ -135,7 +135,12 @@
                            Foreground="{DynamicResource TextMuted}"
                            VerticalAlignment="Center" />
 
-                <StackPanel Grid.Column="1"
+                <controls:TimeRangeDropdown Grid.Column="1"
+                                            SelectedRange="{Binding SelectedTimeRange, Mode=TwoWay}"
+                                            VerticalAlignment="Center"
+                                            Margin="0,0,12,0" />
+
+                <StackPanel Grid.Column="2"
                             Orientation="Horizontal"
                             Spacing="2">
                     <Button Content="GRAPH"
@@ -167,6 +172,7 @@
             <Grid>
                 <!-- Custom traffic chart -->
                 <controls:TrafficChartControl SeriesData="{Binding ChartData}"
+                                             DataSpan="{Binding ChartDataSpan}"
                                              HorizontalAlignment="Stretch"
                                              VerticalAlignment="Stretch"
                                              Margin="8,0,8,8" />

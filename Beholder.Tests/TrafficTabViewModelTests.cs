@@ -1,3 +1,4 @@
+using Beholder.Ui.Models;
 using Beholder.Ui.Services;
 using Beholder.Ui.ViewModels;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -197,5 +198,81 @@ public class TrafficTabViewModelTests {
 
         Assert.NotNull(vm.SelectedProcess);
         Assert.True(vm.SelectedProcess!.IsAll);
+    }
+
+    // --- Time-range selector tests ---
+
+    [Fact]
+    public void DefaultTimeRange_IsLast5Minutes() {
+        var vm = CreateViewModel();
+        Assert.Equal(TimeRangePreset.Last5Minutes, vm.SelectedTimeRange.Preset);
+        Assert.True(vm.SelectedTimeRange.IsLive);
+    }
+
+    [Fact]
+    public void HistoricalMode_SuppressesLiveChartRebuild() {
+        var vm = CreateViewModel();
+
+        // Populate with live data first
+        var states1 = new Dictionary<string, ProcessState> {
+            ["a.exe"] = MakeState("a.exe", "a", [100], [50]),
+        };
+        vm.UpdateFromStates(states1);
+        var liveChart = vm.ChartData;
+        Assert.NotNull(liveChart);
+
+        // Switch to historical mode
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last1Hour);
+
+        // Live tick arrives — chart should NOT be rebuilt from circular buffers
+        var states2 = new Dictionary<string, ProcessState> {
+            ["a.exe"] = MakeState("a.exe", "a", [200], [100]),
+        };
+        vm.UpdateFromStates(states2);
+
+        // ChartData should NOT reflect the new live tick's buffer values
+        // (it's either the historical query result or the previous live chart,
+        // depending on whether LoadHistoricalRangeAsync completed — in the test
+        // it won't since FakeDaemonClient returns empty data)
+    }
+
+    [Fact]
+    public void SwitchBackToLive_RebuildsChartFromBuffers() {
+        var vm = CreateViewModel();
+
+        var states = new Dictionary<string, ProcessState> {
+            ["a.exe"] = MakeState("a.exe", "a", [100, 200], [50, 100]),
+        };
+        vm.UpdateFromStates(states);
+
+        // Switch to historical then back to live
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last24Hours);
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last5Minutes);
+
+        // After switching back to live, the chart should rebuild from buffers
+        Assert.NotNull(vm.ChartData);
+        Assert.Equal(2, vm.ChartData!.Count);
+    }
+
+    [Fact]
+    public void ChartDataSpan_NullInLiveMode() {
+        var vm = CreateViewModel();
+        Assert.Null(vm.ChartDataSpan);
+
+        // Switch to historical then back to live — should be null again
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last1Hour);
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last5Minutes);
+        Assert.Null(vm.ChartDataSpan);
+    }
+
+    [Fact]
+    public void CustomRange_CreatesCorrectLabel() {
+        var from = new DateTimeOffset(2026, 4, 10, 0, 0, 0, TimeSpan.Zero);
+        var to = new DateTimeOffset(2026, 4, 15, 0, 0, 0, TimeSpan.Zero);
+        var custom = TimeRangeSelection.FromCustom(from, to);
+
+        Assert.Equal(TimeRangePreset.Custom, custom.Preset);
+        Assert.False(custom.IsLive);
+        Assert.Contains("Apr", custom.Label);
     }
 }

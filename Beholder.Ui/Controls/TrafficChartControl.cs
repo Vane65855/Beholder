@@ -24,13 +24,27 @@ internal sealed class TrafficChartControl : Control {
     public static readonly StyledProperty<IReadOnlyList<ChartSeries>?> SeriesDataProperty =
         AvaloniaProperty.Register<TrafficChartControl, IReadOnlyList<ChartSeries>?>(nameof(SeriesData));
 
+    /// <summary>
+    /// Total wall-clock duration the chart data represents. Used by <see cref="DrawTimeLabels"/>
+    /// to compute correct labels. Defaults to null, which assumes 1 sample = 1 second
+    /// (matching the 5-minute live mode). For historical queries, set this to the
+    /// queried range's total span (e.g., 24 hours for a "Last 24 Hours" view).
+    /// </summary>
+    public static readonly StyledProperty<TimeSpan?> DataSpanProperty =
+        AvaloniaProperty.Register<TrafficChartControl, TimeSpan?>(nameof(DataSpan));
+
     public IReadOnlyList<ChartSeries>? SeriesData {
         get => GetValue(SeriesDataProperty);
         set => SetValue(SeriesDataProperty, value);
     }
 
+    public TimeSpan? DataSpan {
+        get => GetValue(DataSpanProperty);
+        set => SetValue(DataSpanProperty, value);
+    }
+
     static TrafficChartControl() {
-        AffectsRender<TrafficChartControl>(SeriesDataProperty);
+        AffectsRender<TrafficChartControl>(SeriesDataProperty, DataSpanProperty);
     }
 
     public override void Render(DrawingContext context) {
@@ -89,7 +103,7 @@ internal sealed class TrafficChartControl : Control {
 
         // Draw X axis labels (time)
         DrawTimeLabels(context, chartLeft, chartBottom, chartWidth,
-            maxSamples, axisLabelBrush);
+            maxSamples, DataSpan, axisLabelBrush);
 
         // Draw overlaid area series
         DrawAreas(context, series, chartLeft, chartTop, chartWidth, chartHeight,
@@ -124,21 +138,49 @@ internal sealed class TrafficChartControl : Control {
     }
 
     private static void DrawTimeLabels(DrawingContext context, double left, double bottom,
-        double width, int sampleCount, IBrush labelBrush) {
+        double width, int sampleCount, TimeSpan? dataSpan, IBrush labelBrush) {
         var typeface = new Typeface("Segoe UI", FontStyle.Normal, FontWeight.Normal);
         var tickCount = Math.Min(MaxXTicks, sampleCount);
         if (tickCount < 2) return;
 
+        // Seconds per sample: if DataSpan is set, use it; otherwise assume
+        // 1 sample = 1 second (live 5-minute mode).
+        var totalSeconds = dataSpan?.TotalSeconds ?? sampleCount;
+
         for (var i = 0; i < tickCount; i++) {
             var ratio = i / (double)(tickCount - 1);
-            var sampleIndex = (int)(ratio * (sampleCount - 1));
-            var secondsAgo = sampleCount - 1 - sampleIndex;
-            var label = secondsAgo == 0 ? "now" : $"-{secondsAgo / 60}:{secondsAgo % 60:D2}";
+            var secondsAgo = (1.0 - ratio) * totalSeconds;
+            var label = FormatTimeLabel(secondsAgo, totalSeconds);
             var text = new FormattedText(label, System.Globalization.CultureInfo.InvariantCulture,
                 FlowDirection.LeftToRight, typeface, 10, labelBrush);
             var x = left + ratio * width - text.Width / 2;
             context.DrawText(text, new Point(x, bottom + 6));
         }
+    }
+
+    private static string FormatTimeLabel(double secondsAgo, double totalSeconds) {
+        if (secondsAgo < 1) return "now";
+
+        // Adapt formatting to the total chart span
+        if (totalSeconds <= 600) {
+            // ≤ 10 min: "-M:SS"
+            var m = (int)(secondsAgo / 60);
+            var s = (int)(secondsAgo % 60);
+            return $"-{m}:{s:D2}";
+        }
+        if (totalSeconds <= 86400) {
+            // ≤ 24 hours: "-Hh Mm" or "-H:MM"
+            var h = (int)(secondsAgo / 3600);
+            var m = (int)(secondsAgo % 3600 / 60);
+            if (h == 0) return $"-{m}m";
+            if (m == 0) return $"-{h}h";
+            return $"-{h}h{m:D2}m";
+        }
+        // > 24 hours: "-Nd" or "-Nd Hh"
+        var days = (int)(secondsAgo / 86400);
+        var hours = (int)(secondsAgo % 86400 / 3600);
+        if (hours == 0) return $"-{days}d";
+        return $"-{days}d {hours}h";
     }
 
     private static void DrawAreas(DrawingContext context, IReadOnlyList<ChartSeries> seriesList,

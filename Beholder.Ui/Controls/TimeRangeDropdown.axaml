@@ -1,0 +1,130 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Beholder.Ui.Controls.TimeRangeDropdown">
+
+    <Button x:Name="DropdownButton"
+            FontSize="11"
+            Padding="10,4"
+            Background="Transparent"
+            Foreground="{DynamicResource AccentPrimary}"
+            BorderBrush="{DynamicResource BorderSubtle}"
+            BorderThickness="1"
+            CornerRadius="3"
+            Cursor="Hand"
+            ToolTip.Tip="Select time range for chart and process list">
+        <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedLeft">
+                <Border Background="{DynamicResource BackgroundElevated}"
+                        BorderBrush="{DynamicResource BorderSubtle}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="4"
+                        MinWidth="180">
+                    <StackPanel>
+                        <!-- Preset list (visible when not picking custom dates) -->
+                        <StackPanel x:Name="PresetPanel">
+                            <Button x:Name="Btn5Min"    Content="5 Minutes"    Classes="rangeItem" Click="OnPresetClick" Tag="Last5Minutes" />
+                            <Button x:Name="Btn1Hour"   Content="1 Hour"       Classes="rangeItem" Click="OnPresetClick" Tag="Last1Hour" />
+                            <Button x:Name="Btn24Hours" Content="24 Hours"     Classes="rangeItem" Click="OnPresetClick" Tag="Last24Hours" />
+
+                            <Border Height="1"
+                                    Background="{DynamicResource DividerHorizontal}"
+                                    Margin="4,4" />
+
+                            <Button x:Name="Btn7Days"   Content="Last 7 Days"  Classes="rangeItem" Click="OnPresetClick" Tag="Last7Days" />
+                            <Button x:Name="Btn30Days"  Content="Last 30 Days" Classes="rangeItem" Click="OnPresetClick" Tag="Last30Days" />
+                            <Button x:Name="BtnAllTime" Content="All Time"     Classes="rangeItem" Click="OnPresetClick" Tag="AllTime" />
+
+                            <Border Height="1"
+                                    Background="{DynamicResource DividerHorizontal}"
+                                    Margin="4,4" />
+
+                            <Button Content="Custom..."
+                                    Classes="rangeItem"
+                                    Click="OnCustomClick" />
+                        </StackPanel>
+
+                        <!-- Custom date picker (visible when picking custom dates) -->
+                        <StackPanel x:Name="CustomPanel"
+                                    IsVisible="False"
+                                    Spacing="8">
+                            <TextBlock Text="CUSTOM RANGE"
+                                       FontSize="11"
+                                       LetterSpacing="1"
+                                       Foreground="{DynamicResource TextMuted}"
+                                       Margin="4,2,0,4" />
+
+                            <StackPanel Orientation="Horizontal" Spacing="8" Margin="4,0">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="From"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource TextSecondary}" />
+                                    <CalendarDatePicker x:Name="FromPicker"
+                                                        MinWidth="130"
+                                                        FontSize="11" />
+                                </StackPanel>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="To"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource TextSecondary}" />
+                                    <CalendarDatePicker x:Name="ToPicker"
+                                                        MinWidth="130"
+                                                        FontSize="11" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="8"
+                                        HorizontalAlignment="Right"
+                                        Margin="4,4,4,0">
+                                <Button Content="Cancel"
+                                        FontSize="11"
+                                        Padding="10,4"
+                                        Background="Transparent"
+                                        Foreground="{DynamicResource TextSecondary}"
+                                        BorderThickness="0"
+                                        Cursor="Hand"
+                                        Click="OnCustomCancel" />
+                                <Button Content="Apply"
+                                        FontSize="11"
+                                        Padding="10,4"
+                                        Background="Transparent"
+                                        Foreground="{DynamicResource AccentPrimary}"
+                                        BorderBrush="{DynamicResource AccentPrimary}"
+                                        BorderThickness="1"
+                                        CornerRadius="3"
+                                        Cursor="Hand"
+                                        Click="OnCustomApply" />
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Flyout>
+        </Button.Flyout>
+
+        <Button.Styles>
+            <Style Selector="Button.rangeItem">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="Padding" Value="8,6" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="3" />
+                <Setter Property="Cursor" Value="Hand" />
+            </Style>
+            <Style Selector="Button.rangeItem:pointerover /template/ ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+            </Style>
+            <Style Selector="Button.rangeItem.active">
+                <Setter Property="Foreground" Value="{DynamicResource AccentPrimary}" />
+            </Style>
+        </Button.Styles>
+
+        <StackPanel Orientation="Horizontal" Spacing="4">
+            <TextBlock x:Name="ButtonLabel" Text="5 Minutes" VerticalAlignment="Center" />
+            <TextBlock Text="▾" VerticalAlignment="Center" FontSize="9" />
+        </StackPanel>
+    </Button>
+</UserControl>
