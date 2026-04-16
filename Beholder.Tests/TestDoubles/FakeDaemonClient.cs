@@ -14,6 +14,21 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public DaemonStatusInfo StatusInfo => DaemonStatusInfo.FromState(_state);
     public event Action<DaemonStatusInfo>? StateChanged;
 
+    // Throw-control hooks. When non-null, the corresponding RPC throws the
+    // exception on its next call. Per-RPC nullable to avoid a global throw
+    // that breaks unrelated tests. Used by tests exercising OCE re-throw and
+    // RpcException-swallow semantics in UI-layer catch blocks.
+    public Exception? SnapshotException { get; set; }
+    public Exception? ProcessTimelineException { get; set; }
+    public Exception? AggregateTimelineException { get; set; }
+    public Exception? ProcessSummariesException { get; set; }
+
+    // Optional canned snapshot/response bodies so tests can drive real data
+    // through the seeding path. Existing callers that don't set these get the
+    // empty-response default as before.
+    public GetSnapshotResponse? SnapshotResponse { get; set; }
+    public Func<GetProcessTimelineRequest, GetProcessTimelineResponse>? ProcessTimelineResponder { get; set; }
+
     public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
 
     public void SimulateConnected() {
@@ -42,8 +57,10 @@ internal sealed class FakeDaemonClient : IDaemonClient {
             () => { });
     }
 
-    public Task<GetSnapshotResponse> GetSnapshotAsync(CancellationToken ct) =>
-        Task.FromResult(new GetSnapshotResponse());
+    public Task<GetSnapshotResponse> GetSnapshotAsync(CancellationToken ct) {
+        if (SnapshotException is not null) throw SnapshotException;
+        return Task.FromResult(SnapshotResponse ?? new GetSnapshotResponse());
+    }
 
     public Task<ApplyFirewallRuleResponse> ApplyFirewallRuleAsync(
         ApplyFirewallRuleRequest request, CancellationToken ct) =>
@@ -58,12 +75,16 @@ internal sealed class FakeDaemonClient : IDaemonClient {
         Task.FromResult(new VerifyChainResponse());
 
     public Task<GetProcessTimelineResponse> GetProcessTimelineAsync(
-        GetProcessTimelineRequest request, CancellationToken ct) =>
-        Task.FromResult(new GetProcessTimelineResponse());
+        GetProcessTimelineRequest request, CancellationToken ct) {
+        if (ProcessTimelineException is not null) throw ProcessTimelineException;
+        return Task.FromResult(ProcessTimelineResponder?.Invoke(request) ?? new GetProcessTimelineResponse());
+    }
 
     public Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(
-        GetAggregateTimelineRequest request, CancellationToken ct) =>
-        Task.FromResult(new GetAggregateTimelineResponse());
+        GetAggregateTimelineRequest request, CancellationToken ct) {
+        if (AggregateTimelineException is not null) throw AggregateTimelineException;
+        return Task.FromResult(new GetAggregateTimelineResponse());
+    }
 
     public Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(
         GetProcessDestinationsRequest request, CancellationToken ct) =>
@@ -74,8 +95,10 @@ internal sealed class FakeDaemonClient : IDaemonClient {
         Task.FromResult(new GetCountryBreakdownResponse());
 
     public Task<GetProcessSummariesResponse> GetProcessSummariesAsync(
-        GetProcessSummariesRequest request, CancellationToken ct) =>
-        Task.FromResult(new GetProcessSummariesResponse());
+        GetProcessSummariesRequest request, CancellationToken ct) {
+        if (ProcessSummariesException is not null) throw ProcessSummariesException;
+        return Task.FromResult(new GetProcessSummariesResponse());
+    }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

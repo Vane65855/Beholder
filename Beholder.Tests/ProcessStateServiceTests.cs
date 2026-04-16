@@ -1,5 +1,6 @@
 using Beholder.Protocol.Local;
 using Beholder.Ui.Services;
+using Grpc.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Beholder.Tests;
@@ -182,5 +183,67 @@ public class ProcessStateServiceTests {
         service.OnCounterBatch(batch);
 
         Assert.True(eventFired);
+    }
+
+    // ---- SeedAsync exception-handling tests ----
+
+    private static (ProcessStateService Service, FakeDaemonClient Client) CreateServiceWithClient() {
+        var fakeClient = new FakeDaemonClient();
+        var subscriber = new DaemonStreamSubscriber(
+            fakeClient,
+            NullLogger<DaemonStreamSubscriber>.Instance);
+        var service = new ProcessStateService(subscriber, fakeClient);
+        return (service, fakeClient);
+    }
+
+    [Fact]
+    public async Task SeedAsync_OperationCanceled_ReThrows() {
+        // Cancellation during seeding must surface to the caller
+        // (DaemonStreamSubscriber.OnConnected) so shutdown signals aren't muted.
+        var (service, client) = CreateServiceWithClient();
+        client.SnapshotException = new OperationCanceledException();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => service.SeedAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SeedAsync_RpcException_Swallowed() {
+        // A gRPC failure during seeding is best-effort — the live stream
+        // will fill in. Seeding must not throw to the caller.
+        var (service, client) = CreateServiceWithClient();
+        client.SnapshotException = new RpcException(
+            new Status(StatusCode.Unavailable, "daemon offline"));
+
+        await service.SeedAsync(CancellationToken.None);
+
+        Assert.Equal(0, service.TrackedProcessCount);
+    }
+
+    [Fact]
+    public async Task SeedAsync_PerProcessTimelineFails_ContinuesWithOtherProcesses() {
+        // If one process's historical backfill RPC fails with RpcException,
+        // the seeding loop must continue with the remaining processes. Both
+        // end up in state (just without backfilled recent-window buffers).
+        var (service, client) = CreateServiceWithClient();
+
+        var snapshotResponse = new GetSnapshotResponse();
+        snapshotResponse.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "a.exe",
+            ProcessName = "a.exe",
+            TotalBytesIn = 100,
+        });
+        snapshotResponse.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "b.exe",
+            ProcessName = "b.exe",
+            TotalBytesIn = 200,
+        });
+        client.SnapshotResponse = snapshotResponse;
+        client.ProcessTimelineException = new RpcException(
+            new Status(StatusCode.Internal, "timeline query failed"));
+
+        await service.SeedAsync(CancellationToken.None);
+
+        Assert.Equal(2, service.TrackedProcessCount);
     }
 }

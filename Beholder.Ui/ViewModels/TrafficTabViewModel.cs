@@ -11,6 +11,7 @@ using Beholder.Ui.Helpers;
 using Beholder.Ui.Models;
 using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Grpc.Core;
 
 namespace Beholder.Ui.ViewModels;
 
@@ -251,7 +252,13 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             _allProcessesItem.UpdateTraffic(allHistIn, allHistOut);
             SortProcessList();
             IsLoading = false;
-        } catch (Exception) {
+        } catch (OperationCanceledException) {
+            // User switched range mid-query (or shutdown). No error banner —
+            // the superseding query will take over. Re-throw so the Task
+            // completes as Canceled rather than RanToCompletion; today this
+            // is fire-and-forget but future awaiters see the right status.
+            throw;
+        } catch (RpcException) {
             // Historical query failed — show error state
             IsLoading = false;
             HasError = true;
@@ -366,8 +373,10 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
                 new ChartSeries("Download", downloadValues, downloadColor),
                 new ChartSeries("Upload", uploadValues, uploadColor),
             ];
-        } catch {
-            // Best-effort — chart stays on its previous state
+        } catch (OperationCanceledException) {
+            throw;
+        } catch (RpcException) {
+            // Per-process chart query failed — chart stays on previous state.
         }
     }
 

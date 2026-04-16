@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Beholder.Protocol.Local;
+using Grpc.Core;
 
 namespace Beholder.Ui.Services;
 
@@ -81,13 +82,19 @@ internal sealed class ProcessStateService {
                         state.RecentDeltaIn.Add(point.BytesIn);
                         state.RecentDeltaOut.Add(point.BytesOut);
                     }
-                } catch {
+                } catch (OperationCanceledException) {
+                    throw;  // propagate to the outer try so SeedAsync honors its CT
+                } catch (RpcException) {
                     // Per-process backfill is best-effort — live stream fills in.
                 }
             }
 
             ProcessStatesUpdated?.Invoke(_states);
-        } catch {
+        } catch (OperationCanceledException) {
+            // Surface cancellation to the subscriber loop's OnConnected callback
+            // so shutdown/reconnect signals aren't muted by the best-effort catch.
+            throw;
+        } catch (RpcException) {
             // Snapshot seeding is best-effort — live stream will fill in.
         }
     }

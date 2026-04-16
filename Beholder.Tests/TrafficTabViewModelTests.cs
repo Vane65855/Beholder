@@ -1,6 +1,7 @@
 using Beholder.Ui.Models;
 using Beholder.Ui.Services;
 using Beholder.Ui.ViewModels;
+using Grpc.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Beholder.Tests;
@@ -274,5 +275,55 @@ public class TrafficTabViewModelTests {
         Assert.Equal(TimeRangePreset.Custom, custom.Preset);
         Assert.False(custom.IsLive);
         Assert.Contains("Apr", custom.Label);
+    }
+
+    // ---- Historical query exception-handling tests ----
+
+    private static (TrafficTabViewModel Vm, FakeDaemonClient Client) CreateViewModelWithClient() {
+        var fakeClient = new FakeDaemonClient();
+        var subscriber = new DaemonStreamSubscriber(
+            fakeClient,
+            NullLogger<DaemonStreamSubscriber>.Instance);
+        var service = new ProcessStateService(subscriber, fakeClient);
+        var vm = new TrafficTabViewModel(fakeClient, service);
+        return (vm, fakeClient);
+    }
+
+    [Fact]
+    public void SelectedTimeRangeChange_RpcException_SetsErrorState() {
+        // Historical query fails with a gRPC error → HasError should flip true
+        // and the user-facing ErrorMessage should be set. IsLoading returns to
+        // false (user shouldn't see a stuck "Loading…" after a known failure).
+        var (vm, client) = CreateViewModelWithClient();
+        client.AggregateTimelineException = new RpcException(
+            new Status(StatusCode.Unavailable, "daemon offline"));
+
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last7Days);
+
+        Assert.True(vm.HasError);
+        Assert.Contains("Failed", vm.ErrorMessage);
+        Assert.False(vm.IsLoading);
+    }
+
+    [Fact]
+    public void SelectedTimeRangeChange_OperationCanceled_DoesNotSetErrorState() {
+        // OCE must NOT be treated as a user-visible error — it means the user
+        // switched ranges (or shutdown ran) mid-query. HasError stays false.
+        // Hook UnobservedTaskException so the re-thrown OCE from the
+        // fire-and-forget LoadHistoricalRangeAsync doesn't pollute test output
+        // when GC eventually runs.
+        var (vm, client) = CreateViewModelWithClient();
+        client.AggregateTimelineException = new OperationCanceledException();
+
+        EventHandler<UnobservedTaskExceptionEventArgs> swallow = (_, e) => e.SetObserved();
+        TaskScheduler.UnobservedTaskException += swallow;
+        try {
+            vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last7Days);
+
+            Assert.False(vm.HasError);
+            Assert.Equal(string.Empty, vm.ErrorMessage);
+        } finally {
+            TaskScheduler.UnobservedTaskException -= swallow;
+        }
     }
 }
