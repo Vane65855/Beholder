@@ -1,3 +1,4 @@
+using Beholder.Protocol.Local;
 using Beholder.Ui.Models;
 using Beholder.Ui.Services;
 using Beholder.Ui.ViewModels;
@@ -253,6 +254,55 @@ public class TrafficTabViewModelTests {
         // After switching back to live, the chart should rebuild from buffers
         Assert.NotNull(vm.ChartData);
         Assert.Equal(2, vm.ChartData!.Count);
+    }
+
+    [Fact]
+    public void SwitchFromHistoricalToLive_ClearsStaleHistoricalProcesses() {
+        // Regression test: before the fix, switching back to live from a
+        // historical range left the historical-only processes (those that
+        // had traffic in the 30-day window but aren't currently active)
+        // in the sidebar. UpdateFromStates only upserts — it doesn't remove
+        // stale entries. The fix clears the list on the IsLive transition.
+        var (vm, client) = CreateViewModelWithClient();
+
+        // Live state has only "live.exe".
+        vm.UpdateFromStates(new Dictionary<string, ProcessState> {
+            ["live.exe"] = MakeState("live.exe", "live", [100], [50]),
+        });
+
+        // Historical summary response has only "hist.exe" (simulates a
+        // process that was active in the 30-day window but has since
+        // been evicted from the engine's in-memory state).
+        var histResponse = new GetProcessSummariesResponse();
+        histResponse.Summaries.Add(new ProcessTrafficSummaryProto {
+            ProcessPath = "hist.exe",
+            ProcessName = "hist.exe",
+            TotalBytesIn = 999,
+            TotalBytesOut = 888,
+        });
+        client.ProcessSummariesResponse = histResponse;
+
+        // LoadHistoricalRangeAsync early-returns when the aggregate timeline
+        // response is empty (chart has nothing to draw), so stage at least
+        // one point so the method reaches the process-summary population.
+        var timelineResponse = new GetAggregateTimelineResponse();
+        timelineResponse.Points.Add(new TrafficTimePoint {
+            TimestampUnixNs = 0,
+            BytesIn = 100,
+            BytesOut = 50,
+        });
+        client.AggregateTimelineResponse = timelineResponse;
+
+        // Switch to historical — sidebar now shows hist.exe from the RPC.
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last30Days);
+        Assert.Contains(vm.ProcessList, p => p.ProcessPath == "hist.exe");
+
+        // Switch back to live — sidebar should match live state, not stale
+        // historical entries.
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last5Minutes);
+
+        Assert.DoesNotContain(vm.ProcessList, p => p.ProcessPath == "hist.exe");
+        Assert.Contains(vm.ProcessList, p => p.ProcessPath == "live.exe");
     }
 
     [Fact]

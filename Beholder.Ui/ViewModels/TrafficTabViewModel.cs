@@ -86,8 +86,12 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
 
     partial void OnSelectedTimeRangeChanged(TimeRangeSelection value) {
         if (value.IsLive) {
-            // Switching back to live mode — rebuild chart from the current
-            // circular buffer state immediately.
+            // Clear any historical-only entries left over from the previous
+            // range. UpdateFromStates only upserts from live states and can't
+            // remove processes that were populated via GetProcessSummaries
+            // but aren't in the current live snapshot (e.g., engine-evicted
+            // processes that only exist in SQL history).
+            ClearProcessList();
             ChartDataSpan = null;
             if (_lastStates is not null) {
                 UpdateFromStates(_lastStates);
@@ -96,6 +100,16 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             // Switching to historical mode — query the daemon for the selected range.
             _ = LoadHistoricalRangeAsync(value);
         }
+    }
+
+    /// <summary>
+    /// Removes all process-list items except the leading "All processes"
+    /// aggregate row, and clears the lookup dictionary. Called on every range
+    /// transition so one range's process set can't leak into another's sidebar.
+    /// </summary>
+    private void ClearProcessList() {
+        _processLookup.Clear();
+        while (ProcessList.Count > 1) ProcessList.RemoveAt(ProcessList.Count - 1);
     }
 
     internal void UpdateFromStates(IReadOnlyDictionary<string, ProcessState> states) {
@@ -233,8 +247,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             if (SelectedTimeRange != range) return;
 
             // Clear and rebuild the process list with historical totals
-            _processLookup.Clear();
-            while (ProcessList.Count > 1) ProcessList.RemoveAt(ProcessList.Count - 1);
+            ClearProcessList();
 
             long allHistIn = 0;
             long allHistOut = 0;

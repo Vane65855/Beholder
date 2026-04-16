@@ -28,6 +28,8 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     // empty-response default as before.
     public GetSnapshotResponse? SnapshotResponse { get; set; }
     public Func<GetProcessTimelineRequest, GetProcessTimelineResponse>? ProcessTimelineResponder { get; set; }
+    public GetProcessSummariesResponse? ProcessSummariesResponse { get; set; }
+    public GetAggregateTimelineResponse? AggregateTimelineResponse { get; set; }
 
     public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
 
@@ -83,7 +85,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(
         GetAggregateTimelineRequest request, CancellationToken ct) {
         if (AggregateTimelineException is not null) throw AggregateTimelineException;
-        return Task.FromResult(new GetAggregateTimelineResponse());
+        return Task.FromResult(AggregateTimelineResponse ?? new GetAggregateTimelineResponse());
     }
 
     public Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(
@@ -97,7 +99,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Task<GetProcessSummariesResponse> GetProcessSummariesAsync(
         GetProcessSummariesRequest request, CancellationToken ct) {
         if (ProcessSummariesException is not null) throw ProcessSummariesException;
-        return Task.FromResult(new GetProcessSummariesResponse());
+        return Task.FromResult(ProcessSummariesResponse ?? new GetProcessSummariesResponse());
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
