@@ -256,6 +256,38 @@ internal sealed class TrafficChartControl : Control {
     }
 
     /// <summary>
+    /// Emits the shared Catmull-Rom-to-cubic-Bezier loop into an open
+    /// <see cref="StreamGeometryContext"/>. Both <see cref="StrokeSmoothPath"/>
+    /// and <see cref="FillSmoothArea"/> reuse this body; only the surrounding
+    /// figure-open / figure-close boilerplate differs between them. Control
+    /// point Y coordinates are clamped to <c>[top, baselineY]</c> via
+    /// <see cref="ClampY"/> to prevent the spline from overshooting the data
+    /// envelope on sharp transitions.
+    /// </summary>
+    /// <remarks>
+    /// Callers must guarantee <paramref name="points"/> has length ≥ 3; the
+    /// 0/1/2-point fallbacks (empty figure, single MoveTo, straight LineTo)
+    /// remain the caller's responsibility because their figure-close
+    /// semantics differ between stroke and fill.
+    /// </remarks>
+    private static void EmitCatmullRomBeziers(StreamGeometryContext ctx,
+        ReadOnlySpan<Point> points, double top, double baselineY) {
+        for (var i = 0; i < points.Length - 1; i++) {
+            var p0 = i == 0 ? points[0] : points[i - 1];
+            var p1 = points[i];
+            var p2 = points[i + 1];
+            var p3 = i + 2 < points.Length ? points[i + 2] : points[i + 1];
+            var c1 = new Point(
+                p1.X + (p2.X - p0.X) / 6,
+                ClampY(p1.Y + (p2.Y - p0.Y) / 6, top, baselineY));
+            var c2 = new Point(
+                p2.X - (p3.X - p1.X) / 6,
+                ClampY(p2.Y - (p3.Y - p1.Y) / 6, top, baselineY));
+            ctx.CubicBezierTo(c1, c2, p2);
+        }
+    }
+
+    /// <summary>
     /// Strokes a Catmull-Rom spline through the given points (converted to cubic Beziers).
     /// Falls back to straight lines when there are fewer than 3 points. Control point Y
     /// values are clamped to <c>[top, baselineY]</c> to prevent the spline from
@@ -275,19 +307,7 @@ internal sealed class TrafficChartControl : Control {
             return;
         }
 
-        for (var i = 0; i < points.Length - 1; i++) {
-            var p0 = i == 0 ? points[0] : points[i - 1];
-            var p1 = points[i];
-            var p2 = points[i + 1];
-            var p3 = i + 2 < points.Length ? points[i + 2] : points[i + 1];
-            var c1 = new Point(
-                p1.X + (p2.X - p0.X) / 6,
-                ClampY(p1.Y + (p2.Y - p0.Y) / 6, top, baselineY));
-            var c2 = new Point(
-                p2.X - (p3.X - p1.X) / 6,
-                ClampY(p2.Y - (p3.Y - p1.Y) / 6, top, baselineY));
-            ctx.CubicBezierTo(c1, c2, p2);
-        }
+        EmitCatmullRomBeziers(ctx, points, top, baselineY);
         ctx.EndFigure(false);
     }
 
@@ -304,19 +324,7 @@ internal sealed class TrafficChartControl : Control {
         ctx.LineTo(points[0]);
 
         if (points.Length >= 3) {
-            for (var i = 0; i < points.Length - 1; i++) {
-                var p0 = i == 0 ? points[0] : points[i - 1];
-                var p1 = points[i];
-                var p2 = points[i + 1];
-                var p3 = i + 2 < points.Length ? points[i + 2] : points[i + 1];
-                var c1 = new Point(
-                    p1.X + (p2.X - p0.X) / 6,
-                    ClampY(p1.Y + (p2.Y - p0.Y) / 6, top, baselineY));
-                var c2 = new Point(
-                    p2.X - (p3.X - p1.X) / 6,
-                    ClampY(p2.Y - (p3.Y - p1.Y) / 6, top, baselineY));
-                ctx.CubicBezierTo(c1, c2, p2);
-            }
+            EmitCatmullRomBeziers(ctx, points, top, baselineY);
         } else if (points.Length == 2) {
             ctx.LineTo(points[1]);
         }

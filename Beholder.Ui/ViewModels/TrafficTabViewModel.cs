@@ -245,22 +245,10 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             var dataLastMs = timelineResponse.Points[^1].TimestampUnixNs / 1_000_000;
             var dataSpanMs = dataLastMs - dataFirstMs;
 
-            // Pad single-point responses so the chart renders a sharp spike
-            // instead of nothing. Layout: the burst sits ~1/11 of the way from
-            // the left (one lead-in zero, one burst point, nine trailing zeros),
-            // producing a sharp up-and-down peak on the left with empty trailing
-            // space. Reads as "this happened at the start of the window."
-            // Without padding, the bezier code early-returns for N<=1 points
-            // and axis labels hide for tickCount<2.
-            if (downloadValues.Length == 1) {
-                var burstIn = downloadValues[0];
-                var burstOut = uploadValues[0];
-                downloadValues = [0L, burstIn, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L];
-                uploadValues = [0L, burstOut, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L];
-                // Total span = 10 × bucket width (one bucket for the spike plus
-                // nine buckets of trailing empty space).
-                dataSpanMs = Math.Max(resolutionMs * 10, 10_000);
-            }
+            // Pad single-point responses to a sharp left-aligned spike (see
+            // ApplySinglePointPadding for the layout and rationale).
+            (downloadValues, uploadValues, dataSpanMs) = ApplySinglePointPadding(
+                downloadValues, uploadValues, dataSpanMs, resolutionMs);
 
             ChartDataSpan = TimeSpan.FromMilliseconds(Math.Max(dataSpanMs, 1000));
 
@@ -413,15 +401,9 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             var dataLastMs = points[^1].TimestampUnixNs / 1_000_000;
             var dataSpanMs = dataLastMs - dataFirstMs;
 
-            // Single-point padding: burst on the left, nine trailing zeros
-            // for empty space. See LoadHistoricalRangeAsync for the full rationale.
-            if (downloadValues.Length == 1) {
-                var burstIn = downloadValues[0];
-                var burstOut = uploadValues[0];
-                downloadValues = [0L, burstIn, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L];
-                uploadValues = [0L, burstOut, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L];
-                dataSpanMs = Math.Max(resolutionMs * 10, 10_000);
-            }
+            // Single-point padding: see ApplySinglePointPadding for the layout.
+            (downloadValues, uploadValues, dataSpanMs) = ApplySinglePointPadding(
+                downloadValues, uploadValues, dataSpanMs, resolutionMs);
 
             ChartDataSpan = TimeSpan.FromMilliseconds(Math.Max(dataSpanMs, 1000));
 
@@ -468,6 +450,32 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             new ChartSeries("Download", downloadValues, downloadColor),
             new ChartSeries("Upload", uploadValues, uploadColor),
         ];
+    }
+
+    /// <summary>
+    /// Pads a single-value download/upload array pair to an 11-point spike
+    /// layout (one leading zero, the burst at index 1, nine trailing zeros)
+    /// so <see cref="TrafficChartControl"/> can render a sharp up-and-down
+    /// peak on the left with empty trailing space. Arrays with a count other
+    /// than 1 are returned unchanged. When padding applies, the caller's
+    /// <paramref name="dataSpanMs"/> is widened to 10× bucket width so the
+    /// X-axis has ten equal divisions covering the spike plus trailing space.
+    /// </summary>
+    /// <remarks>
+    /// Without this, <see cref="TrafficChartControl"/> early-returns for
+    /// maxSamples &lt; 2 (NaN-guard), and axis labels hide below tickCount = 2.
+    /// The spike layout was chosen in Phase 5.4.1 over a centered single dot
+    /// so the peak reads as "this happened at the start of the window" rather
+    /// than "this is a scatter plot."
+    /// </remarks>
+    private static (long[] Download, long[] Upload, long DataSpanMs) ApplySinglePointPadding(
+        long[] downloadValues, long[] uploadValues, long dataSpanMs, long resolutionMs
+    ) {
+        if (downloadValues.Length != 1) return (downloadValues, uploadValues, dataSpanMs);
+        return (
+            [0L, downloadValues[0], 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L],
+            [0L, uploadValues[0],   0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L],
+            Math.Max(resolutionMs * 10, 10_000));
     }
 
     private static long[] BufferToArray(CircularBuffer<long> buffer) {
