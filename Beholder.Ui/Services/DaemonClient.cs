@@ -25,6 +25,12 @@ internal sealed class DaemonClient : IDaemonClient {
     private BeholderLocal.BeholderLocalClient? _client;
     private ConnectionState _state = ConnectionState.Disconnected;
 
+    // Task of the running ConnectLoopAsync. Stored so DisposeAsync can await
+    // the loop's unwind before disposing the channel — otherwise the loop's
+    // in-flight health probe / MonitorConnection RPC may see a just-disposed
+    // channel and surface ObjectDisposedException during shutdown.
+    private Task? _connectTask;
+
     public ConnectionState State => _state;
     public DaemonStatusInfo StatusInfo => DaemonStatusInfo.FromState(_state);
     public event Action<DaemonStatusInfo>? StateChanged;
@@ -36,7 +42,14 @@ internal sealed class DaemonClient : IDaemonClient {
         _logger = logger;
     }
 
-    public async Task ConnectAsync(CancellationToken ct) {
+    public Task ConnectAsync(CancellationToken ct) {
+        if (_connectTask is not null)
+            throw new InvalidOperationException("ConnectAsync has already been started.");
+        _connectTask = ConnectLoopAsync(ct);
+        return _connectTask;
+    }
+
+    private async Task ConnectLoopAsync(CancellationToken ct) {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _shutdownCts.Token);
         var token = linked.Token;
 
@@ -91,7 +104,8 @@ internal sealed class DaemonClient : IDaemonClient {
             await Task.Delay(TimeSpan.FromSeconds(5), _timeProvider, ct);
 
             try {
-                await _client!.GetSnapshotAsync(new GetSnapshotRequest(), cancellationToken: ct);
+                var client = GetConnectedClient();
+                await client.GetSnapshotAsync(new GetSnapshotRequest(), cancellationToken: ct);
             } catch (OperationCanceledException) {
                 throw;
             } catch {
@@ -102,73 +116,82 @@ internal sealed class DaemonClient : IDaemonClient {
     }
 
     public async Task<GetSnapshotResponse> GetSnapshotAsync(CancellationToken ct) {
-        EnsureConnected();
-        return await _client!.GetSnapshotAsync(new GetSnapshotRequest(), cancellationToken: ct);
+        var client = GetConnectedClient();
+        return await client.GetSnapshotAsync(new GetSnapshotRequest(), cancellationToken: ct);
     }
 
     public async Task<ApplyFirewallRuleResponse> ApplyFirewallRuleAsync(
         ApplyFirewallRuleRequest request, CancellationToken ct) {
         ArgumentNullException.ThrowIfNull(request);
-        EnsureConnected();
-        return await _client!.ApplyFirewallRuleAsync(request, cancellationToken: ct);
+        var client = GetConnectedClient();
+        return await client.ApplyFirewallRuleAsync(request, cancellationToken: ct);
     }
 
     public async Task<MarkAlertReadResponse> MarkAlertReadAsync(
         MarkAlertReadRequest request, CancellationToken ct) {
         ArgumentNullException.ThrowIfNull(request);
-        EnsureConnected();
-        return await _client!.MarkAlertReadAsync(request, cancellationToken: ct);
+        var client = GetConnectedClient();
+        return await client.MarkAlertReadAsync(request, cancellationToken: ct);
     }
 
     public async Task<VerifyChainResponse> VerifyChainAsync(
         VerifyChainRequest request, CancellationToken ct) {
         ArgumentNullException.ThrowIfNull(request);
-        EnsureConnected();
-        return await _client!.VerifyChainAsync(request, cancellationToken: ct);
+        var client = GetConnectedClient();
+        return await client.VerifyChainAsync(request, cancellationToken: ct);
     }
 
     public async Task<GetProcessTimelineResponse> GetProcessTimelineAsync(
         GetProcessTimelineRequest request, CancellationToken ct) {
         ArgumentNullException.ThrowIfNull(request);
-        EnsureConnected();
-        return await _client!.GetProcessTimelineAsync(request, cancellationToken: ct);
+        var client = GetConnectedClient();
+        return await client.GetProcessTimelineAsync(request, cancellationToken: ct);
     }
 
     public async Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(
         GetAggregateTimelineRequest request, CancellationToken ct) {
         ArgumentNullException.ThrowIfNull(request);
-        EnsureConnected();
-        return await _client!.GetAggregateTimelineAsync(request, cancellationToken: ct);
+        var client = GetConnectedClient();
+        return await client.GetAggregateTimelineAsync(request, cancellationToken: ct);
     }
 
     public async Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(
         GetProcessDestinationsRequest request, CancellationToken ct) {
         ArgumentNullException.ThrowIfNull(request);
-        EnsureConnected();
-        return await _client!.GetProcessDestinationsAsync(request, cancellationToken: ct);
+        var client = GetConnectedClient();
+        return await client.GetProcessDestinationsAsync(request, cancellationToken: ct);
     }
 
     public async Task<GetCountryBreakdownResponse> GetCountryBreakdownAsync(
         GetCountryBreakdownRequest request, CancellationToken ct) {
         ArgumentNullException.ThrowIfNull(request);
-        EnsureConnected();
-        return await _client!.GetCountryBreakdownAsync(request, cancellationToken: ct);
+        var client = GetConnectedClient();
+        return await client.GetCountryBreakdownAsync(request, cancellationToken: ct);
     }
 
     public async Task<GetProcessSummariesResponse> GetProcessSummariesAsync(
         GetProcessSummariesRequest request, CancellationToken ct) {
         ArgumentNullException.ThrowIfNull(request);
-        EnsureConnected();
-        return await _client!.GetProcessSummariesAsync(request, cancellationToken: ct);
+        var client = GetConnectedClient();
+        return await client.GetProcessSummariesAsync(request, cancellationToken: ct);
     }
 
     public AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken ct) {
-        EnsureConnected();
-        return _client!.Subscribe(new SubscribeRequest(), cancellationToken: ct);
+        var client = GetConnectedClient();
+        return client.Subscribe(new SubscribeRequest(), cancellationToken: ct);
     }
 
     public async ValueTask DisposeAsync() {
         await _shutdownCts.CancelAsync();
+        if (_connectTask is not null) {
+            try {
+                await _connectTask;
+            } catch (OperationCanceledException) {
+                // Today ConnectLoopAsync catches OCE internally and exits
+                // cleanly, so this branch is defensive — if the loop is ever
+                // changed to let OCE propagate, disposal still completes.
+            }
+        }
         _channel?.Dispose();
         _shutdownCts.Dispose();
     }
@@ -179,8 +202,21 @@ internal sealed class DaemonClient : IDaemonClient {
         StateChanged?.Invoke(StatusInfo);
     }
 
-    private void EnsureConnected() {
-        if (_state != ConnectionState.Connected)
+    /// <summary>
+    /// Snapshots <see cref="_client"/> under the Connected-state check and
+    /// returns it. Callers use the returned local for RPC dispatch, so even
+    /// if the reconnect loop reassigns <see cref="_client"/> between this
+    /// call and the RPC's await, the RPC runs against a consistent
+    /// client/channel pair. If the snapshot happens to point at a just-
+    /// disposed channel (narrow race), the RPC surfaces a normal
+    /// <see cref="RpcException"/> / <see cref="ObjectDisposedException"/>
+    /// which callers handle via the existing per-RPC catches in
+    /// <c>TrafficTabViewModel</c> and <c>ProcessStateService</c>.
+    /// </summary>
+    private BeholderLocal.BeholderLocalClient GetConnectedClient() {
+        var client = _client;
+        if (_state != ConnectionState.Connected || client is null)
             throw new InvalidOperationException("Not connected to daemon");
+        return client;
     }
 }
