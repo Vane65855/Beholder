@@ -16,8 +16,8 @@ using Grpc.Core;
 namespace Beholder.Ui.ViewModels;
 
 internal sealed partial class TrafficTabViewModel : ViewModelBase {
-    private readonly IDaemonClient _daemonClient;
     private readonly ProcessStateService _processStateService;
+    private readonly HistoricalChartLoader _historicalChartLoader;
     private readonly Dictionary<string, ProcessListItem> _processLookup = new(StringComparer.Ordinal);
     private readonly ProcessListItem _allProcessesItem;
     private IReadOnlyDictionary<string, ProcessState>? _lastStates;
@@ -60,11 +60,15 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
 
     public ObservableCollection<ProcessListItem> ProcessList { get; } = [];
 
-    public TrafficTabViewModel(IDaemonClient daemonClient, ProcessStateService processStateService) {
+    public TrafficTabViewModel(
+        IDaemonClient daemonClient,
+        ProcessStateService processStateService,
+        HistoricalChartLoader historicalChartLoader) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
-        _daemonClient = daemonClient;
+        ArgumentNullException.ThrowIfNull(historicalChartLoader);
         _processStateService = processStateService;
+        _historicalChartLoader = historicalChartLoader;
 
         _allProcessesItem = new ProcessListItem(string.Empty, "All processes", isAll: true);
         ProcessList.Add(_allProcessesItem);
@@ -161,7 +165,19 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         }
         IsEmpty = false;
 
-        // Upsert process list items using recent-window sums for display + sort.
+        UpsertProcessListFromStates(states);
+        SortProcessList();
+        RebuildChartData(states);
+    }
+
+    /// <summary>
+    /// Upserts <see cref="ProcessList"/> items from live states, using each
+    /// process's recent-window sum for display + sort; removes processes whose
+    /// rolling window has gone to zero; updates the leading "All processes"
+    /// aggregate row. Split out of <see cref="UpdateFromStates"/> to keep that
+    /// method readable top-to-bottom as a narrative.
+    /// </summary>
+    private void UpsertProcessListFromStates(IReadOnlyDictionary<string, ProcessState> states) {
         long allRecentIn = 0;
         long allRecentOut = 0;
         foreach (var kvp in states) {
@@ -190,9 +206,6 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         }
 
         _allProcessesItem.UpdateTraffic(allRecentIn, allRecentOut);
-
-        SortProcessList();
-        RebuildChartData(states);
     }
 
     private async Task LoadHistoricalRangeAsync(TimeRangeSelection range, CancellationToken ct) {
@@ -200,93 +213,20 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             IsLoading = true;
             IsEmpty = false;
 
-            var from = range.From;
-            var to = range.To;
-            var spanMs = (long)(to - from).TotalMilliseconds;
+            var result = await _historicalChartLoader.LoadRangeAsync(range, ct);
 
-            // Target ~300 output buckets across the requested range. The daemon
-            // stitches multi-tier data across the range (finest tier for recent
-            // portions, coarsest for oldest), so the returned timeline is
-            // already optimally fidelity-balanced — no adaptive re-query needed.
-            var resolutionMs = Math.Max(spanMs / 300, 1000);
-
-            var timelineRequest = new GetAggregateTimelineRequest {
-                FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000,
-                ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000,
-                ResolutionMs = resolutionMs,
-            };
-
-            var timelineResponse = await _daemonClient.GetAggregateTimelineAsync(
-                timelineRequest, ct);
-
-            // Check that the user hasn't switched away while we were querying
+            // The user may have switched away while we were querying.
             if (SelectedTimeRange != range) return;
 
-            if (timelineResponse.Points.Count == 0) {
+            if (result.Points.Count == 0) {
                 IsEmpty = true;
                 IsLoading = false;
                 ChartData = [];
                 return;
             }
 
-            // Build chart data from the (possibly re-queried) historical response
-            var downloadColor = ThemeColorHelper.Resolve("ChartOutboundStrokeColor");
-            var uploadColor = ThemeColorHelper.Resolve("ChartInboundStrokeColor");
-
-            var downloadValues = new long[timelineResponse.Points.Count];
-            var uploadValues = new long[timelineResponse.Points.Count];
-            for (var i = 0; i < timelineResponse.Points.Count; i++) {
-                downloadValues[i] = timelineResponse.Points[i].BytesIn;
-                uploadValues[i] = timelineResponse.Points[i].BytesOut;
-            }
-
-            // Use the actual data extent for the X-axis, not the requested range.
-            var dataFirstMs = timelineResponse.Points[0].TimestampUnixNs / 1_000_000;
-            var dataLastMs = timelineResponse.Points[^1].TimestampUnixNs / 1_000_000;
-            var dataSpanMs = dataLastMs - dataFirstMs;
-
-            // Pad single-point responses to a sharp left-aligned spike (see
-            // ApplySinglePointPadding for the layout and rationale).
-            (downloadValues, uploadValues, dataSpanMs) = ApplySinglePointPadding(
-                downloadValues, uploadValues, dataSpanMs, resolutionMs);
-
-            ChartDataSpan = TimeSpan.FromMilliseconds(Math.Max(dataSpanMs, 1000));
-
-            ChartData = [
-                new ChartSeries("Download", downloadValues, downloadColor),
-                new ChartSeries("Upload", uploadValues, uploadColor),
-            ];
-
-            // Query per-process totals for the process list. Uses the new
-            // GetProcessSummaries RPC which queries the tiered storage directly,
-            // so processes that the engine evicted from memory (idle >1 hour) still
-            // appear — unlike GetSnapshot which only returns currently-tracked processes.
-            var summariesRequest = new GetProcessSummariesRequest {
-                FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000,
-                ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000,
-            };
-            var summariesResponse = await _daemonClient.GetProcessSummariesAsync(
-                summariesRequest, ct);
-            if (SelectedTimeRange != range) return;
-
-            // Clear and rebuild the process list with historical totals
-            ClearProcessList();
-
-            long allHistIn = 0;
-            long allHistOut = 0;
-
-            foreach (var summary in summariesResponse.Summaries) {
-                allHistIn += summary.TotalBytesIn;
-                allHistOut += summary.TotalBytesOut;
-
-                var item = new ProcessListItem(summary.ProcessPath, summary.ProcessName);
-                item.UpdateTraffic(summary.TotalBytesIn, summary.TotalBytesOut);
-                _processLookup[summary.ProcessPath] = item;
-                ProcessList.Add(item);
-            }
-
-            _allProcessesItem.UpdateTraffic(allHistIn, allHistOut);
-            SortProcessList();
+            ApplyHistoricalChart(result.Points, result.ResolutionMs);
+            ApplyHistoricalProcessList(result.Summaries);
             IsLoading = false;
         } catch (OperationCanceledException) {
             // User switched range mid-query (or shutdown). No error banner —
@@ -349,68 +289,17 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
     private async Task LoadHistoricalChartForProcessAsync(
         TimeRangeSelection range, ProcessListItem selected, CancellationToken ct) {
         try {
-            var from = range.From;
-            var to = range.To;
-            var spanMs = (long)(to - from).TotalMilliseconds;
-
-            // Target ~300 output buckets. The daemon stitches multi-tier data,
-            // so no adaptive re-query is needed.
-            var resolutionMs = Math.Max(spanMs / 300, 1000);
-
-            IReadOnlyList<TrafficTimePoint> points;
-
-            if (selected.IsAll) {
-                var request = new GetAggregateTimelineRequest {
-                    FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000,
-                    ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000,
-                    ResolutionMs = resolutionMs,
-                };
-                var aggResponse = await _daemonClient.GetAggregateTimelineAsync(
-                    request, ct);
-                points = aggResponse.Points;
-            } else {
-                var request = new GetProcessTimelineRequest {
-                    ProcessPath = selected.ProcessPath,
-                    FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000,
-                    ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000,
-                    ResolutionMs = resolutionMs,
-                };
-                var procResponse = await _daemonClient.GetProcessTimelineAsync(
-                    request, ct);
-                points = procResponse.Points;
-            }
+            var processPath = selected.IsAll ? null : selected.ProcessPath;
+            var result = await _historicalChartLoader.LoadProcessChartAsync(range, processPath, ct);
 
             if (SelectedTimeRange != range || SelectedProcess != selected) return;
 
-            if (points.Count == 0) {
+            if (result.Points.Count == 0) {
                 ChartData = [];
                 return;
             }
 
-            var downloadColor = ThemeColorHelper.Resolve("ChartOutboundStrokeColor");
-            var uploadColor = ThemeColorHelper.Resolve("ChartInboundStrokeColor");
-
-            var downloadValues = new long[points.Count];
-            var uploadValues = new long[points.Count];
-            for (var i = 0; i < points.Count; i++) {
-                downloadValues[i] = points[i].BytesIn;
-                uploadValues[i] = points[i].BytesOut;
-            }
-
-            var dataFirstMs = points[0].TimestampUnixNs / 1_000_000;
-            var dataLastMs = points[^1].TimestampUnixNs / 1_000_000;
-            var dataSpanMs = dataLastMs - dataFirstMs;
-
-            // Single-point padding: see ApplySinglePointPadding for the layout.
-            (downloadValues, uploadValues, dataSpanMs) = ApplySinglePointPadding(
-                downloadValues, uploadValues, dataSpanMs, resolutionMs);
-
-            ChartDataSpan = TimeSpan.FromMilliseconds(Math.Max(dataSpanMs, 1000));
-
-            ChartData = [
-                new ChartSeries("Download", downloadValues, downloadColor),
-                new ChartSeries("Upload", uploadValues, uploadColor),
-            ];
+            ApplyHistoricalChart(result.Points, result.ResolutionMs);
         } catch (OperationCanceledException) {
             throw;
         } catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled) {
@@ -450,6 +339,70 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             new ChartSeries("Download", downloadValues, downloadColor),
             new ChartSeries("Upload", uploadValues, uploadColor),
         ];
+    }
+
+    /// <summary>
+    /// Transforms historical response points into download/upload arrays
+    /// (with single-point padding applied), then writes <see cref="ChartData"/>
+    /// and <see cref="ChartDataSpan"/>. Used by both the full-range and
+    /// per-process historical loaders.
+    /// </summary>
+    private void ApplyHistoricalChart(IReadOnlyList<TrafficTimePoint> points, long resolutionMs) {
+        var (downloadValues, uploadValues, dataSpanMs) =
+            BuildChartArrays(points, resolutionMs);
+
+        ChartDataSpan = TimeSpan.FromMilliseconds(Math.Max(dataSpanMs, 1000));
+
+        var downloadColor = ThemeColorHelper.Resolve("ChartOutboundStrokeColor");
+        var uploadColor = ThemeColorHelper.Resolve("ChartInboundStrokeColor");
+        ChartData = [
+            new ChartSeries("Download", downloadValues, downloadColor),
+            new ChartSeries("Upload", uploadValues, uploadColor),
+        ];
+    }
+
+    /// <summary>
+    /// Pure transform: pulls <c>BytesIn</c>/<c>BytesOut</c> out of each point,
+    /// computes the data-extent-based span from first/last timestamps, then
+    /// delegates to <see cref="ApplySinglePointPadding"/> for the single-point
+    /// spike layout. Callers must guarantee <c>points.Count &gt;= 1</c>.
+    /// </summary>
+    private static (long[] Download, long[] Upload, long DataSpanMs) BuildChartArrays(
+        IReadOnlyList<TrafficTimePoint> points, long resolutionMs) {
+        var downloadValues = new long[points.Count];
+        var uploadValues = new long[points.Count];
+        for (var i = 0; i < points.Count; i++) {
+            downloadValues[i] = points[i].BytesIn;
+            uploadValues[i] = points[i].BytesOut;
+        }
+        var dataFirstMs = points[0].TimestampUnixNs / 1_000_000;
+        var dataLastMs = points[^1].TimestampUnixNs / 1_000_000;
+        var dataSpanMs = dataLastMs - dataFirstMs;
+        return ApplySinglePointPadding(downloadValues, uploadValues, dataSpanMs, resolutionMs);
+    }
+
+    /// <summary>
+    /// Clears and rebuilds <see cref="ProcessList"/> from historical summaries,
+    /// updates the leading "All processes" aggregate row, and re-sorts. Used
+    /// only by <see cref="LoadHistoricalRangeAsync"/>; per-process chart
+    /// queries leave the list untouched.
+    /// </summary>
+    private void ApplyHistoricalProcessList(IReadOnlyList<ProcessTrafficSummaryProto> summaries) {
+        ClearProcessList();
+
+        long allHistIn = 0;
+        long allHistOut = 0;
+        foreach (var summary in summaries) {
+            allHistIn += summary.TotalBytesIn;
+            allHistOut += summary.TotalBytesOut;
+            var item = new ProcessListItem(summary.ProcessPath, summary.ProcessName);
+            item.UpdateTraffic(summary.TotalBytesIn, summary.TotalBytesOut);
+            _processLookup[summary.ProcessPath] = item;
+            ProcessList.Add(item);
+        }
+
+        _allProcessesItem.UpdateTraffic(allHistIn, allHistOut);
+        SortProcessList();
     }
 
     /// <summary>

@@ -48,11 +48,13 @@ internal partial class MainWindowViewModel : ViewModelBase {
     public MainWindowViewModel(
         IDaemonClient daemonClient,
         ProcessStateService processStateService,
-        StatusStripViewModel statusStripVm) {
+        StatusStripViewModel statusStripVm,
+        HistoricalChartLoader historicalChartLoader) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(statusStripVm);
-        _trafficTab = new TrafficTabViewModel(daemonClient, processStateService);
+        ArgumentNullException.ThrowIfNull(historicalChartLoader);
+        _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         daemonClient.StateChanged += OnDaemonStateChanged;

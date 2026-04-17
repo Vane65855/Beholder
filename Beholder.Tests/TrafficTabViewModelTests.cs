@@ -14,7 +14,8 @@ public class TrafficTabViewModelTests {
             fakeClient,
             NullLogger<DaemonStreamSubscriber>.Instance);
         var service = new ProcessStateService(subscriber, fakeClient);
-        return new TrafficTabViewModel(fakeClient, service);
+        var loader = new HistoricalChartLoader(fakeClient);
+        return new TrafficTabViewModel(fakeClient, service, loader);
     }
 
     private static ProcessState MakeState(
@@ -335,7 +336,8 @@ public class TrafficTabViewModelTests {
             fakeClient,
             NullLogger<DaemonStreamSubscriber>.Instance);
         var service = new ProcessStateService(subscriber, fakeClient);
-        var vm = new TrafficTabViewModel(fakeClient, service);
+        var loader = new HistoricalChartLoader(fakeClient);
+        var vm = new TrafficTabViewModel(fakeClient, service, loader);
         return (vm, fakeClient);
     }
 

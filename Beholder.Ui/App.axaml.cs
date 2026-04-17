@@ -36,9 +36,11 @@ public partial class App : Application {
             var processStateService = new ProcessStateService(_streamSubscriber, _daemonClient);
             _streamSubscriber.OnConnected = ct => processStateService.SeedAsync(ct);
             var statusStripVm = new StatusStripViewModel(processStateService);
+            var historicalChartLoader = new HistoricalChartLoader(_daemonClient);
 
             desktop.MainWindow = new MainWindow {
-                DataContext = new MainWindowViewModel(_daemonClient, processStateService, statusStripVm),
+                DataContext = new MainWindowViewModel(
+                    _daemonClient, processStateService, statusStripVm, historicalChartLoader),
             };
 
             // Fire-and-forget — both loops run indefinitely until shutdown
