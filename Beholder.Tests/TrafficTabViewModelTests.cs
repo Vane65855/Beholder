@@ -90,8 +90,14 @@ public class TrafficTabViewModelTests {
         var bItem = vm.ProcessList.First(p => p.ProcessPath == "b.exe");
         vm.SelectedProcess = bItem;
 
+        // ChartData is a fresh ChartSeries[] on every rebuild, but the
+        // underlying Values buffer is reused across ticks to avoid per-tick
+        // allocations — so reference-inequality on .Values is no longer a
+        // valid "did it rebuild" proxy. Assert the actual rebuilt content:
+        // after switching to b.exe, the chart shows b.exe's recent window,
+        // not the previous aggregate [110, 220, 330].
         Assert.NotSame(allChart, vm.ChartData);
-        Assert.NotEqual(allChart![0].Values, vm.ChartData![0].Values);
+        Assert.Equal(new long[] { 100, 200, 300 }, vm.ChartData![0].Values);
     }
 
     [Fact]

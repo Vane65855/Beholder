@@ -22,6 +22,15 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
     private readonly ProcessListItem _allProcessesItem;
     private IReadOnlyDictionary<string, ProcessState>? _lastStates;
 
+    // Cached live-mode chart buffers. Reused across 1-Hz RebuildChartData calls
+    // once the live circular buffers saturate (~300 samples = 5 min). Aliasing
+    // is safe: all mutations happen on the UI thread inside RebuildChartData,
+    // and Avalonia's Render also runs on the UI thread, so there's no observer
+    // between Array.Clear and the ChartData reassignment that would see
+    // partial buffer state. Null until the first live tick.
+    private long[]? _cachedDownloadBuffer;
+    private long[]? _cachedUploadBuffer;
+
     // Cancellation source for the currently in-flight historical query (either
     // LoadHistoricalRangeAsync or LoadHistoricalChartForProcessAsync). Cancelled
     // whenever the user triggers a new range/process change that supersedes the
@@ -319,22 +328,26 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         var selected = SelectedProcess;
         var showAll = selected is null || selected.IsAll;
 
-        var downloadColor = ThemeColorHelper.Resolve("ChartOutboundStrokeColor");
-        var uploadColor = ThemeColorHelper.Resolve("ChartInboundStrokeColor");
-
         long[] downloadValues;
         long[] uploadValues;
 
         if (showAll) {
-            (downloadValues, uploadValues) = AggregateAll(states);
+            var length = ComputeMaxLength(states);
+            downloadValues = RentOrAllocate(ref _cachedDownloadBuffer, length);
+            uploadValues = RentOrAllocate(ref _cachedUploadBuffer, length);
+            AggregateAllInto(states, downloadValues, uploadValues, length);
         } else if (states.TryGetValue(selected!.ProcessPath, out var state)) {
-            downloadValues = BufferToArray(state.RecentDeltaIn);
-            uploadValues = BufferToArray(state.RecentDeltaOut);
+            downloadValues = RentOrAllocate(ref _cachedDownloadBuffer, state.RecentDeltaIn.Count);
+            uploadValues = RentOrAllocate(ref _cachedUploadBuffer, state.RecentDeltaOut.Count);
+            FillBufferInto(state.RecentDeltaIn, downloadValues);
+            FillBufferInto(state.RecentDeltaOut, uploadValues);
         } else {
             ChartData = [];
             return;
         }
 
+        var downloadColor = ThemeColorHelper.Resolve("ChartOutboundStrokeColor");
+        var uploadColor = ThemeColorHelper.Resolve("ChartInboundStrokeColor");
         ChartData = [
             new ChartSeries("Download", downloadValues, downloadColor),
             new ChartSeries("Upload", uploadValues, uploadColor),
@@ -431,32 +444,61 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             Math.Max(resolutionMs * 10, 10_000));
     }
 
-    private static long[] BufferToArray(CircularBuffer<long> buffer) {
-        var result = new long[buffer.Count];
-        for (var i = 0; i < buffer.Count; i++)
-            result[i] = buffer[i];
-        return result;
+    /// <summary>
+    /// Rents <paramref name="cached"/> when its length exactly matches
+    /// <paramref name="length"/> (cleared to zero for the caller); otherwise
+    /// allocates a fresh <see langword="long"/>[]. In both cases
+    /// <paramref name="cached"/> is updated to hold the returned buffer so
+    /// the next tick sees it. Exact-size match (not grow-on-demand) because
+    /// the caller passes the buffer straight through <see cref="ChartSeries.Values"/>
+    /// where <c>.Count</c> is read by <see cref="TrafficChartControl"/> for
+    /// X-axis scaling — an oversized buffer would throw off the chart.
+    /// </summary>
+    private static long[] RentOrAllocate(ref long[]? cached, int length) {
+        long[] buffer;
+        if (cached is not null && cached.Length == length) {
+            buffer = cached;
+            Array.Clear(buffer, 0, length);
+        } else {
+            buffer = new long[length];
+        }
+        cached = buffer;
+        return buffer;
     }
 
-    private static (long[] Download, long[] Upload) AggregateAll(
-        IReadOnlyDictionary<string, ProcessState> states) {
+    private static void FillBufferInto(CircularBuffer<long> source, long[] destination) {
+        for (var i = 0; i < source.Count; i++)
+            destination[i] = source[i];
+    }
+
+    private static int ComputeMaxLength(IReadOnlyDictionary<string, ProcessState> states) {
         var max = 0;
         foreach (var s in states.Values) {
             if (s.RecentDeltaIn.Count > max) max = s.RecentDeltaIn.Count;
             if (s.RecentDeltaOut.Count > max) max = s.RecentDeltaOut.Count;
         }
-        var download = new long[max];
-        var upload = new long[max];
+        return max;
+    }
+
+    /// <summary>
+    /// Aggregates all processes' recent-window samples into the caller-owned
+    /// <paramref name="download"/> and <paramref name="upload"/> buffers.
+    /// Buffers must be pre-cleared and of length <paramref name="length"/>;
+    /// right-aligns each process's samples so processes with shorter histories
+    /// contribute zeros at the front of the window rather than being stretched.
+    /// </summary>
+    private static void AggregateAllInto(
+        IReadOnlyDictionary<string, ProcessState> states,
+        long[] download, long[] upload, int length) {
         foreach (var s in states.Values) {
             var inBuf = s.RecentDeltaIn;
             var outBuf = s.RecentDeltaOut;
-            var inOffset = max - inBuf.Count;
-            var outOffset = max - outBuf.Count;
+            var inOffset = length - inBuf.Count;
+            var outOffset = length - outBuf.Count;
             for (var i = 0; i < inBuf.Count; i++)
                 download[inOffset + i] += inBuf[i];
             for (var i = 0; i < outBuf.Count; i++)
                 upload[outOffset + i] += outBuf[i];
         }
-        return (download, upload);
     }
 }
