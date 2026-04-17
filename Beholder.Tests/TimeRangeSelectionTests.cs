@@ -165,4 +165,13 @@ public class TimeRangeSelectionTests {
         Assert.Contains("Apr 10", range.Label);
         Assert.Contains("Apr 14", range.Label);
     }
+
+    [Fact]
+    public void FromCustom_InvertedDates_Throws() {
+        var from = new DateTimeOffset(2026, 4, 14, 0, 0, 0, TimeSpan.Zero);
+        var to = new DateTimeOffset(2026, 4, 10, 0, 0, 0, TimeSpan.Zero);
+
+        Assert.Throws<ArgumentOutOfRangeException>("to",
+            () => TimeRangeSelection.FromCustom(from, to));
+    }
 }

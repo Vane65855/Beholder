@@ -89,6 +89,7 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         CancellationToken cancellationToken
     ) {
         ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
+        ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
 
         var resolutionMs = (long)resolution.TotalMilliseconds;
         if (resolutionMs <= 0) throw new ArgumentOutOfRangeException(nameof(resolution));
@@ -104,6 +105,7 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         CancellationToken cancellationToken
     ) {
         ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
+        ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
 
         var tier = SelectTierForRange(from, to);
 
@@ -148,6 +150,8 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         TimeSpan resolution,
         CancellationToken cancellationToken
     ) {
+        ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
+
         var resolutionMs = (long)resolution.TotalMilliseconds;
         if (resolutionMs <= 0) throw new ArgumentOutOfRangeException(nameof(resolution));
 
@@ -385,6 +389,7 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         DateTimeOffset to,
         CancellationToken cancellationToken
     ) {
+        ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
         var tier = SelectTierForRange(from, to);
 
         using var connection = _connectionFactory.CreateConnection();
@@ -419,6 +424,7 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         DateTimeOffset to,
         CancellationToken cancellationToken
     ) {
+        ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
         var tier = SelectTierForRange(from, to);
 
         using var connection = _connectionFactory.CreateConnection();

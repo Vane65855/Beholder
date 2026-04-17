@@ -57,6 +57,7 @@ public sealed class TimeRangeSelection {
     }
 
     public static TimeRangeSelection FromCustom(DateTimeOffset from, DateTimeOffset to) {
+        ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
         var label = $"{from:MMM d} – {to:MMM d}";
         return new(TimeRangePreset.Custom, from, to, label);
     }

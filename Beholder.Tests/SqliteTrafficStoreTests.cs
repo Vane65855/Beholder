@@ -391,6 +391,39 @@ public class SqliteTrafficStoreTests : IDisposable {
     }
 
     [Fact]
+    public async Task GetProcessTimelineAsync_FromAfterTo_Throws() =>
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            _store.GetProcessTimelineAsync(
+                "C:/app/firefox.exe", BaseTime.AddHours(1), BaseTime,
+                TimeSpan.FromSeconds(1), CancellationToken.None));
+
+    [Fact]
+    public async Task GetProcessDestinationsAsync_FromAfterTo_Throws() =>
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            _store.GetProcessDestinationsAsync(
+                "C:/app/firefox.exe", BaseTime.AddHours(1), BaseTime,
+                CancellationToken.None));
+
+    [Fact]
+    public async Task GetAggregateTimelineAsync_FromAfterTo_Throws() =>
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            _store.GetAggregateTimelineAsync(
+                BaseTime.AddHours(1), BaseTime,
+                TimeSpan.FromSeconds(1), CancellationToken.None));
+
+    [Fact]
+    public async Task GetProcessSummariesAsync_FromAfterTo_Throws() =>
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            _store.GetProcessSummariesAsync(
+                BaseTime.AddHours(1), BaseTime, CancellationToken.None));
+
+    [Fact]
+    public async Task GetCountryBreakdownAsync_FromAfterTo_Throws() =>
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            _store.GetCountryBreakdownAsync(
+                BaseTime.AddHours(1), BaseTime, CancellationToken.None));
+
+    [Fact]
     public async Task GetAggregateTimelineAsync_StitchesAcrossTiers() {
         // Verify the stitched multi-tier query: each time slice of the range is
         // served by the finest tier whose retention covers that slice. Under the

@@ -1,3 +1,4 @@
+using System;
 using Beholder.Ui.Helpers;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -37,6 +38,11 @@ internal sealed partial class ProcessListItem : ObservableObject {
     public long SortKey => RecentBytesIn + RecentBytesOut;
 
     public ProcessListItem(string processPath, string displayName, bool isAll = false) {
+        ArgumentNullException.ThrowIfNull(processPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        // "All processes" aggregate row legitimately uses an empty path; all
+        // other items represent a real process and must have a non-empty path.
+        if (!isAll) ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
         ProcessPath = processPath;
         DisplayName = displayName;
         IsAll = isAll;

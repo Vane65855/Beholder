@@ -39,4 +39,36 @@ public class ProcessListItemTests {
         Assert.True(all.IsAll);
         Assert.Equal(1, all.SeriesIndex);
     }
+
+    [Fact]
+    public void Ctor_NullProcessPath_Throws() =>
+        Assert.Throws<ArgumentNullException>("processPath",
+            () => new ProcessListItem(null!, "test.exe"));
+
+    [Fact]
+    public void Ctor_EmptyProcessPath_WithoutIsAll_Throws() =>
+        Assert.Throws<ArgumentException>("processPath",
+            () => new ProcessListItem(string.Empty, "test.exe", isAll: false));
+
+    [Fact]
+    public void Ctor_EmptyProcessPath_WithIsAll_DoesNotThrow() {
+        // The "All processes" aggregate row legitimately uses an empty path.
+        var item = new ProcessListItem(string.Empty, "All processes", isAll: true);
+
+        Assert.True(item.IsAll);
+        Assert.Equal(string.Empty, item.ProcessPath);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Ctor_NullOrWhitespaceDisplayName_Throws(string? displayName) {
+        // ThrowIfNullOrWhiteSpace throws ArgumentNullException for null and
+        // ArgumentException for empty/whitespace — both derive from
+        // ArgumentException, so ThrowsAny handles both cases.
+        var ex = Assert.ThrowsAny<ArgumentException>(
+            () => new ProcessListItem("fake/test.exe", displayName!));
+        Assert.Equal("displayName", ex.ParamName);
+    }
 }
