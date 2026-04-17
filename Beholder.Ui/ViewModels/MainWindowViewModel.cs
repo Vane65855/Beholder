@@ -6,7 +6,8 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Beholder.Ui.ViewModels;
 
-internal partial class MainWindowViewModel : ViewModelBase {
+internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
+    private readonly IDaemonClient _daemonClient;
     private readonly TrafficTabViewModel _trafficTab;
     private readonly FirewallTabViewModel _firewallTab = new();
     private readonly AlertsTabViewModel _alertsTab = new();
@@ -54,10 +55,17 @@ internal partial class MainWindowViewModel : ViewModelBase {
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(statusStripVm);
         ArgumentNullException.ThrowIfNull(historicalChartLoader);
+        _daemonClient = daemonClient;
         _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
-        daemonClient.StateChanged += OnDaemonStateChanged;
+        _daemonClient.StateChanged += OnDaemonStateChanged;
+    }
+
+    public void Dispose() {
+        _daemonClient.StateChanged -= OnDaemonStateChanged;
+        _trafficTab.Dispose();
+        StatusStripVm.Dispose();
     }
 
     private void OnDaemonStateChanged(DaemonStatusInfo status) {

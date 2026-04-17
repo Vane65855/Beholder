@@ -13,6 +13,8 @@ namespace Beholder.Ui;
 public partial class App : Application {
     private DaemonClient? _daemonClient;
     private DaemonStreamSubscriber? _streamSubscriber;
+    private ProcessStateService? _processStateService;
+    private MainWindowViewModel? _mainWindowVm;
 
     public override void Initialize() {
         AvaloniaXamlLoader.Load(this);
@@ -33,21 +35,24 @@ public partial class App : Application {
                 _daemonClient,
                 loggerFactory.CreateLogger<DaemonStreamSubscriber>());
 
-            var processStateService = new ProcessStateService(_streamSubscriber, _daemonClient);
-            _streamSubscriber.OnConnected = ct => processStateService.SeedAsync(ct);
-            var statusStripVm = new StatusStripViewModel(processStateService);
+            _processStateService = new ProcessStateService(_streamSubscriber, _daemonClient);
+            _streamSubscriber.OnConnected = ct => _processStateService.SeedAsync(ct);
+            var statusStripVm = new StatusStripViewModel(_processStateService);
             var historicalChartLoader = new HistoricalChartLoader(_daemonClient);
 
-            desktop.MainWindow = new MainWindow {
-                DataContext = new MainWindowViewModel(
-                    _daemonClient, processStateService, statusStripVm, historicalChartLoader),
-            };
+            _mainWindowVm = new MainWindowViewModel(
+                _daemonClient, _processStateService, statusStripVm, historicalChartLoader);
+            desktop.MainWindow = new MainWindow { DataContext = _mainWindowVm };
 
             // Fire-and-forget — both loops run indefinitely until shutdown
             _ = _daemonClient.ConnectAsync(CancellationToken.None);
             _ = _streamSubscriber.StartAsync(CancellationToken.None);
 
             desktop.ShutdownRequested += async (_, _) => {
+                // Dispose subscribers first so their -= handlers run against
+                // still-live publishers, then tear down the publishers.
+                _mainWindowVm?.Dispose();
+                _processStateService?.Dispose();
                 if (_streamSubscriber is not null)
                     await _streamSubscriber.DisposeAsync();
                 if (_daemonClient is not null)

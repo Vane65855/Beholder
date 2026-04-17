@@ -1,3 +1,4 @@
+using System.Reflection;
 using Beholder.Protocol.Local;
 using Beholder.Ui.Models;
 using Beholder.Ui.Services;
@@ -442,5 +443,52 @@ public class TrafficTabViewModelTests {
         // Live path doesn't fire another aggregate RPC — still just one capture.
         Assert.Single(captured);
         Assert.True(captured[0].IsCancellationRequested);
+    }
+
+    // ---- Dispose / unsubscribe tests (audit #16) ----
+
+    [Fact]
+    public void Dispose_UnsubscribesFromDaemonStateChanged() {
+        // The reflection-based regression guard: after Dispose, the VM's
+        // handler must be gone from FakeDaemonClient.StateChanged's
+        // invocation list. Uses a sentinel handler to prove the count delta
+        // matches exactly the VM's contribution (not off-by-one or wholesale
+        // event clearing).
+        var (vm, client) = CreateViewModelWithClient();
+
+        Action<DaemonStatusInfo> sentinel = _ => { };
+        client.StateChanged += sentinel;
+
+        var before = CountStateChangedHandlers(client);
+        vm.Dispose();
+        var after = CountStateChangedHandlers(client);
+
+        Assert.Equal(before - 1, after);
+
+        // Sanity: the sentinel we added is still there.
+        client.StateChanged -= sentinel;
+        Assert.Equal(after - 1, CountStateChangedHandlers(client));
+    }
+
+    [Fact]
+    public void Dispose_DoesNotThrow() {
+        // Smoke: Dispose also unsubscribes from ProcessStatesUpdated and
+        // cancels any in-flight historical query. Covered by code review;
+        // this test guards that the Dispose path is reachable without
+        // throwing.
+        var vm = CreateViewModel();
+        var exception = Record.Exception(() => vm.Dispose());
+        Assert.Null(exception);
+    }
+
+    private static int CountStateChangedHandlers(FakeDaemonClient client) {
+        // Field-like events (public event Action<T>? Name;) generate a
+        // compiler-named private backing field. Reflection reads that
+        // backing delegate and returns its invocation-list length.
+        var field = typeof(FakeDaemonClient).GetField(
+            "StateChanged",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        var handler = field?.GetValue(client) as Delegate;
+        return handler?.GetInvocationList().Length ?? 0;
     }
 }

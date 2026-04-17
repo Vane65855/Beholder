@@ -15,7 +15,8 @@ using Grpc.Core;
 
 namespace Beholder.Ui.ViewModels;
 
-internal sealed partial class TrafficTabViewModel : ViewModelBase {
+internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
+    private readonly IDaemonClient _daemonClient;
     private readonly ProcessStateService _processStateService;
     private readonly HistoricalChartLoader _historicalChartLoader;
     private readonly Dictionary<string, ProcessListItem> _processLookup = new(StringComparer.Ordinal);
@@ -76,6 +77,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(historicalChartLoader);
+        _daemonClient = daemonClient;
         _processStateService = processStateService;
         _historicalChartLoader = historicalChartLoader;
 
@@ -83,8 +85,16 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         ProcessList.Add(_allProcessesItem);
         SelectedProcess = _allProcessesItem;
 
-        processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
-        daemonClient.StateChanged += OnDaemonStateChanged;
+        _processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
+        _daemonClient.StateChanged += OnDaemonStateChanged;
+    }
+
+    public void Dispose() {
+        _processStateService.ProcessStatesUpdated -= OnProcessStatesUpdated;
+        _daemonClient.StateChanged -= OnDaemonStateChanged;
+        // Cancel any in-flight historical query so its fire-and-forget task
+        // doesn't complete against a disposed subscriber.
+        CancelInFlightHistoricalQuery();
     }
 
     private void OnDaemonStateChanged(DaemonStatusInfo status) {

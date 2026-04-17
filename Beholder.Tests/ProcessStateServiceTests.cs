@@ -208,6 +208,16 @@ public class ProcessStateServiceTests {
     }
 
     [Fact]
+    public void Dispose_DoesNotThrow() {
+        // Smoke: Dispose unsubscribes from the subscriber's CounterBatchReceived
+        // event. The symmetry is verified by code review; this test guards that
+        // the Dispose path is at least reachable without throwing.
+        var (service, _) = CreateServiceWithClient();
+        var exception = Record.Exception(() => service.Dispose());
+        Assert.Null(exception);
+    }
+
+    [Fact]
     public async Task SeedAsync_RpcException_Swallowed() {
         // A gRPC failure during seeding is best-effort — the live stream
         // will fill in. Seeding must not throw to the caller.

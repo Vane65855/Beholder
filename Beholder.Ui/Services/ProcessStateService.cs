@@ -23,8 +23,9 @@ namespace Beholder.Ui.Services;
 /// background thread. Consumers must marshal to the UI thread via <c>Dispatcher.UIThread.Post</c>.
 /// </para>
 /// </remarks>
-internal sealed class ProcessStateService {
+internal sealed class ProcessStateService : IDisposable {
     private readonly IDaemonClient _daemonClient;
+    private readonly DaemonStreamSubscriber _subscriber;
     private readonly Dictionary<string, ProcessState> _states = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -37,8 +38,13 @@ internal sealed class ProcessStateService {
     public ProcessStateService(DaemonStreamSubscriber subscriber, IDaemonClient daemonClient) {
         ArgumentNullException.ThrowIfNull(subscriber);
         ArgumentNullException.ThrowIfNull(daemonClient);
+        _subscriber = subscriber;
         _daemonClient = daemonClient;
-        subscriber.CounterBatchReceived += OnCounterBatch;
+        _subscriber.CounterBatchReceived += OnCounterBatch;
+    }
+
+    public void Dispose() {
+        _subscriber.CounterBatchReceived -= OnCounterBatch;
     }
 
     /// <summary>

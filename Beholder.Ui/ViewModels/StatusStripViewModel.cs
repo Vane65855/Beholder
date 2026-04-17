@@ -7,10 +7,12 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Beholder.Ui.ViewModels;
 
-internal sealed partial class StatusStripViewModel : ViewModelBase {
+internal sealed partial class StatusStripViewModel : ViewModelBase, IDisposable {
     // LERP smoothing factor — 0.3 per tick reaches target in ~3–4 ticks,
     // preventing the bar from jittering during bursty traffic patterns.
     private const double SmoothingFactor = 0.3;
+
+    private readonly ProcessStateService _processStateService;
 
     [ObservableProperty]
     private string _outboundTotalLabel = "0 B";
@@ -40,7 +42,12 @@ internal sealed partial class StatusStripViewModel : ViewModelBase {
 
     public StatusStripViewModel(ProcessStateService processStateService) {
         ArgumentNullException.ThrowIfNull(processStateService);
-        processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
+        _processStateService = processStateService;
+        _processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
+    }
+
+    public void Dispose() {
+        _processStateService.ProcessStatesUpdated -= OnProcessStatesUpdated;
     }
 
     private void OnProcessStatesUpdated(IReadOnlyDictionary<string, ProcessState> states) {

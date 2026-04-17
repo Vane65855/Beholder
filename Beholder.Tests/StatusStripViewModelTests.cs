@@ -184,4 +184,14 @@ public class StatusStripViewModelTests {
         Assert.Equal("0 B/s", vm.InboundRateLabel);
         Assert.Equal("0 B/s", vm.OutboundRateLabel);
     }
+
+    [Fact]
+    public void Dispose_DoesNotThrow() {
+        // Smoke: Dispose unsubscribes from the service's ProcessStatesUpdated
+        // event. The symmetry is verified by code review; this test guards that
+        // the Dispose path is at least reachable without throwing.
+        var (vm, _) = CreateViewModelWithService();
+        var exception = Record.Exception(() => vm.Dispose());
+        Assert.Null(exception);
+    }
 }
