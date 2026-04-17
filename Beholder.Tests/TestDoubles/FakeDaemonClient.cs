@@ -30,6 +30,10 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Func<GetProcessTimelineRequest, GetProcessTimelineResponse>? ProcessTimelineResponder { get; set; }
     public GetProcessSummariesResponse? ProcessSummariesResponse { get; set; }
     public GetAggregateTimelineResponse? AggregateTimelineResponse { get; set; }
+    // Responder variant for tests that need the CancellationToken the VM
+    // passed (e.g., cancellation-plumbing tests). Takes precedence over
+    // AggregateTimelineResponse when set.
+    public Func<GetAggregateTimelineRequest, CancellationToken, GetAggregateTimelineResponse>? AggregateTimelineResponder { get; set; }
 
     public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
 
@@ -85,6 +89,8 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(
         GetAggregateTimelineRequest request, CancellationToken ct) {
         if (AggregateTimelineException is not null) throw AggregateTimelineException;
+        if (AggregateTimelineResponder is not null)
+            return Task.FromResult(AggregateTimelineResponder(request, ct));
         return Task.FromResult(AggregateTimelineResponse ?? new GetAggregateTimelineResponse());
     }
 

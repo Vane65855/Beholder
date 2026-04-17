@@ -22,6 +22,13 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
     private readonly ProcessListItem _allProcessesItem;
     private IReadOnlyDictionary<string, ProcessState>? _lastStates;
 
+    // Cancellation source for the currently in-flight historical query (either
+    // LoadHistoricalRangeAsync or LoadHistoricalChartForProcessAsync). Cancelled
+    // whenever the user triggers a new range/process change that supersedes the
+    // in-flight work, so the daemon can stop the superseded stitched query
+    // instead of running it to completion with its response discarded.
+    private CancellationTokenSource? _historicalCts;
+
     [ObservableProperty]
     private bool _isLoading = true;
 
@@ -86,20 +93,48 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
 
     partial void OnSelectedTimeRangeChanged(TimeRangeSelection value) {
         if (value.IsLive) {
-            // Clear any historical-only entries left over from the previous
-            // range. UpdateFromStates only upserts from live states and can't
-            // remove processes that were populated via GetProcessSummaries
-            // but aren't in the current live snapshot (e.g., engine-evicted
-            // processes that only exist in SQL history).
+            // Switching TO live mode — cancel any in-flight historical query
+            // (the live path doesn't hit the daemon, so we don't need a fresh
+            // CTS) and clear historical-only entries left over from the
+            // previous range. UpdateFromStates only upserts from live states
+            // and can't remove processes that were populated via
+            // GetProcessSummaries but aren't in the current live snapshot
+            // (e.g., engine-evicted processes that only exist in SQL history).
+            CancelInFlightHistoricalQuery();
             ClearProcessList();
             ChartDataSpan = null;
             if (_lastStates is not null) {
                 UpdateFromStates(_lastStates);
             }
         } else {
-            // Switching to historical mode — query the daemon for the selected range.
-            _ = LoadHistoricalRangeAsync(value);
+            // Switching to historical mode — cancel any prior query and issue
+            // a new one under a fresh token.
+            var ct = StartNewHistoricalQuery();
+            _ = LoadHistoricalRangeAsync(value, ct);
         }
+    }
+
+    /// <summary>
+    /// Cancels any in-flight historical query and returns a fresh
+    /// <see cref="CancellationToken"/> for the new one. Called at the entry of
+    /// each <c>OnSelectedXxxChanged</c> branch that will fire a new historical
+    /// load.
+    /// </summary>
+    private CancellationToken StartNewHistoricalQuery() {
+        _historicalCts?.Cancel();
+        _historicalCts?.Dispose();
+        _historicalCts = new CancellationTokenSource();
+        return _historicalCts.Token;
+    }
+
+    /// <summary>
+    /// Cancels any in-flight historical query without starting a new one.
+    /// Used by the live branch of <see cref="OnSelectedTimeRangeChanged"/>.
+    /// </summary>
+    private void CancelInFlightHistoricalQuery() {
+        _historicalCts?.Cancel();
+        _historicalCts?.Dispose();
+        _historicalCts = null;
     }
 
     /// <summary>
@@ -160,7 +195,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         RebuildChartData(states);
     }
 
-    private async Task LoadHistoricalRangeAsync(TimeRangeSelection range) {
+    private async Task LoadHistoricalRangeAsync(TimeRangeSelection range, CancellationToken ct) {
         try {
             IsLoading = true;
             IsEmpty = false;
@@ -182,7 +217,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             };
 
             var timelineResponse = await _daemonClient.GetAggregateTimelineAsync(
-                timelineRequest, CancellationToken.None);
+                timelineRequest, ct);
 
             // Check that the user hasn't switched away while we were querying
             if (SelectedTimeRange != range) return;
@@ -243,7 +278,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
                 ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000,
             };
             var summariesResponse = await _daemonClient.GetProcessSummariesAsync(
-                summariesRequest, CancellationToken.None);
+                summariesRequest, ct);
             if (SelectedTimeRange != range) return;
 
             // Clear and rebuild the process list with historical totals
@@ -268,9 +303,14 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
         } catch (OperationCanceledException) {
             // User switched range mid-query (or shutdown). No error banner —
             // the superseding query will take over. Re-throw so the Task
-            // completes as Canceled rather than RanToCompletion; today this
-            // is fire-and-forget but future awaiters see the right status.
+            // completes as Canceled rather than RanToCompletion.
             throw;
+        } catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled) {
+            // gRPC surfaces CT cancellation as RpcException(Cancelled) in some
+            // grpc-dotnet versions. Normalize to OCE so the fire-and-forget
+            // task completes as Canceled rather than Faulted (which would fire
+            // TaskScheduler.UnobservedTaskException at finalization).
+            throw new OperationCanceledException("Cancelled via gRPC status", ex);
         } catch (RpcException) {
             // Historical query failed — show error state
             IsLoading = false;
@@ -310,13 +350,16 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
                 RebuildChartData(_lastStates);
         } else {
             // In historical mode, re-query the chart for the selected process
-            // (or the aggregate if "All processes" is selected).
-            _ = LoadHistoricalChartForProcessAsync(SelectedTimeRange, value);
+            // (or the aggregate if "All processes" is selected). Cancel any
+            // prior in-flight historical query first so rapid process-switching
+            // doesn't leave superseded daemon work running.
+            var ct = StartNewHistoricalQuery();
+            _ = LoadHistoricalChartForProcessAsync(SelectedTimeRange, value, ct);
         }
     }
 
     private async Task LoadHistoricalChartForProcessAsync(
-        TimeRangeSelection range, ProcessListItem selected) {
+        TimeRangeSelection range, ProcessListItem selected, CancellationToken ct) {
         try {
             var from = range.From;
             var to = range.To;
@@ -335,7 +378,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
                     ResolutionMs = resolutionMs,
                 };
                 var aggResponse = await _daemonClient.GetAggregateTimelineAsync(
-                    request, CancellationToken.None);
+                    request, ct);
                 points = aggResponse.Points;
             } else {
                 var request = new GetProcessTimelineRequest {
@@ -345,7 +388,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
                     ResolutionMs = resolutionMs,
                 };
                 var procResponse = await _daemonClient.GetProcessTimelineAsync(
-                    request, CancellationToken.None);
+                    request, ct);
                 points = procResponse.Points;
             }
 
@@ -388,6 +431,9 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase {
             ];
         } catch (OperationCanceledException) {
             throw;
+        } catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled) {
+            // Same gRPC-cancellation bridge as LoadHistoricalRangeAsync.
+            throw new OperationCanceledException("Cancelled via gRPC status", ex);
         } catch (RpcException) {
             // Per-process chart query failed — chart stays on previous state.
         }

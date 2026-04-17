@@ -376,4 +376,63 @@ public class TrafficTabViewModelTests {
             TaskScheduler.UnobservedTaskException -= swallow;
         }
     }
+
+    // ---- Cancellation plumbing tests (audit #5) ----
+
+    [Fact]
+    public void RapidRangeSwitch_CancelsPreviousQueryCt() {
+        // When the user switches ranges while a historical query is in flight,
+        // the previous query's CancellationToken must be cancelled so the
+        // daemon can stop the superseded stitched-query work. Captures every
+        // CT the VM passes to the aggregate-timeline RPC, then asserts the
+        // first CT was cancelled by the superseding range change while the
+        // second (fresh) CT stays uncancelled.
+        var (vm, client) = CreateViewModelWithClient();
+
+        var captured = new List<CancellationToken>();
+        client.AggregateTimelineResponder = (_, ct) => {
+            captured.Add(ct);
+            return new GetAggregateTimelineResponse();
+        };
+
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last30Days);
+
+        // The CT threaded through must be a real cancellable token, not None.
+        // Before the fix this field was CancellationToken.None (CanBeCanceled == false).
+        Assert.Single(captured);
+        Assert.True(captured[0].CanBeCanceled);
+        Assert.False(captured[0].IsCancellationRequested);
+
+        // Superseding range change must cancel the first CT and issue a fresh one.
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.AllTime);
+
+        Assert.Equal(2, captured.Count);
+        Assert.True(captured[0].IsCancellationRequested);   // first was cancelled
+        Assert.False(captured[1].IsCancellationRequested);  // second is fresh
+    }
+
+    [Fact]
+    public void SwitchToLive_CancelsInFlightHistoricalCt() {
+        // Switching TO live mode (5 Minutes) must also cancel any in-flight
+        // historical query — the live path doesn't hit the daemon, so leaving
+        // a stale historical query running would waste daemon CPU.
+        var (vm, client) = CreateViewModelWithClient();
+
+        var captured = new List<CancellationToken>();
+        client.AggregateTimelineResponder = (_, ct) => {
+            captured.Add(ct);
+            return new GetAggregateTimelineResponse();
+        };
+
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last30Days);
+        Assert.Single(captured);
+        Assert.True(captured[0].CanBeCanceled);
+        Assert.False(captured[0].IsCancellationRequested);
+
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last5Minutes);
+
+        // Live path doesn't fire another aggregate RPC — still just one capture.
+        Assert.Single(captured);
+        Assert.True(captured[0].IsCancellationRequested);
+    }
 }
