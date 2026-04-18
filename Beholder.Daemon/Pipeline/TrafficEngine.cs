@@ -86,9 +86,12 @@ internal sealed class TrafficEngine {
         _currentRawBucketStart = AlignToSecondBoundary(now);
         var nextFlush = now + TickInterval;
 
+        // RawFlushInterval intentionally mirrors TickInterval — each tick
+        // closes one raw-tier bucket. Logged as a distinct field so the line
+        // reads correctly if the two are ever decoupled.
         _logger.LogInformation(
-            "TrafficEngine loop starting with {TickInterval} tick, 1s raw flush",
-            TickInterval);
+            "TrafficEngine loop starting with {TickInterval} tick, {RawFlushInterval} raw flush",
+            TickInterval, TickInterval);
 
         try {
             while (!cancellationToken.IsCancellationRequested) {

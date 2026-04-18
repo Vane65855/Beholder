@@ -81,6 +81,18 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Per-process stitched multi-tier timeline. Serves each time slice from
+    /// the finest-retention tier that covers it.
+    /// </summary>
+    /// <param name="resolution">
+    /// <b>Advisory only — ignored for bucket-width purposes.</b> Phase 5.4.3
+    /// demoted this to a hint: <see cref="TimelineStitcher"/> derives the
+    /// effective bucket width from actual data extent so that different
+    /// request ranges over the same data produce identical output arrays
+    /// ("same data → same chart"). The parameter is still validated
+    /// (<c>&gt; 0</c>) and kept in the gRPC contract for backward compatibility.
+    /// </param>
     public async Task<IReadOnlyList<TrafficTimePoint>> GetProcessTimelineAsync(
         string processPath,
         DateTimeOffset from,
@@ -146,6 +158,15 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         return results;
     }
 
+    /// <summary>
+    /// Aggregate stitched multi-tier timeline across all processes. Serves each
+    /// time slice from the finest-retention tier that covers it.
+    /// </summary>
+    /// <param name="resolution">
+    /// <b>Advisory only — ignored for bucket-width purposes.</b> See
+    /// <see cref="GetProcessTimelineAsync"/> for the full contract: bucket
+    /// width is derived from actual data extent, not the caller's hint.
+    /// </param>
     public async Task<IReadOnlyList<TrafficTimePoint>> GetAggregateTimelineAsync(
         DateTimeOffset from,
         DateTimeOffset to,

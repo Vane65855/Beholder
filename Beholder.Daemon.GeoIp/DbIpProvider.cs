@@ -55,6 +55,11 @@ public sealed class DbIpProvider : IGeoIpResolver, IDisposable {
             if (isoObj is not string iso || string.IsNullOrWhiteSpace(iso)) return CountryCode.Unknown;
             return CountryCode.FromAlpha2(iso);
         } catch (Exception ex) {
+            // Graceful degradation: any MMDB anomaly (corrupted file, unexpected
+            // record schema, reader state error, unknown future MaxMind.Db
+            // exception types) collapses to CountryCode.Unknown. A per-address
+            // resolve failure is not a daemon-level fault — the UI renders the
+            // flow as country "??" and the rest of the pipeline continues.
             _logger.LogWarning(ex,
                 "MMDB lookup failed for {Address}, returning Unknown", address);
             return CountryCode.Unknown;

@@ -3,7 +3,11 @@ using System.Net;
 namespace Beholder.Core;
 
 /// <summary>
-/// Extension methods for <see cref="IPAddress"/> used by the daemon's flow pipeline.
+/// Address-range predicates for the RFC-reserved IPv4/IPv6 blocks that have no
+/// meaningful geolocation: RFC 1918 private, RFC 3927 link-local, RFC 4193 ULA,
+/// RFC 5737 documentation, RFC 6598 shared (CGNAT), and loopback. Kept in Core
+/// so any consumer can short-circuit MMDB / WHOIS / firewall lookups for traffic
+/// that can never map to a public country or ASN.
 /// </summary>
 public static class IPAddressExtensions {
     /// <summary>
