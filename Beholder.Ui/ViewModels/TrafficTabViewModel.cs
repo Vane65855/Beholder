@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -18,9 +17,8 @@ namespace Beholder.Ui.ViewModels;
 internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     private readonly IDaemonClient _daemonClient;
     private readonly ProcessStateService _processStateService;
-    private readonly HistoricalChartLoader _historicalChartLoader;
-    private readonly Dictionary<string, ProcessListItem> _processLookup = new(StringComparer.Ordinal);
-    private readonly ProcessListItem _allProcessesItem;
+    private readonly ProcessListCoordinator _processList;
+    private readonly HistoricalQueryOrchestrator _historicalQueries;
     private IReadOnlyDictionary<string, ProcessState>? _lastStates;
 
     // Cached live-mode chart buffers. Reused across 1-Hz RebuildChartData calls
@@ -31,13 +29,6 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     // partial buffer state. Null until the first live tick.
     private long[]? _cachedDownloadBuffer;
     private long[]? _cachedUploadBuffer;
-
-    // Cancellation source for the currently in-flight historical query (either
-    // LoadHistoricalRangeAsync or LoadHistoricalChartForProcessAsync). Cancelled
-    // whenever the user triggers a new range/process change that supersedes the
-    // in-flight work, so the daemon can stop the superseded stitched query
-    // instead of running it to completion with its response discarded.
-    private CancellationTokenSource? _historicalCts;
 
     [ObservableProperty]
     private bool _isLoading = true;
@@ -68,7 +59,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     [ObservableProperty]
     private TimeRangeSelection _selectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last5Minutes);
 
-    public ObservableCollection<ProcessListItem> ProcessList { get; } = [];
+    public ObservableCollection<ProcessListItem> ProcessList => _processList.List;
 
     public TrafficTabViewModel(
         IDaemonClient daemonClient,
@@ -79,11 +70,10 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         ArgumentNullException.ThrowIfNull(historicalChartLoader);
         _daemonClient = daemonClient;
         _processStateService = processStateService;
-        _historicalChartLoader = historicalChartLoader;
+        _processList = new ProcessListCoordinator();
+        _historicalQueries = new HistoricalQueryOrchestrator(historicalChartLoader);
 
-        _allProcessesItem = new ProcessListItem(string.Empty, "All processes", isAll: true);
-        ProcessList.Add(_allProcessesItem);
-        SelectedProcess = _allProcessesItem;
+        SelectedProcess = _processList.AllProcessesItem;
 
         _processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
         _daemonClient.StateChanged += OnDaemonStateChanged;
@@ -92,9 +82,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     public void Dispose() {
         _processStateService.ProcessStatesUpdated -= OnProcessStatesUpdated;
         _daemonClient.StateChanged -= OnDaemonStateChanged;
-        // Cancel any in-flight historical query so its fire-and-forget task
-        // doesn't complete against a disposed subscriber.
-        CancelInFlightHistoricalQuery();
+        _historicalQueries.Dispose();
     }
 
     private void OnDaemonStateChanged(DaemonStatusInfo status) {
@@ -123,57 +111,17 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             // and can't remove processes that were populated via
             // GetProcessSummaries but aren't in the current live snapshot
             // (e.g., engine-evicted processes that only exist in SQL history).
-            CancelInFlightHistoricalQuery();
-            ClearProcessList();
+            _historicalQueries.CancelInFlight();
+            _processList.Clear();
             ChartDataSpan = null;
             if (_lastStates is not null) {
                 UpdateFromStates(_lastStates);
             }
         } else {
-            // Switching to historical mode — cancel any prior query and issue
-            // a new one under a fresh token.
-            var cancellationToken = StartNewHistoricalQuery();
-            _ = LoadHistoricalRangeAsync(value, cancellationToken);
+            // Switching to historical mode — orchestrator cancels any prior
+            // query and issues a new one under a fresh token.
+            _ = LoadHistoricalRangeAsync(value);
         }
-    }
-
-    /// <summary>
-    /// Cancels any in-flight historical query and returns a fresh
-    /// <see cref="CancellationToken"/> for the new one. Called at the entry of
-    /// each <c>OnSelectedXxxChanged</c> branch that will fire a new historical
-    /// load.
-    /// </summary>
-    private CancellationToken StartNewHistoricalQuery() {
-        _historicalCts?.Cancel();
-        _historicalCts?.Dispose();
-        _historicalCts = new CancellationTokenSource();
-        return _historicalCts.Token;
-    }
-
-    /// <summary>
-    /// Cancels any in-flight historical query without starting a new one.
-    /// Used by the live branch of <see cref="OnSelectedTimeRangeChanged"/>.
-    /// </summary>
-    private void CancelInFlightHistoricalQuery() {
-        _historicalCts?.Cancel();
-        _historicalCts?.Dispose();
-        _historicalCts = null;
-    }
-
-    /// <summary>
-    /// Removes all process-list items except the leading "All processes"
-    /// aggregate row, and clears the lookup dictionary. Called on every range
-    /// transition so one range's process set can't leak into another's sidebar.
-    /// Uses <see cref="ObservableCollection{T}.Clear"/> + <see cref="ObservableCollection{T}.Add"/>
-    /// rather than per-item removal so downstream ListBox invalidation fires
-    /// twice (Reset + Add) instead of N times.
-    /// </summary>
-    private void ClearProcessList() {
-        _processLookup.Clear();
-        if (ProcessList.Count <= 1) return;
-        var all = ProcessList[0];
-        ProcessList.Clear();
-        ProcessList.Add(all);
     }
 
     internal void UpdateFromStates(IReadOnlyDictionary<string, ProcessState> states) {
@@ -190,55 +138,17 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         }
         IsEmpty = false;
 
-        UpsertProcessListFromStates(states);
-        SortProcessList();
+        _processList.Upsert(states);
+        _processList.Sort();
         RebuildChartData(states);
     }
 
-    /// <summary>
-    /// Upserts <see cref="ProcessList"/> items from live states, using each
-    /// process's recent-window sum for display + sort; removes processes whose
-    /// rolling window has gone to zero; updates the leading "All processes"
-    /// aggregate row. Split out of <see cref="UpdateFromStates"/> to keep that
-    /// method readable top-to-bottom as a narrative.
-    /// </summary>
-    private void UpsertProcessListFromStates(IReadOnlyDictionary<string, ProcessState> states) {
-        long allRecentIn = 0;
-        long allRecentOut = 0;
-        foreach (var kvp in states) {
-            var state = kvp.Value;
-            long recentIn = 0;
-            long recentOut = 0;
-            for (var i = 0; i < state.RecentDeltaIn.Count; i++)
-                recentIn += state.RecentDeltaIn[i];
-            for (var i = 0; i < state.RecentDeltaOut.Count; i++)
-                recentOut += state.RecentDeltaOut[i];
-
-            allRecentIn += recentIn;
-            allRecentOut += recentOut;
-
-            if (recentIn + recentOut == 0) {
-                RemoveProcess(kvp.Key);
-                continue;
-            }
-
-            if (!_processLookup.TryGetValue(kvp.Key, out var item)) {
-                item = new ProcessListItem(kvp.Key, state.DisplayName);
-                _processLookup[kvp.Key] = item;
-                ProcessList.Add(item);
-            }
-            item.UpdateTraffic(recentIn, recentOut);
-        }
-
-        _allProcessesItem.UpdateTraffic(allRecentIn, allRecentOut);
-    }
-
-    private async Task LoadHistoricalRangeAsync(TimeRangeSelection range, CancellationToken cancellationToken) {
+    private async Task LoadHistoricalRangeAsync(TimeRangeSelection range) {
         try {
             IsLoading = true;
             IsEmpty = false;
 
-            var result = await _historicalChartLoader.LoadRangeAsync(range, cancellationToken);
+            var result = await _historicalQueries.LoadRangeAsync(range);
 
             // The user may have switched away while we were querying.
             if (SelectedTimeRange != range) return;
@@ -251,19 +161,13 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             }
 
             ApplyHistoricalChart(result.Points, result.ResolutionMs);
-            ApplyHistoricalProcessList(result.Summaries);
+            _processList.ApplyHistorical(result.Summaries);
             IsLoading = false;
         } catch (OperationCanceledException) {
             // User switched range mid-query (or shutdown). No error banner —
             // the superseding query will take over. Re-throw so the Task
             // completes as Canceled rather than RanToCompletion.
             throw;
-        } catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled) {
-            // gRPC surfaces CT cancellation as RpcException(Cancelled) in some
-            // grpc-dotnet versions. Normalize to OCE so the fire-and-forget
-            // task completes as Canceled rather than Faulted (which would fire
-            // TaskScheduler.UnobservedTaskException at finalization).
-            throw new OperationCanceledException("Cancelled via gRPC status", ex);
         } catch (RpcException) {
             // Historical query failed — show error state
             IsLoading = false;
@@ -272,30 +176,9 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         }
     }
 
-    private void SortProcessList() {
-        // CRITICAL: never use indexer assignment (ProcessList[x] = y) on this
-        // ObservableCollection — it fires NotifyCollectionChangedAction.Replace,
-        // which causes Avalonia's ListBox to clear its SelectedItem when the
-        // replaced index was the user's current selection. Use Move/Add/Remove
-        // exclusively so identity is preserved and selection follows the item.
-        if (ProcessList.Count <= 2) return;
-
-        var sorted = new List<ProcessListItem>(ProcessList.Count - 1);
-        for (var i = 1; i < ProcessList.Count; i++)
-            sorted.Add(ProcessList[i]);
-        sorted.Sort(static (a, b) => b.SortKey.CompareTo(a.SortKey));
-
-        for (var targetIndex = 1; targetIndex <= sorted.Count; targetIndex++) {
-            var desired = sorted[targetIndex - 1];
-            var currentIndex = ProcessList.IndexOf(desired);
-            if (currentIndex != targetIndex)
-                ProcessList.Move(currentIndex, targetIndex);
-        }
-    }
-
     partial void OnSelectedProcessChanged(ProcessListItem? value) {
         if (value is null) {
-            SelectedProcess = _allProcessesItem;
+            SelectedProcess = _processList.AllProcessesItem;
             return;
         }
         if (SelectedTimeRange.IsLive) {
@@ -303,19 +186,19 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
                 RebuildChartData(_lastStates);
         } else {
             // In historical mode, re-query the chart for the selected process
-            // (or the aggregate if "All processes" is selected). Cancel any
-            // prior in-flight historical query first so rapid process-switching
-            // doesn't leave superseded daemon work running.
-            var cancellationToken = StartNewHistoricalQuery();
-            _ = LoadHistoricalChartForProcessAsync(SelectedTimeRange, value, cancellationToken);
+            // (or the aggregate if "All processes" is selected). The
+            // orchestrator cancels any prior in-flight historical query so
+            // rapid process-switching doesn't leave superseded daemon work
+            // running.
+            _ = LoadHistoricalChartForProcessAsync(SelectedTimeRange, value);
         }
     }
 
     private async Task LoadHistoricalChartForProcessAsync(
-        TimeRangeSelection range, ProcessListItem selected, CancellationToken cancellationToken) {
+        TimeRangeSelection range, ProcessListItem selected) {
         try {
             var processPath = selected.IsAll ? null : selected.ProcessPath;
-            var result = await _historicalChartLoader.LoadProcessChartAsync(range, processPath, cancellationToken);
+            var result = await _historicalQueries.LoadProcessChartAsync(range, processPath);
 
             if (SelectedTimeRange != range || SelectedProcess != selected) return;
 
@@ -327,17 +210,9 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             ApplyHistoricalChart(result.Points, result.ResolutionMs);
         } catch (OperationCanceledException) {
             throw;
-        } catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled) {
-            // Same gRPC-cancellation bridge as LoadHistoricalRangeAsync.
-            throw new OperationCanceledException("Cancelled via gRPC status", ex);
         } catch (RpcException) {
             // Per-process chart query failed — chart stays on previous state.
         }
-    }
-
-    private void RemoveProcess(string processPath) {
-        if (_processLookup.Remove(processPath, out var item))
-            ProcessList.Remove(item);
     }
 
     private void RebuildChartData(IReadOnlyDictionary<string, ProcessState> states) {
@@ -408,30 +283,6 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         var dataLastMs = points[^1].TimestampUnixNs / 1_000_000;
         var dataSpanMs = dataLastMs - dataFirstMs;
         return ApplySinglePointPadding(downloadValues, uploadValues, dataSpanMs, resolutionMs);
-    }
-
-    /// <summary>
-    /// Clears and rebuilds <see cref="ProcessList"/> from historical summaries,
-    /// updates the leading "All processes" aggregate row, and re-sorts. Used
-    /// only by <see cref="LoadHistoricalRangeAsync"/>; per-process chart
-    /// queries leave the list untouched.
-    /// </summary>
-    private void ApplyHistoricalProcessList(IReadOnlyList<ProcessTrafficSummaryProto> summaries) {
-        ClearProcessList();
-
-        long allHistIn = 0;
-        long allHistOut = 0;
-        foreach (var summary in summaries) {
-            allHistIn += summary.TotalBytesIn;
-            allHistOut += summary.TotalBytesOut;
-            var item = new ProcessListItem(summary.ProcessPath, summary.ProcessName);
-            item.UpdateTraffic(summary.TotalBytesIn, summary.TotalBytesOut);
-            _processLookup[summary.ProcessPath] = item;
-            ProcessList.Add(item);
-        }
-
-        _allProcessesItem.UpdateTraffic(allHistIn, allHistOut);
-        SortProcessList();
     }
 
     /// <summary>
