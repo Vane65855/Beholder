@@ -423,6 +423,78 @@ public class SqliteTrafficStoreTests : IDisposable {
             _store.GetCountryBreakdownAsync(
                 BaseTime.AddHours(1), BaseTime, CancellationToken.None));
 
+    // Zero-width range tests. Each test seeds a bucket at BaseTime and queries
+    // (BaseTime, BaseTime) — a legal but zero-width range. The SQL predicate
+    // `bucket_start_ms >= fromMs AND bucket_start_ms < toMs` with from == to is
+    // always false, so the seeded row must not appear. This also locks in the
+    // exclusive-upper-bound semantic: if someone flips `<` to `<=`, the seeded
+    // bucket at bucket_start_ms == BaseTime would be included and all 5 tests
+    // fail. For the stitched methods (Aggregate/ProcessTimeline), the test also
+    // proves the slicer's `sliceFromMs < sliceToMs` guard short-circuits empty
+    // slices without reaching the bucket-width picker (which divides by extent).
+
+    [Fact]
+    public async Task GetProcessTimelineAsync_ZeroWidthRange_ReturnsEmpty() {
+        var bucket = CreateBucket();
+        await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
+
+        var timeline = await _store.GetProcessTimelineAsync(
+            "C:/app/firefox.exe",
+            BaseTime, BaseTime,
+            TimeSpan.FromSeconds(1),
+            CancellationToken.None);
+
+        Assert.Empty(timeline);
+    }
+
+    [Fact]
+    public async Task GetProcessDestinationsAsync_ZeroWidthRange_ReturnsEmpty() {
+        var bucket = CreateBucket();
+        await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
+
+        var destinations = await _store.GetProcessDestinationsAsync(
+            "C:/app/firefox.exe",
+            BaseTime, BaseTime,
+            CancellationToken.None);
+
+        Assert.Empty(destinations);
+    }
+
+    [Fact]
+    public async Task GetAggregateTimelineAsync_ZeroWidthRange_ReturnsEmpty() {
+        var bucket = CreateBucket();
+        await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
+
+        var timeline = await _store.GetAggregateTimelineAsync(
+            BaseTime, BaseTime,
+            TimeSpan.FromSeconds(1),
+            CancellationToken.None);
+
+        Assert.Empty(timeline);
+    }
+
+    [Fact]
+    public async Task GetProcessSummariesAsync_ZeroWidthRange_ReturnsEmpty() {
+        var bucket = CreateBucket();
+        await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
+
+        var summaries = await _store.GetProcessSummariesAsync(
+            BaseTime, BaseTime, CancellationToken.None);
+
+        Assert.Empty(summaries);
+    }
+
+    [Fact]
+    public async Task GetCountryBreakdownAsync_ZeroWidthRange_ReturnsEmpty() {
+        var bucket = CreateBucket();
+        await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
+
+        var breakdown = await _store.GetCountryBreakdownAsync(
+            BaseTime, BaseTime, CancellationToken.None);
+
+        Assert.Empty(breakdown);
+    }
+
     [Fact]
     public async Task GetAggregateTimelineAsync_StitchesAcrossTiers() {
         // Verify the stitched multi-tier query: each time slice of the range is
