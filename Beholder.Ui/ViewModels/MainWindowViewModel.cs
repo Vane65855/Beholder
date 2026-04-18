@@ -15,6 +15,16 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
     private readonly ScannerTabViewModel _scannerTab = new();
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsTrafficActive))]
+    [NotifyPropertyChangedFor(nameof(IsFirewallActive))]
+    [NotifyPropertyChangedFor(nameof(IsAlertsActive))]
+    [NotifyPropertyChangedFor(nameof(IsMapActive))]
+    [NotifyPropertyChangedFor(nameof(IsScannerActive))]
+    [NotifyPropertyChangedFor(nameof(TrafficLabel))]
+    [NotifyPropertyChangedFor(nameof(FirewallLabel))]
+    [NotifyPropertyChangedFor(nameof(AlertsLabel))]
+    [NotifyPropertyChangedFor(nameof(MapLabel))]
+    [NotifyPropertyChangedFor(nameof(ScannerLabel))]
     private TabKind _activeTab = TabKind.Traffic;
 
     [ObservableProperty]
@@ -65,6 +75,10 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
     public void Dispose() {
         _daemonClient.StateChanged -= OnDaemonStateChanged;
         _trafficTab.Dispose();
+        _firewallTab.Dispose();
+        _alertsTab.Dispose();
+        _mapTab.Dispose();
+        _scannerTab.Dispose();
         StatusStripVm.Dispose();
     }
 
@@ -78,6 +92,8 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
     }
 
     partial void OnActiveTabChanged(TabKind value) {
+        // The 10 derived tab-state properties (IsTrafficActive/TrafficLabel/...)
+        // are notified automatically by [NotifyPropertyChangedFor] on _activeTab.
         ActiveTabContent = value switch {
             TabKind.Traffic => _trafficTab,
             TabKind.Firewall => _firewallTab,
@@ -86,18 +102,6 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
             TabKind.Scanner => _scannerTab,
             _ => _trafficTab,
         };
-
-        OnPropertyChanged(nameof(IsTrafficActive));
-        OnPropertyChanged(nameof(IsFirewallActive));
-        OnPropertyChanged(nameof(IsAlertsActive));
-        OnPropertyChanged(nameof(IsMapActive));
-        OnPropertyChanged(nameof(IsScannerActive));
-
-        OnPropertyChanged(nameof(TrafficLabel));
-        OnPropertyChanged(nameof(FirewallLabel));
-        OnPropertyChanged(nameof(AlertsLabel));
-        OnPropertyChanged(nameof(MapLabel));
-        OnPropertyChanged(nameof(ScannerLabel));
     }
 
     [RelayCommand]

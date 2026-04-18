@@ -164,10 +164,16 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     /// Removes all process-list items except the leading "All processes"
     /// aggregate row, and clears the lookup dictionary. Called on every range
     /// transition so one range's process set can't leak into another's sidebar.
+    /// Uses <see cref="ObservableCollection{T}.Clear"/> + <see cref="ObservableCollection{T}.Add"/>
+    /// rather than per-item removal so downstream ListBox invalidation fires
+    /// twice (Reset + Add) instead of N times.
     /// </summary>
     private void ClearProcessList() {
         _processLookup.Clear();
-        while (ProcessList.Count > 1) ProcessList.RemoveAt(ProcessList.Count - 1);
+        if (ProcessList.Count <= 1) return;
+        var all = ProcessList[0];
+        ProcessList.Clear();
+        ProcessList.Add(all);
     }
 
     internal void UpdateFromStates(IReadOnlyDictionary<string, ProcessState> states) {
