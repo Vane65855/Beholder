@@ -21,19 +21,19 @@
                         VerticalAlignment="Center" Spacing="6">
                 <TextBlock Text="BEHOLDER NMT"
                            Foreground="{DynamicResource AccentPrimary}"
-                           FontWeight="SemiBold" FontSize="14"
+                           FontWeight="SemiBold" FontSize="{DynamicResource FontSizeHeading}"
                            LetterSpacing="2"
                            VerticalAlignment="Center" />
                 <TextBlock Text="v0.1.0"
                            Foreground="{DynamicResource TextMuted}"
-                           FontSize="11"
+                           FontSize="{DynamicResource FontSizeCaption}"
                            VerticalAlignment="Center" />
                 <TextBlock Text=" ·  daemon:"
                            Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11"
+                           FontSize="{DynamicResource FontSizeCaption}"
                            VerticalAlignment="Center" />
                 <TextBlock Text="{Binding DaemonStatusLabel}"
-                           FontSize="11"
+                           FontSize="{DynamicResource FontSizeCaption}"
                            VerticalAlignment="Center"
                            Classes.disconnected="{Binding IsDaemonDisconnected}"
                            Classes.connecting="{Binding IsDaemonConnecting}"
@@ -101,7 +101,7 @@
             <Setter Property="Padding" Value="12,6" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
             <Setter Property="FontWeight" Value="Medium" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />

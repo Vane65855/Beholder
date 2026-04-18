@@ -27,20 +27,20 @@ internal sealed class HistoricalChartLoader {
     /// caller's empty-state rendering doesn't burn a second round-trip.
     /// </summary>
     public async Task<HistoricalRangeResult> LoadRangeAsync(
-        TimeRangeSelection range, CancellationToken ct) {
+        TimeRangeSelection range, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(range);
 
         var resolutionMs = ComputeResolutionMs(range);
 
         var timeline = await _daemonClient.GetAggregateTimelineAsync(
-            BuildAggregateTimelineRequest(range, resolutionMs), ct);
+            BuildAggregateTimelineRequest(range, resolutionMs), cancellationToken);
 
         if (timeline.Points.Count == 0) {
             return new HistoricalRangeResult([], [], resolutionMs);
         }
 
         var summaries = await _daemonClient.GetProcessSummariesAsync(
-            BuildProcessSummariesRequest(range), ct);
+            BuildProcessSummariesRequest(range), cancellationToken);
 
         return new HistoricalRangeResult(timeline.Points, summaries.Summaries, resolutionMs);
     }
@@ -52,7 +52,7 @@ internal sealed class HistoricalChartLoader {
     /// returns the per-process timeline for that path.
     /// </summary>
     public async Task<HistoricalChartResult> LoadProcessChartAsync(
-        TimeRangeSelection range, string? processPath, CancellationToken ct) {
+        TimeRangeSelection range, string? processPath, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(range);
 
         var resolutionMs = ComputeResolutionMs(range);
@@ -60,11 +60,11 @@ internal sealed class HistoricalChartLoader {
         IReadOnlyList<TrafficTimePoint> points;
         if (processPath is null) {
             var response = await _daemonClient.GetAggregateTimelineAsync(
-                BuildAggregateTimelineRequest(range, resolutionMs), ct);
+                BuildAggregateTimelineRequest(range, resolutionMs), cancellationToken);
             points = response.Points;
         } else {
             var response = await _daemonClient.GetProcessTimelineAsync(
-                BuildProcessTimelineRequest(range, processPath, resolutionMs), ct);
+                BuildProcessTimelineRequest(range, processPath, resolutionMs), cancellationToken);
             points = response.Points;
         }
 

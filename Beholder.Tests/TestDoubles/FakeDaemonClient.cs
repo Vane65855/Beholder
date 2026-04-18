@@ -35,7 +35,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     // AggregateTimelineResponse when set.
     public Func<GetAggregateTimelineRequest, CancellationToken, GetAggregateTimelineResponse>? AggregateTimelineResponder { get; set; }
 
-    public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
+    public Task ConnectAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public void SimulateConnected() {
         _state = ConnectionState.Connected;
@@ -53,8 +53,8 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public void CompleteStream() =>
         _channel.Writer.Complete();
 
-    public AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken ct) {
-        var reader = new ChannelStreamReader<DaemonEvent>(_channel.Reader, ct);
+    public AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken cancellationToken) {
+        var reader = new ChannelStreamReader<DaemonEvent>(_channel.Reader, cancellationToken);
         return new AsyncServerStreamingCall<DaemonEvent>(
             reader,
             Task.FromResult(new Metadata()),
@@ -63,47 +63,47 @@ internal sealed class FakeDaemonClient : IDaemonClient {
             () => { });
     }
 
-    public Task<GetSnapshotResponse> GetSnapshotAsync(CancellationToken ct) {
+    public Task<GetSnapshotResponse> GetSnapshotAsync(CancellationToken cancellationToken) {
         if (SnapshotException is not null) throw SnapshotException;
         return Task.FromResult(SnapshotResponse ?? new GetSnapshotResponse());
     }
 
     public Task<ApplyFirewallRuleResponse> ApplyFirewallRuleAsync(
-        ApplyFirewallRuleRequest request, CancellationToken ct) =>
+        ApplyFirewallRuleRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(new ApplyFirewallRuleResponse());
 
     public Task<MarkAlertReadResponse> MarkAlertReadAsync(
-        MarkAlertReadRequest request, CancellationToken ct) =>
+        MarkAlertReadRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(new MarkAlertReadResponse());
 
     public Task<VerifyChainResponse> VerifyChainAsync(
-        VerifyChainRequest request, CancellationToken ct) =>
+        VerifyChainRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(new VerifyChainResponse());
 
     public Task<GetProcessTimelineResponse> GetProcessTimelineAsync(
-        GetProcessTimelineRequest request, CancellationToken ct) {
+        GetProcessTimelineRequest request, CancellationToken cancellationToken) {
         if (ProcessTimelineException is not null) throw ProcessTimelineException;
         return Task.FromResult(ProcessTimelineResponder?.Invoke(request) ?? new GetProcessTimelineResponse());
     }
 
     public Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(
-        GetAggregateTimelineRequest request, CancellationToken ct) {
+        GetAggregateTimelineRequest request, CancellationToken cancellationToken) {
         if (AggregateTimelineException is not null) throw AggregateTimelineException;
         if (AggregateTimelineResponder is not null)
-            return Task.FromResult(AggregateTimelineResponder(request, ct));
+            return Task.FromResult(AggregateTimelineResponder(request, cancellationToken));
         return Task.FromResult(AggregateTimelineResponse ?? new GetAggregateTimelineResponse());
     }
 
     public Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(
-        GetProcessDestinationsRequest request, CancellationToken ct) =>
+        GetProcessDestinationsRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(new GetProcessDestinationsResponse());
 
     public Task<GetCountryBreakdownResponse> GetCountryBreakdownAsync(
-        GetCountryBreakdownRequest request, CancellationToken ct) =>
+        GetCountryBreakdownRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(new GetCountryBreakdownResponse());
 
     public Task<GetProcessSummariesResponse> GetProcessSummariesAsync(
-        GetProcessSummariesRequest request, CancellationToken ct) {
+        GetProcessSummariesRequest request, CancellationToken cancellationToken) {
         if (ProcessSummariesException is not null) throw ProcessSummariesException;
         return Task.FromResult(ProcessSummariesResponse ?? new GetProcessSummariesResponse());
     }
@@ -117,18 +117,18 @@ internal sealed class FakeDaemonClient : IDaemonClient {
 /// </summary>
 internal sealed class ChannelStreamReader<T> : IAsyncStreamReader<T> {
     private readonly ChannelReader<T> _reader;
-    private readonly CancellationToken _ct;
+    private readonly CancellationToken _cancellationToken;
     private T _current = default!;
 
-    public ChannelStreamReader(ChannelReader<T> reader, CancellationToken ct) {
+    public ChannelStreamReader(ChannelReader<T> reader, CancellationToken cancellationToken) {
         _reader = reader;
-        _ct = ct;
+        _cancellationToken = cancellationToken;
     }
 
     public T Current => _current;
 
     public async Task<bool> MoveNext(CancellationToken cancellationToken) {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _ct);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cancellationToken);
         try {
             if (await _reader.WaitToReadAsync(linked.Token)) {
                 if (_reader.TryRead(out var item)) {

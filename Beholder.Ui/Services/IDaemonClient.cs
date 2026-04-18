@@ -27,16 +27,16 @@ internal interface IDaemonClient : IAsyncDisposable {
     DaemonStatusInfo StatusInfo { get; }
     event Action<DaemonStatusInfo>? StateChanged;
 
-    Task ConnectAsync(CancellationToken ct);
+    Task ConnectAsync(CancellationToken cancellationToken);
 
-    Task<GetSnapshotResponse> GetSnapshotAsync(CancellationToken ct);
-    Task<ApplyFirewallRuleResponse> ApplyFirewallRuleAsync(ApplyFirewallRuleRequest request, CancellationToken ct);
-    Task<MarkAlertReadResponse> MarkAlertReadAsync(MarkAlertReadRequest request, CancellationToken ct);
-    Task<VerifyChainResponse> VerifyChainAsync(VerifyChainRequest request, CancellationToken ct);
-    Task<GetProcessTimelineResponse> GetProcessTimelineAsync(GetProcessTimelineRequest request, CancellationToken ct);
-    Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(GetAggregateTimelineRequest request, CancellationToken ct);
-    Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(GetProcessDestinationsRequest request, CancellationToken ct);
-    Task<GetCountryBreakdownResponse> GetCountryBreakdownAsync(GetCountryBreakdownRequest request, CancellationToken ct);
-    Task<GetProcessSummariesResponse> GetProcessSummariesAsync(GetProcessSummariesRequest request, CancellationToken ct);
-    Grpc.Core.AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken ct);
+    Task<GetSnapshotResponse> GetSnapshotAsync(CancellationToken cancellationToken);
+    Task<ApplyFirewallRuleResponse> ApplyFirewallRuleAsync(ApplyFirewallRuleRequest request, CancellationToken cancellationToken);
+    Task<MarkAlertReadResponse> MarkAlertReadAsync(MarkAlertReadRequest request, CancellationToken cancellationToken);
+    Task<VerifyChainResponse> VerifyChainAsync(VerifyChainRequest request, CancellationToken cancellationToken);
+    Task<GetProcessTimelineResponse> GetProcessTimelineAsync(GetProcessTimelineRequest request, CancellationToken cancellationToken);
+    Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(GetAggregateTimelineRequest request, CancellationToken cancellationToken);
+    Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(GetProcessDestinationsRequest request, CancellationToken cancellationToken);
+    Task<GetCountryBreakdownResponse> GetCountryBreakdownAsync(GetCountryBreakdownRequest request, CancellationToken cancellationToken);
+    Task<GetProcessSummariesResponse> GetProcessSummariesAsync(GetProcessSummariesRequest request, CancellationToken cancellationToken);
+    Grpc.Core.AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken cancellationToken);
 }

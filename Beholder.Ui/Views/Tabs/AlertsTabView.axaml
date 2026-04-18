@@ -6,7 +6,7 @@
              Background="{DynamicResource BackgroundRoot}">
     <TextBlock Text="Alerts tab content"
                Foreground="{DynamicResource TextMuted}"
-               FontSize="14"
+               FontSize="{DynamicResource FontSizeHeading}"
                HorizontalAlignment="Center"
                VerticalAlignment="Center" />
 </UserControl>

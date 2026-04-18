@@ -58,20 +58,20 @@ internal sealed class DaemonStreamSubscriber : IAsyncDisposable {
         _cts?.Dispose();
     }
 
-    private async Task ConsumeLoopAsync(CancellationToken ct) {
-        while (!ct.IsCancellationRequested) {
-            await WaitForConnected(ct);
+    private async Task ConsumeLoopAsync(CancellationToken cancellationToken) {
+        while (!cancellationToken.IsCancellationRequested) {
+            await WaitForConnected(cancellationToken);
             if (OnConnected is not null)
-                await OnConnected(ct);
-            await ConsumeStream(ct);
+                await OnConnected(cancellationToken);
+            await ConsumeStream(cancellationToken);
         }
     }
 
-    private async Task WaitForConnected(CancellationToken ct) {
+    private async Task WaitForConnected(CancellationToken cancellationToken) {
         if (_daemonClient.State == ConnectionState.Connected) return;
 
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var registration = ct.Register(() => tcs.TrySetCanceled(ct));
+        using var registration = cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
 
         void OnStateChanged(DaemonStatusInfo status) {
             if (status.State == ConnectionState.Connected)
@@ -88,16 +88,16 @@ internal sealed class DaemonStreamSubscriber : IAsyncDisposable {
         }
     }
 
-    private async Task ConsumeStream(CancellationToken ct) {
+    private async Task ConsumeStream(CancellationToken cancellationToken) {
         try {
-            using var call = _daemonClient.Subscribe(ct);
-            await foreach (var daemonEvent in call.ResponseStream.ReadAllAsync(ct)) {
+            using var call = _daemonClient.Subscribe(cancellationToken);
+            await foreach (var daemonEvent in call.ResponseStream.ReadAllAsync(cancellationToken)) {
                 DispatchEvent(daemonEvent);
             }
-        } catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+        } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             throw;
-        } catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && ct.IsCancellationRequested) {
-            throw new OperationCanceledException(ct);
+        } catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && cancellationToken.IsCancellationRequested) {
+            throw new OperationCanceledException(cancellationToken);
         } catch (RpcException ex) {
             _logger.LogInformation("Daemon stream ended: {Status}", ex.StatusCode);
         } catch (InvalidOperationException) {

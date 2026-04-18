@@ -53,9 +53,9 @@ internal sealed class ProcessStateService : IDisposable {
     /// stream starts. This eliminates the "0 B on reconnect" problem.
     /// Best-effort: if any query fails, the live stream fills in within seconds.
     /// </summary>
-    internal async Task SeedAsync(CancellationToken ct) {
+    internal async Task SeedAsync(CancellationToken cancellationToken) {
         try {
-            var snapshot = await _daemonClient.GetSnapshotAsync(ct);
+            var snapshot = await _daemonClient.GetSnapshotAsync(cancellationToken);
             if (snapshot.Snapshots.Count == 0) return;
 
             _states.Clear();
@@ -83,7 +83,7 @@ internal sealed class ProcessStateService : IDisposable {
                         ToUnixNs = now.ToUnixTimeMilliseconds() * 1_000_000,
                         ResolutionMs = 1_000,
                     };
-                    var timeline = await _daemonClient.GetProcessTimelineAsync(request, ct);
+                    var timeline = await _daemonClient.GetProcessTimelineAsync(request, cancellationToken);
                     foreach (var point in timeline.Points) {
                         state.RecentDeltaIn.Add(point.BytesIn);
                         state.RecentDeltaOut.Add(point.BytesOut);

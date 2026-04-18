@@ -3,7 +3,7 @@
              x:Class="Beholder.Ui.Controls.TimeRangeDropdown">
 
     <Button x:Name="DropdownButton"
-            FontSize="11"
+            FontSize="{DynamicResource FontSizeCaption}"
             Padding="10,4"
             Background="Transparent"
             Foreground="{DynamicResource AccentPrimary}"
@@ -49,7 +49,7 @@
                                     IsVisible="False"
                                     Spacing="8">
                             <TextBlock Text="CUSTOM RANGE"
-                                       FontSize="11"
+                                       FontSize="{DynamicResource FontSizeCaption}"
                                        LetterSpacing="1"
                                        Foreground="{DynamicResource TextMuted}"
                                        Margin="4,2,0,4" />
@@ -57,19 +57,19 @@
                             <StackPanel Orientation="Horizontal" Spacing="8" Margin="4,0">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="From"
-                                               FontSize="10"
+                                               FontSize="{DynamicResource FontSizeSmall}"
                                                Foreground="{DynamicResource TextSecondary}" />
                                     <CalendarDatePicker x:Name="FromPicker"
                                                         MinWidth="130"
-                                                        FontSize="11" />
+                                                        FontSize="{DynamicResource FontSizeCaption}" />
                                 </StackPanel>
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="To"
-                                               FontSize="10"
+                                               FontSize="{DynamicResource FontSizeSmall}"
                                                Foreground="{DynamicResource TextSecondary}" />
                                     <CalendarDatePicker x:Name="ToPicker"
                                                         MinWidth="130"
-                                                        FontSize="11" />
+                                                        FontSize="{DynamicResource FontSizeCaption}" />
                                 </StackPanel>
                             </StackPanel>
 
@@ -78,7 +78,8 @@
                                         HorizontalAlignment="Right"
                                         Margin="4,4,4,0">
                                 <Button Content="Cancel"
-                                        FontSize="11"
+                                        Classes="customCancel"
+                                        FontSize="{DynamicResource FontSizeCaption}"
                                         Padding="10,4"
                                         Background="Transparent"
                                         Foreground="{DynamicResource TextSecondary}"
@@ -86,7 +87,8 @@
                                         Cursor="Hand"
                                         Click="OnCustomCancel" />
                                 <Button Content="Apply"
-                                        FontSize="11"
+                                        Classes="customApply"
+                                        FontSize="{DynamicResource FontSizeCaption}"
                                         Padding="10,4"
                                         Background="Transparent"
                                         Foreground="{DynamicResource AccentPrimary}"
@@ -109,7 +111,7 @@
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Left" />
                 <Setter Property="Padding" Value="8,6" />
-                <Setter Property="FontSize" Value="12" />
+                <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="CornerRadius" Value="3" />
                 <Setter Property="Cursor" Value="Hand" />
@@ -120,11 +122,17 @@
             <Style Selector="Button.rangeItem.active">
                 <Setter Property="Foreground" Value="{DynamicResource AccentPrimary}" />
             </Style>
+            <Style Selector="Button.customCancel:pointerover /template/ ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+            </Style>
+            <Style Selector="Button.customApply:pointerover /template/ ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource AccentHover}" />
+            </Style>
         </Button.Styles>
 
         <StackPanel Orientation="Horizontal" Spacing="4">
             <TextBlock x:Name="ButtonLabel" Text="5 Minutes" VerticalAlignment="Center" />
-            <TextBlock Text="▾" VerticalAlignment="Center" FontSize="9" />
+            <TextBlock Text="▾" VerticalAlignment="Center" FontSize="{DynamicResource FontSizeSmall}" />
         </StackPanel>
     </Button>
 </UserControl>

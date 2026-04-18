@@ -13,7 +13,7 @@
         <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" Margin="16,4">
 
             <!-- Download metrics -->
-            <TextBlock Grid.Column="0" FontSize="11" VerticalAlignment="Center"
+            <TextBlock Grid.Column="0" FontSize="{DynamicResource FontSizeCaption}" VerticalAlignment="Center"
                        ToolTip.Tip="Download traffic. Σ = total bytes received since daemon started. Rate = bytes received in the last second.">
                 <Run Text="▼ " Foreground="{DynamicResource ChartOutboundStroke}" />
                 <Run Text="DOWNLOAD " Foreground="{DynamicResource TextMuted}" FontWeight="Medium" />
@@ -24,7 +24,7 @@
             </TextBlock>
 
             <!-- Upload metrics -->
-            <TextBlock Grid.Column="1" FontSize="11" VerticalAlignment="Center"
+            <TextBlock Grid.Column="1" FontSize="{DynamicResource FontSizeCaption}" VerticalAlignment="Center"
                        Margin="24,0,0,0"
                        ToolTip.Tip="Upload traffic. Σ = total bytes sent since daemon started. Rate = bytes sent in the last second.">
                 <Run Text="▲ " Foreground="{DynamicResource ChartInboundStroke}" />
@@ -56,7 +56,7 @@
             </Border>
 
             <!-- WAN label + total -->
-            <TextBlock Grid.Column="3" FontSize="11" VerticalAlignment="Center">
+            <TextBlock Grid.Column="3" FontSize="{DynamicResource FontSizeCaption}" VerticalAlignment="Center">
                 <Run Text="WAN " Foreground="{DynamicResource TextMuted}"
                      FontWeight="Medium" />
                 <Run Text="Σ " Foreground="{DynamicResource TextMuted}" />
@@ -65,7 +65,7 @@
             </TextBlock>
 
             <!-- Device ID -->
-            <TextBlock Grid.Column="4" FontSize="11" VerticalAlignment="Center"
+            <TextBlock Grid.Column="4" FontSize="{DynamicResource FontSizeCaption}" VerticalAlignment="Center"
                        Margin="24,0,0,0">
                 <Run Text="DEV " Foreground="{DynamicResource TextMuted}"
                      FontWeight="Medium" />

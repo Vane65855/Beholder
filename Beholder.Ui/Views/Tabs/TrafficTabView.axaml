@@ -7,6 +7,22 @@
              x:DataType="vm:TrafficTabViewModel"
              Background="{DynamicResource BackgroundRoot}">
 
+    <UserControl.Styles>
+        <Style Selector="Button.toolbarPill">
+            <Setter Property="MinWidth" Value="64" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+        </Style>
+        <Style Selector="Button.toolbarPill:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+        </Style>
+    </UserControl.Styles>
+
     <Grid ColumnDefinitions="280,*">
 
         <!-- ── Left: Process List Panel ──────────────────────────────── -->
@@ -21,19 +37,19 @@
                       Margin="12,10,12,6">
                     <TextBlock Grid.Column="1"
                                Text="PROCESS"
-                               FontSize="11"
+                               FontSize="{DynamicResource FontSizeCaption}"
                                LetterSpacing="1"
                                Foreground="{DynamicResource TextMuted}"
                                Margin="6,0,8,0" />
                     <TextBlock Grid.Column="2"
                                Text="IN"
-                               FontSize="11"
+                               FontSize="{DynamicResource FontSizeCaption}"
                                LetterSpacing="1"
                                Foreground="{DynamicResource TextMuted}"
                                Margin="0,0,8,0" />
                     <TextBlock Grid.Column="3"
                                Text="OUT"
-                               FontSize="11"
+                               FontSize="{DynamicResource FontSizeCaption}"
                                LetterSpacing="1"
                                Foreground="{DynamicResource TextMuted}" />
                 </Grid>
@@ -80,7 +96,7 @@
                                 <TextBlock Grid.Column="1"
                                            Text="{Binding DisplayName}"
                                            Foreground="{DynamicResource TextPrimary}"
-                                           FontSize="13"
+                                           FontSize="{DynamicResource FontSizeSubheading}"
                                            VerticalAlignment="Center"
                                            TextTrimming="CharacterEllipsis"
                                            Margin="6,0,8,0" />
@@ -93,10 +109,10 @@
                                             VerticalAlignment="Center"
                                             Margin="0,0,8,0">
                                     <TextBlock Text="▼ "
-                                               FontSize="13"
+                                               FontSize="{DynamicResource FontSizeSubheading}"
                                                Foreground="{DynamicResource ChartOutboundStroke}" />
                                     <TextBlock Text="{Binding RecentInLabel}"
-                                               FontSize="13"
+                                               FontSize="{DynamicResource FontSizeSubheading}"
                                                Foreground="{DynamicResource TextSecondary}" />
                                 </StackPanel>
 
@@ -107,10 +123,10 @@
                                             Orientation="Horizontal"
                                             VerticalAlignment="Center">
                                     <TextBlock Text="▲ "
-                                               FontSize="13"
+                                               FontSize="{DynamicResource FontSizeSubheading}"
                                                Foreground="{DynamicResource ChartInboundStroke}" />
                                     <TextBlock Text="{Binding RecentOutLabel}"
-                                               FontSize="13"
+                                               FontSize="{DynamicResource FontSizeSubheading}"
                                                Foreground="{DynamicResource TextSecondary}" />
                                 </StackPanel>
                             </Grid>
@@ -129,7 +145,7 @@
                   Margin="16,10,16,6">
                 <TextBlock Grid.Column="0"
                            Text="TRAFFIC  ·  BYTES/SEC"
-                           FontSize="11"
+                           FontSize="{DynamicResource FontSizeCaption}"
                            LetterSpacing="1"
                            Foreground="{DynamicResource TextMuted}"
                            VerticalAlignment="Center" />
@@ -143,25 +159,11 @@
                             Orientation="Horizontal"
                             Spacing="2">
                     <Button Content="GRAPH"
-                            FontSize="11"
-                            MinWidth="64"
-                            Padding="10,4"
-                            Background="Transparent"
-                            Foreground="{DynamicResource AccentPrimary}"
-                            BorderBrush="{DynamicResource BorderSubtle}"
-                            BorderThickness="1"
-                            CornerRadius="3"
-                            Cursor="Hand"
-                            IsEnabled="True" />
+                            Classes="toolbarPill"
+                            Foreground="{DynamicResource AccentPrimary}" />
                     <Button Content="COLS"
-                            FontSize="11"
-                            MinWidth="64"
-                            Padding="10,4"
-                            Background="Transparent"
+                            Classes="toolbarPill"
                             Foreground="{DynamicResource TextMuted}"
-                            BorderBrush="{DynamicResource BorderSubtle}"
-                            BorderThickness="1"
-                            CornerRadius="3"
                             IsEnabled="False"
                             ToolTip.Tip="Column view — coming soon" />
                 </StackPanel>
@@ -183,7 +185,7 @@
                             Spacing="8">
                     <TextBlock Text="Connecting to daemon..."
                                Foreground="{DynamicResource TextMuted}"
-                               FontSize="14"
+                               FontSize="{DynamicResource FontSizeHeading}"
                                HorizontalAlignment="Center" />
                 </StackPanel>
 
@@ -194,11 +196,11 @@
                             Spacing="4">
                     <TextBlock Text="No traffic data yet"
                                Foreground="{DynamicResource TextSecondary}"
-                               FontSize="14"
+                               FontSize="{DynamicResource FontSizeHeading}"
                                HorizontalAlignment="Center" />
                     <TextBlock Text="Traffic will appear when processes access the network."
                                Foreground="{DynamicResource TextMuted}"
-                               FontSize="12"
+                               FontSize="{DynamicResource FontSizeBody}"
                                HorizontalAlignment="Center" />
                 </StackPanel>
 
@@ -214,7 +216,7 @@
                         BorderThickness="1">
                     <TextBlock Text="{Binding ErrorMessage}"
                                Foreground="{DynamicResource SeverityWarn}"
-                               FontSize="12" />
+                               FontSize="{DynamicResource FontSizeBody}" />
                 </Border>
             </Grid>
         </DockPanel>

@@ -6,7 +6,7 @@
              Background="{DynamicResource BackgroundRoot}">
     <TextBlock Text="Scanner tab content (deferred)"
                Foreground="{DynamicResource TextMuted}"
-               FontSize="14"
+               FontSize="{DynamicResource FontSizeHeading}"
                HorizontalAlignment="Center"
                VerticalAlignment="Center" />
 </UserControl>

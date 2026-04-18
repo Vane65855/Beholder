@@ -42,15 +42,15 @@ internal sealed class DaemonClient : IDaemonClient {
         _logger = logger;
     }
 
-    public Task ConnectAsync(CancellationToken ct) {
+    public Task ConnectAsync(CancellationToken cancellationToken) {
         if (_connectTask is not null)
             throw new InvalidOperationException("ConnectAsync has already been started.");
-        _connectTask = ConnectLoopAsync(ct);
+        _connectTask = ConnectLoopAsync(cancellationToken);
         return _connectTask;
     }
 
-    private async Task ConnectLoopAsync(CancellationToken ct) {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _shutdownCts.Token);
+    private async Task ConnectLoopAsync(CancellationToken cancellationToken) {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
         var token = linked.Token;
 
         // Reconnection runs indefinitely with exponential backoff (cap 15s).
@@ -98,14 +98,14 @@ internal sealed class DaemonClient : IDaemonClient {
         SetState(ConnectionState.Disconnected);
     }
 
-    private async Task MonitorConnection(CancellationToken ct) {
+    private async Task MonitorConnection(CancellationToken cancellationToken) {
         // Poll every 5 seconds to detect if daemon goes away
-        while (!ct.IsCancellationRequested) {
-            await Task.Delay(TimeSpan.FromSeconds(5), _timeProvider, ct);
+        while (!cancellationToken.IsCancellationRequested) {
+            await Task.Delay(TimeSpan.FromSeconds(5), _timeProvider, cancellationToken);
 
             try {
                 var client = GetConnectedClient();
-                await client.GetSnapshotAsync(new GetSnapshotRequest(), cancellationToken: ct);
+                await client.GetSnapshotAsync(new GetSnapshotRequest(), cancellationToken: cancellationToken);
             } catch (OperationCanceledException) {
                 throw;
             } catch {
@@ -115,70 +115,70 @@ internal sealed class DaemonClient : IDaemonClient {
         }
     }
 
-    public async Task<GetSnapshotResponse> GetSnapshotAsync(CancellationToken ct) {
+    public async Task<GetSnapshotResponse> GetSnapshotAsync(CancellationToken cancellationToken) {
         var client = GetConnectedClient();
-        return await client.GetSnapshotAsync(new GetSnapshotRequest(), cancellationToken: ct);
+        return await client.GetSnapshotAsync(new GetSnapshotRequest(), cancellationToken: cancellationToken);
     }
 
     public async Task<ApplyFirewallRuleResponse> ApplyFirewallRuleAsync(
-        ApplyFirewallRuleRequest request, CancellationToken ct) {
+        ApplyFirewallRuleRequest request, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(request);
         var client = GetConnectedClient();
-        return await client.ApplyFirewallRuleAsync(request, cancellationToken: ct);
+        return await client.ApplyFirewallRuleAsync(request, cancellationToken: cancellationToken);
     }
 
     public async Task<MarkAlertReadResponse> MarkAlertReadAsync(
-        MarkAlertReadRequest request, CancellationToken ct) {
+        MarkAlertReadRequest request, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(request);
         var client = GetConnectedClient();
-        return await client.MarkAlertReadAsync(request, cancellationToken: ct);
+        return await client.MarkAlertReadAsync(request, cancellationToken: cancellationToken);
     }
 
     public async Task<VerifyChainResponse> VerifyChainAsync(
-        VerifyChainRequest request, CancellationToken ct) {
+        VerifyChainRequest request, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(request);
         var client = GetConnectedClient();
-        return await client.VerifyChainAsync(request, cancellationToken: ct);
+        return await client.VerifyChainAsync(request, cancellationToken: cancellationToken);
     }
 
     public async Task<GetProcessTimelineResponse> GetProcessTimelineAsync(
-        GetProcessTimelineRequest request, CancellationToken ct) {
+        GetProcessTimelineRequest request, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(request);
         var client = GetConnectedClient();
-        return await client.GetProcessTimelineAsync(request, cancellationToken: ct);
+        return await client.GetProcessTimelineAsync(request, cancellationToken: cancellationToken);
     }
 
     public async Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(
-        GetAggregateTimelineRequest request, CancellationToken ct) {
+        GetAggregateTimelineRequest request, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(request);
         var client = GetConnectedClient();
-        return await client.GetAggregateTimelineAsync(request, cancellationToken: ct);
+        return await client.GetAggregateTimelineAsync(request, cancellationToken: cancellationToken);
     }
 
     public async Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(
-        GetProcessDestinationsRequest request, CancellationToken ct) {
+        GetProcessDestinationsRequest request, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(request);
         var client = GetConnectedClient();
-        return await client.GetProcessDestinationsAsync(request, cancellationToken: ct);
+        return await client.GetProcessDestinationsAsync(request, cancellationToken: cancellationToken);
     }
 
     public async Task<GetCountryBreakdownResponse> GetCountryBreakdownAsync(
-        GetCountryBreakdownRequest request, CancellationToken ct) {
+        GetCountryBreakdownRequest request, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(request);
         var client = GetConnectedClient();
-        return await client.GetCountryBreakdownAsync(request, cancellationToken: ct);
+        return await client.GetCountryBreakdownAsync(request, cancellationToken: cancellationToken);
     }
 
     public async Task<GetProcessSummariesResponse> GetProcessSummariesAsync(
-        GetProcessSummariesRequest request, CancellationToken ct) {
+        GetProcessSummariesRequest request, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(request);
         var client = GetConnectedClient();
-        return await client.GetProcessSummariesAsync(request, cancellationToken: ct);
+        return await client.GetProcessSummariesAsync(request, cancellationToken: cancellationToken);
     }
 
-    public AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken ct) {
+    public AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken cancellationToken) {
         var client = GetConnectedClient();
-        return client.Subscribe(new SubscribeRequest(), cancellationToken: ct);
+        return client.Subscribe(new SubscribeRequest(), cancellationToken: cancellationToken);
     }
 
     public async ValueTask DisposeAsync() {

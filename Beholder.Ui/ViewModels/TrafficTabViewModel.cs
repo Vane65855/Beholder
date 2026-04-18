@@ -132,8 +132,8 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         } else {
             // Switching to historical mode — cancel any prior query and issue
             // a new one under a fresh token.
-            var ct = StartNewHistoricalQuery();
-            _ = LoadHistoricalRangeAsync(value, ct);
+            var cancellationToken = StartNewHistoricalQuery();
+            _ = LoadHistoricalRangeAsync(value, cancellationToken);
         }
     }
 
@@ -227,12 +227,12 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         _allProcessesItem.UpdateTraffic(allRecentIn, allRecentOut);
     }
 
-    private async Task LoadHistoricalRangeAsync(TimeRangeSelection range, CancellationToken ct) {
+    private async Task LoadHistoricalRangeAsync(TimeRangeSelection range, CancellationToken cancellationToken) {
         try {
             IsLoading = true;
             IsEmpty = false;
 
-            var result = await _historicalChartLoader.LoadRangeAsync(range, ct);
+            var result = await _historicalChartLoader.LoadRangeAsync(range, cancellationToken);
 
             // The user may have switched away while we were querying.
             if (SelectedTimeRange != range) return;
@@ -300,16 +300,16 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             // (or the aggregate if "All processes" is selected). Cancel any
             // prior in-flight historical query first so rapid process-switching
             // doesn't leave superseded daemon work running.
-            var ct = StartNewHistoricalQuery();
-            _ = LoadHistoricalChartForProcessAsync(SelectedTimeRange, value, ct);
+            var cancellationToken = StartNewHistoricalQuery();
+            _ = LoadHistoricalChartForProcessAsync(SelectedTimeRange, value, cancellationToken);
         }
     }
 
     private async Task LoadHistoricalChartForProcessAsync(
-        TimeRangeSelection range, ProcessListItem selected, CancellationToken ct) {
+        TimeRangeSelection range, ProcessListItem selected, CancellationToken cancellationToken) {
         try {
             var processPath = selected.IsAll ? null : selected.ProcessPath;
-            var result = await _historicalChartLoader.LoadProcessChartAsync(range, processPath, ct);
+            var result = await _historicalChartLoader.LoadProcessChartAsync(range, processPath, cancellationToken);
 
             if (SelectedTimeRange != range || SelectedProcess != selected) return;
 
