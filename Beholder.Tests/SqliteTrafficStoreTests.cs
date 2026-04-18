@@ -428,11 +428,17 @@ public class SqliteTrafficStoreTests : IDisposable {
         // Verify the stitched multi-tier query: each time slice of the range is
         // served by the finest tier whose retention covers that slice. Under the
         // Balanced preset at BaseTime:
-        //   - raw (retention 10min) serves [now-10min, now)
-        //   - _10s (retention 7d) serves [now-7d, now-10min)
-        //   - _1m (retention 14d) serves [now-14d, now-7d)
-        // Seed one distinguishable row in each tier, query the full 14d range,
-        // and verify all three rows appear at their expected timestamps.
+        //   - raw   (retention 10min) serves [now-10min, now)
+        //   - _10s  (retention 7d)    serves [now-7d,    now-10min)
+        //   - _1m   (retention 14d)   serves [now-14d,   now-7d)
+        //   - _10m  (retention 365d)  serves [now-365d,  now-14d)
+        //   - _1h   (retention null)  serves [everything older, now-365d)
+        // Seed one distinguishable row in each tier and query back 600 days so
+        // the _1h slice is actually included in the request — this exercises
+        // the null-retention branch in the slicing logic (SqliteTrafficStore.cs
+        // at the `tier.Retention is null` check). Extent across the 5 seeded
+        // rows is ~500 days, which rounds up past the coarsest NiceResolutionsMs
+        // entry (1 day), so each row falls into its own 1-day output bucket.
         var databasePath = Path.Combine(_tempDir, "beholder.db");
         var connectionFactory = new ConnectionFactory(databasePath, pooling: false);
 
@@ -451,21 +457,30 @@ public class SqliteTrafficStoreTests : IDisposable {
             bucketStart: BaseTime.AddDays(-10), bucketSeconds: 60,
             bytesIn: 333, bytesOut: 33);
 
+        // _10m: 100 days ago (inside _10m's [14d, 365d] slice)
+        await InsertDirectAsync(connectionFactory, "traffic_buckets_10m",
+            bucketStart: BaseTime.AddDays(-100), bucketSeconds: 600,
+            bytesIn: 444, bytesOut: 44);
+
+        // _1h: 500 days ago (inside _1h's [365d, ∞) slice — null-retention branch)
+        await InsertDirectAsync(connectionFactory, "traffic_buckets_1h",
+            bucketStart: BaseTime.AddDays(-500), bucketSeconds: 3600,
+            bytesIn: 555, bytesOut: 55);
+
         var timeline = await _store.GetAggregateTimelineAsync(
-            BaseTime.AddDays(-14), BaseTime,
+            BaseTime.AddDays(-600), BaseTime,
             TimeSpan.FromMinutes(1),
             CancellationToken.None);
 
-        Assert.Equal(3, timeline.Count);
+        Assert.Equal(5, timeline.Count);
 
         // Ordered by timestamp (oldest → newest). Verify each tier's row came
         // from the correct tier by checking the byte values we seeded.
-        Assert.Equal(333, timeline[0].BytesIn);  // from _1m
-        Assert.Equal(33, timeline[0].BytesOut);
-        Assert.Equal(222, timeline[1].BytesIn);  // from _10s
-        Assert.Equal(22, timeline[1].BytesOut);
-        Assert.Equal(111, timeline[2].BytesIn);  // from raw
-        Assert.Equal(11, timeline[2].BytesOut);
+        Assert.Equal(555, timeline[0].BytesIn);  Assert.Equal(55, timeline[0].BytesOut);  // _1h
+        Assert.Equal(444, timeline[1].BytesIn);  Assert.Equal(44, timeline[1].BytesOut);  // _10m
+        Assert.Equal(333, timeline[2].BytesIn);  Assert.Equal(33, timeline[2].BytesOut);  // _1m
+        Assert.Equal(222, timeline[3].BytesIn);  Assert.Equal(22, timeline[3].BytesOut);  // _10s
+        Assert.Equal(111, timeline[4].BytesIn);  Assert.Equal(11, timeline[4].BytesOut);  // raw
     }
 
     [Fact]
