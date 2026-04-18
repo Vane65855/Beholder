@@ -21,6 +21,12 @@ internal sealed class TrafficChartControl : Control {
     private const int MaxYTicks = 5;
     private const int MaxXTicks = 6;
 
+    /// <summary>Alpha channel for series area fill — ~30% opacity over the theme's chart background.</summary>
+    private const byte FillAlpha = 77;
+
+    /// <summary>Font size for axis labels. Mirrors <c>FontSizeSmall</c> in the theme tokens.</summary>
+    private const double AxisLabelFontSize = 10;
+
     // Typeface is content-independent. Cached statically so FormattedText
     // construction at each tick avoids the FontManager resolution inside.
     private static readonly Typeface s_axisLabelTypeface = new(
@@ -163,7 +169,7 @@ internal sealed class TrafficChartControl : Control {
             var value = (long)(ratio * maxValue);
             var label = ByteFormatter.FormatRate(value);
             var text = new FormattedText(label, System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, s_axisLabelTypeface, 10, labelBrush);
+                FlowDirection.LeftToRight, s_axisLabelTypeface, AxisLabelFontSize, labelBrush);
             context.DrawText(text, new Point(left - text.Width - 6, y - text.Height / 2));
         }
     }
@@ -182,7 +188,7 @@ internal sealed class TrafficChartControl : Control {
             var secondsAgo = (1.0 - ratio) * totalSeconds;
             var label = FormatTimeLabel(secondsAgo, totalSeconds);
             var text = new FormattedText(label, System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, s_axisLabelTypeface, 10, labelBrush);
+                FlowDirection.LeftToRight, s_axisLabelTypeface, AxisLabelFontSize, labelBrush);
             var x = left + ratio * width - text.Width / 2;
             context.DrawText(text, new Point(x, bottom + 6));
         }
@@ -356,7 +362,7 @@ internal sealed class TrafficChartControl : Control {
     private SeriesResources GetSeriesResources(Color color) {
         if (_seriesCache.TryGetValue(color, out var cached)) return cached;
         var stroke = new SolidColorBrush(color);
-        var fillColor = Color.FromArgb(77, color.R, color.G, color.B);
+        var fillColor = Color.FromArgb(FillAlpha, color.R, color.G, color.B);
         var fill = new SolidColorBrush(fillColor);
         var pen = new Pen(stroke, 1.5);
         cached = new SeriesResources(fill, stroke, pen);

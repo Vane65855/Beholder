@@ -14,6 +14,22 @@ namespace Beholder.Ui.Services;
 /// state orchestration but stops mixing network I/O with presentation logic.
 /// </summary>
 internal sealed class HistoricalChartLoader {
+    /// <summary>
+    /// Target number of output buckets per chart. The UI-side resolution hint
+    /// is the requested range divided by this target; the daemon treats it as
+    /// advisory and derives the real bucket width from actual data extent.
+    /// 300 was picked to comfortably fill a 1280+ px wide chart with visible
+    /// buckets.
+    /// </summary>
+    private const int TargetOutputBuckets = 300;
+
+    /// <summary>
+    /// Floor on the computed resolution hint. Degenerate small ranges (e.g.,
+    /// a 30-second custom pick) would otherwise request sub-second resolution,
+    /// which no tier serves — 1s is the finest tier's native width.
+    /// </summary>
+    private const long MinResolutionMs = 1000;
+
     private readonly IDaemonClient _daemonClient;
 
     public HistoricalChartLoader(IDaemonClient daemonClient) {
@@ -73,7 +89,7 @@ internal sealed class HistoricalChartLoader {
 
     private static long ComputeResolutionMs(TimeRangeSelection range) {
         var spanMs = (long)(range.To - range.From).TotalMilliseconds;
-        return Math.Max(spanMs / 300, 1000);
+        return Math.Max(spanMs / TargetOutputBuckets, MinResolutionMs);
     }
 
     private static GetAggregateTimelineRequest BuildAggregateTimelineRequest(
