@@ -8,7 +8,16 @@ using Microsoft.Extensions.Logging;
 namespace Beholder.Ui.Services;
 
 internal sealed class DaemonStreamSubscriber : IAsyncDisposable {
+    /// <summary>
+    /// Delay between failed stream-consume iterations. Prevents tight-loop
+    /// retry if <c>Subscribe</c> repeatedly fails (e.g., channel open but
+    /// server rejects every stream). DaemonClient handles the connection
+    /// layer's exponential backoff; this flat delay is a belt on top.
+    /// </summary>
+    private static readonly TimeSpan StreamFailureBackoff = TimeSpan.FromSeconds(1);
+
     private readonly IDaemonClient _daemonClient;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<DaemonStreamSubscriber> _logger;
     private CancellationTokenSource? _cts;
     private Task? _consumeTask;
@@ -27,10 +36,13 @@ internal sealed class DaemonStreamSubscriber : IAsyncDisposable {
 
     public DaemonStreamSubscriber(
         IDaemonClient daemonClient,
+        TimeProvider timeProvider,
         ILogger<DaemonStreamSubscriber> logger) {
         ArgumentNullException.ThrowIfNull(daemonClient);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _daemonClient = daemonClient;
+        _timeProvider = timeProvider;
         _logger = logger;
     }
 
@@ -64,6 +76,17 @@ internal sealed class DaemonStreamSubscriber : IAsyncDisposable {
             if (OnConnected is not null)
                 await OnConnected(cancellationToken);
             await ConsumeStream(cancellationToken);
+
+            // Brief backoff before re-entering WaitForConnected →
+            // ConsumeStream. Guards against a tight re-subscribe loop if
+            // the server accepts the connection but rejects Subscribe
+            // repeatedly — DaemonClient's exponential backoff only covers
+            // the channel-open path, not per-stream failures.
+            try {
+                await Task.Delay(StreamFailureBackoff, _timeProvider, cancellationToken);
+            } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                return;
+            }
         }
     }
 

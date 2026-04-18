@@ -10,15 +10,16 @@ public class ProcessStateServiceTests {
         var fakeClient = new FakeDaemonClient();
         var subscriber = new DaemonStreamSubscriber(
             fakeClient,
+            TimeProvider.System,
             NullLogger<DaemonStreamSubscriber>.Instance);
-        var service = new ProcessStateService(subscriber, fakeClient);
+        var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
         return (service, subscriber);
     }
 
     [Fact]
     public void Ctor_NullSubscriber_Throws() =>
         Assert.Throws<ArgumentNullException>("subscriber",
-            () => new ProcessStateService(null!, new FakeDaemonClient()));
+            () => new ProcessStateService(null!, new FakeDaemonClient(), TimeProvider.System));
 
     [Fact]
     public void OnCounterBatch_SingleProcess_TracksState() {
@@ -191,8 +192,9 @@ public class ProcessStateServiceTests {
         var fakeClient = new FakeDaemonClient();
         var subscriber = new DaemonStreamSubscriber(
             fakeClient,
+            TimeProvider.System,
             NullLogger<DaemonStreamSubscriber>.Instance);
-        var service = new ProcessStateService(subscriber, fakeClient);
+        var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
         return (service, fakeClient);
     }
 

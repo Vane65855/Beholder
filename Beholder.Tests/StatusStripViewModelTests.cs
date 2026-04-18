@@ -17,8 +17,9 @@ public class StatusStripViewModelTests {
         var fakeClient = new FakeDaemonClient();
         var subscriber = new DaemonStreamSubscriber(
             fakeClient,
+            TimeProvider.System,
             NullLogger<DaemonStreamSubscriber>.Instance);
-        var service = new ProcessStateService(subscriber, fakeClient);
+        var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
         var vm = new StatusStripViewModel(service);
         return (vm, service);
     }

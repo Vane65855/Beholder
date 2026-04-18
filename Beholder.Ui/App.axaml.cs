@@ -33,9 +33,11 @@ public partial class App : Application {
 
             _streamSubscriber = new DaemonStreamSubscriber(
                 _daemonClient,
+                TimeProvider.System,
                 loggerFactory.CreateLogger<DaemonStreamSubscriber>());
 
-            _processStateService = new ProcessStateService(_streamSubscriber, _daemonClient);
+            _processStateService = new ProcessStateService(
+                _streamSubscriber, _daemonClient, TimeProvider.System);
             _streamSubscriber.OnConnected = ct => _processStateService.SeedAsync(ct);
             var statusStripVm = new StatusStripViewModel(_processStateService);
             var historicalChartLoader = new HistoricalChartLoader(_daemonClient);

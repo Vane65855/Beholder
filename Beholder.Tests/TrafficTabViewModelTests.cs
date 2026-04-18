@@ -13,8 +13,9 @@ public class TrafficTabViewModelTests {
         var fakeClient = new FakeDaemonClient();
         var subscriber = new DaemonStreamSubscriber(
             fakeClient,
+            TimeProvider.System,
             NullLogger<DaemonStreamSubscriber>.Instance);
-        var service = new ProcessStateService(subscriber, fakeClient);
+        var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
         var loader = new HistoricalChartLoader(fakeClient);
         return new TrafficTabViewModel(fakeClient, service, loader);
     }
@@ -341,8 +342,9 @@ public class TrafficTabViewModelTests {
         var fakeClient = new FakeDaemonClient();
         var subscriber = new DaemonStreamSubscriber(
             fakeClient,
+            TimeProvider.System,
             NullLogger<DaemonStreamSubscriber>.Instance);
-        var service = new ProcessStateService(subscriber, fakeClient);
+        var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
         var loader = new HistoricalChartLoader(fakeClient);
         var vm = new TrafficTabViewModel(fakeClient, service, loader);
         return (vm, fakeClient);

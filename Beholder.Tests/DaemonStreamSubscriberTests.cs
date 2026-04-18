@@ -10,13 +10,14 @@ public class DaemonStreamSubscriberTests {
         Assert.Throws<ArgumentNullException>("daemonClient",
             () => new DaemonStreamSubscriber(
                 null!,
+                TimeProvider.System,
                 NullLogger<DaemonStreamSubscriber>.Instance));
 
     [Fact]
     public void Ctor_NullLogger_Throws() {
         var fakeClient = new FakeDaemonClient();
         Assert.Throws<ArgumentNullException>("logger",
-            () => new DaemonStreamSubscriber(fakeClient, null!));
+            () => new DaemonStreamSubscriber(fakeClient, TimeProvider.System, null!));
     }
 
     [Fact]
@@ -25,6 +26,7 @@ public class DaemonStreamSubscriberTests {
         var fakeClient = new FakeDaemonClient();
         var subscriber = new DaemonStreamSubscriber(
             fakeClient,
+            TimeProvider.System,
             NullLogger<DaemonStreamSubscriber>.Instance);
 
         CounterBatch? received = null;

@@ -108,8 +108,11 @@ internal sealed class DaemonClient : IDaemonClient {
                 await client.GetSnapshotAsync(new GetSnapshotRequest(), cancellationToken: cancellationToken);
             } catch (OperationCanceledException) {
                 throw;
-            } catch {
-                _logger.LogWarning("Lost connection to daemon");
+            } catch (Exception ex) {
+                // Capture the exception reason for the log — otherwise an
+                // unexpected type (e.g., NullReferenceException during channel
+                // teardown) exits the monitor loop with no diagnostic.
+                _logger.LogWarning("Lost connection to daemon: {Reason}", ex.Message);
                 return;
             }
         }

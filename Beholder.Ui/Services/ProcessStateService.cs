@@ -26,6 +26,7 @@ namespace Beholder.Ui.Services;
 internal sealed class ProcessStateService : IDisposable {
     private readonly IDaemonClient _daemonClient;
     private readonly DaemonStreamSubscriber _subscriber;
+    private readonly TimeProvider _timeProvider;
     private readonly Dictionary<string, ProcessState> _states = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -35,11 +36,17 @@ internal sealed class ProcessStateService : IDisposable {
     /// </summary>
     public event Action<IReadOnlyDictionary<string, ProcessState>>? ProcessStatesUpdated;
 
-    public ProcessStateService(DaemonStreamSubscriber subscriber, IDaemonClient daemonClient) {
+    public ProcessStateService(
+        DaemonStreamSubscriber subscriber,
+        IDaemonClient daemonClient,
+        TimeProvider timeProvider
+    ) {
         ArgumentNullException.ThrowIfNull(subscriber);
         ArgumentNullException.ThrowIfNull(daemonClient);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         _subscriber = subscriber;
         _daemonClient = daemonClient;
+        _timeProvider = timeProvider;
         _subscriber.CounterBatchReceived += OnCounterBatch;
     }
 
@@ -59,7 +66,7 @@ internal sealed class ProcessStateService : IDisposable {
             if (snapshot.Snapshots.Count == 0) return;
 
             _states.Clear();
-            var now = DateTimeOffset.UtcNow;
+            var now = _timeProvider.GetUtcNow();
             var from = now.AddMinutes(-5);
 
             foreach (var snap in snapshot.Snapshots) {
@@ -134,7 +141,7 @@ internal sealed class ProcessStateService : IDisposable {
             state.TotalBytesOut = snapshot.TotalBytesOut;
             state.DeltaBytesIn = snapshot.DeltaBytesIn;
             state.DeltaBytesOut = snapshot.DeltaBytesOut;
-            state.LastSeen = DateTimeOffset.UtcNow;
+            state.LastSeen = _timeProvider.GetUtcNow();
             state.RecentDeltaIn.Add(snapshot.DeltaBytesIn);
             state.RecentDeltaOut.Add(snapshot.DeltaBytesOut);
         }
