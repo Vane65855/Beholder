@@ -207,7 +207,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         }
     }
 
-    public override async Task<Local.GetProcessTimelineResponse> GetProcessTimeline(
+    public override Task<Local.GetProcessTimelineResponse> GetProcessTimeline(
         Local.GetProcessTimelineRequest request, ServerCallContext context
     ) {
         if (string.IsNullOrWhiteSpace(request.ProcessPath))
@@ -215,113 +215,120 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         if (request.ResolutionMs <= 0)
             throw new RpcException(new Status(StatusCode.InvalidArgument, "resolution_ms must be positive"));
 
-        try {
+        return ExecuteQueryAsync(nameof(GetProcessTimeline), async cancellationToken => {
             var from = request.FromUnixNs.FromUnixTimeNanoseconds();
             var to = request.ToUnixNs.FromUnixTimeNanoseconds();
             var resolution = TimeSpan.FromMilliseconds(request.ResolutionMs);
 
             var points = await _trafficStore.GetProcessTimelineAsync(
-                request.ProcessPath, from, to, resolution, context.CancellationToken)
+                request.ProcessPath, from, to, resolution, cancellationToken)
                 .ConfigureAwait(false);
 
             var response = new Local.GetProcessTimelineResponse();
             foreach (var point in points) response.Points.Add(point.ToProto());
             return response;
-        } catch (Exception ex) when (ex is not RpcException) {
-            _logger.LogError(ex, "GetProcessTimeline failed");
-            throw new RpcException(new Status(StatusCode.Internal,
-                $"Failed to get process timeline: {ex.Message}"));
-        }
+        }, context);
     }
 
-    public override async Task<Local.GetProcessDestinationsResponse> GetProcessDestinations(
+    public override Task<Local.GetProcessDestinationsResponse> GetProcessDestinations(
         Local.GetProcessDestinationsRequest request, ServerCallContext context
     ) {
         if (string.IsNullOrWhiteSpace(request.ProcessPath))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "process_path is required"));
 
-        try {
+        return ExecuteQueryAsync(nameof(GetProcessDestinations), async cancellationToken => {
             var from = request.FromUnixNs.FromUnixTimeNanoseconds();
             var to = request.ToUnixNs.FromUnixTimeNanoseconds();
 
             var destinations = await _trafficStore.GetProcessDestinationsAsync(
-                request.ProcessPath, from, to, context.CancellationToken)
+                request.ProcessPath, from, to, cancellationToken)
                 .ConfigureAwait(false);
 
             var response = new Local.GetProcessDestinationsResponse();
             foreach (var dest in destinations) response.Destinations.Add(dest.ToProto());
             return response;
-        } catch (Exception ex) when (ex is not RpcException) {
-            _logger.LogError(ex, "GetProcessDestinations failed");
-            throw new RpcException(new Status(StatusCode.Internal,
-                $"Failed to get process destinations: {ex.Message}"));
-        }
+        }, context);
     }
 
-    public override async Task<Local.GetAggregateTimelineResponse> GetAggregateTimeline(
+    public override Task<Local.GetAggregateTimelineResponse> GetAggregateTimeline(
         Local.GetAggregateTimelineRequest request, ServerCallContext context
     ) {
         if (request.ResolutionMs <= 0)
             throw new RpcException(new Status(StatusCode.InvalidArgument, "resolution_ms must be positive"));
 
-        try {
+        return ExecuteQueryAsync(nameof(GetAggregateTimeline), async cancellationToken => {
             var from = request.FromUnixNs.FromUnixTimeNanoseconds();
             var to = request.ToUnixNs.FromUnixTimeNanoseconds();
             var resolution = TimeSpan.FromMilliseconds(request.ResolutionMs);
 
             var points = await _trafficStore.GetAggregateTimelineAsync(
-                from, to, resolution, context.CancellationToken)
+                from, to, resolution, cancellationToken)
                 .ConfigureAwait(false);
 
             var response = new Local.GetAggregateTimelineResponse();
             foreach (var point in points) response.Points.Add(point.ToProto());
             return response;
-        } catch (Exception ex) when (ex is not RpcException) {
-            _logger.LogError(ex, "GetAggregateTimeline failed");
-            throw new RpcException(new Status(StatusCode.Internal,
-                $"Failed to get aggregate timeline: {ex.Message}"));
-        }
+        }, context);
     }
 
-    public override async Task<Local.GetCountryBreakdownResponse> GetCountryBreakdown(
+    public override Task<Local.GetCountryBreakdownResponse> GetCountryBreakdown(
         Local.GetCountryBreakdownRequest request, ServerCallContext context
-    ) {
-        try {
-            var from = request.FromUnixNs.FromUnixTimeNanoseconds();
-            var to = request.ToUnixNs.FromUnixTimeNanoseconds();
+    ) => ExecuteQueryAsync(nameof(GetCountryBreakdown), async cancellationToken => {
+        var from = request.FromUnixNs.FromUnixTimeNanoseconds();
+        var to = request.ToUnixNs.FromUnixTimeNanoseconds();
 
-            var breakdown = await _trafficStore.GetCountryBreakdownAsync(
-                from, to, context.CancellationToken)
-                .ConfigureAwait(false);
+        var breakdown = await _trafficStore.GetCountryBreakdownAsync(
+            from, to, cancellationToken)
+            .ConfigureAwait(false);
 
-            var response = new Local.GetCountryBreakdownResponse();
-            foreach (var summary in breakdown) response.Countries.Add(summary.ToProto());
-            return response;
-        } catch (Exception ex) when (ex is not RpcException) {
-            _logger.LogError(ex, "GetCountryBreakdown failed");
-            throw new RpcException(new Status(StatusCode.Internal,
-                $"Failed to get country breakdown: {ex.Message}"));
-        }
-    }
+        var response = new Local.GetCountryBreakdownResponse();
+        foreach (var summary in breakdown) response.Countries.Add(summary.ToProto());
+        return response;
+    }, context);
 
-    public override async Task<Local.GetProcessSummariesResponse> GetProcessSummaries(
+    public override Task<Local.GetProcessSummariesResponse> GetProcessSummaries(
         Local.GetProcessSummariesRequest request, ServerCallContext context
+    ) => ExecuteQueryAsync(nameof(GetProcessSummaries), async cancellationToken => {
+        var from = request.FromUnixNs.FromUnixTimeNanoseconds();
+        var to = request.ToUnixNs.FromUnixTimeNanoseconds();
+
+        var summaries = await _trafficStore.GetProcessSummariesAsync(
+            from, to, cancellationToken)
+            .ConfigureAwait(false);
+
+        var response = new Local.GetProcessSummariesResponse();
+        foreach (var summary in summaries) response.Summaries.Add(summary.ToProto());
+        return response;
+    }, context);
+
+    /// <summary>
+    /// Runs a query RPC's inner work with unified exception classification.
+    /// <see cref="ArgumentOutOfRangeException"/> (inverted ranges from store
+    /// guards) and <see cref="ArgumentException"/> (whitespace string guards)
+    /// surface as <see cref="StatusCode.InvalidArgument"/>; anything else is
+    /// logged and surfaced as <see cref="StatusCode.Internal"/>.
+    /// <see cref="OperationCanceledException"/> and existing
+    /// <see cref="RpcException"/>s propagate untouched.
+    /// </summary>
+    private async Task<TResponse> ExecuteQueryAsync<TResponse>(
+        string rpcName,
+        Func<CancellationToken, Task<TResponse>> query,
+        ServerCallContext context
     ) {
         try {
-            var from = request.FromUnixNs.FromUnixTimeNanoseconds();
-            var to = request.ToUnixNs.FromUnixTimeNanoseconds();
-
-            var summaries = await _trafficStore.GetProcessSummariesAsync(
-                from, to, context.CancellationToken)
-                .ConfigureAwait(false);
-
-            var response = new Local.GetProcessSummariesResponse();
-            foreach (var summary in summaries) response.Summaries.Add(summary.ToProto());
-            return response;
-        } catch (Exception ex) when (ex is not RpcException) {
-            _logger.LogError(ex, "GetProcessSummaries failed");
+            return await query(context.CancellationToken).ConfigureAwait(false);
+        } catch (OperationCanceledException) {
+            throw;
+        } catch (RpcException) {
+            throw;
+        } catch (ArgumentOutOfRangeException ex) {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        } catch (ArgumentException ex) {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        } catch (Exception ex) {
+            _logger.LogError(ex, "{Rpc} failed", rpcName);
             throw new RpcException(new Status(StatusCode.Internal,
-                $"Failed to get process summaries: {ex.Message}"));
+                $"{rpcName} failed: {ex.Message}"));
         }
     }
 }
