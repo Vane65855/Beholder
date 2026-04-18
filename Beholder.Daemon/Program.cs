@@ -62,7 +62,8 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<ITrafficStore>(sp => sp.GetRequiredService<SqliteTrafficStore>());
     builder.Services.AddSingleton<SqliteDnsCacheStore>();
     builder.Services.AddSingleton<IDnsCacheStore>(sp => sp.GetRequiredService<SqliteDnsCacheStore>());
-    builder.Services.AddSingleton<TrafficStorageOptions>();
+    builder.Services.Configure<TrafficStorageOptions>(
+        builder.Configuration.GetSection("TrafficStorage"));
     builder.Services.Configure<RecordingOptions>(
         builder.Configuration.GetSection("Recording"));
     builder.Services.Configure<RollupOptions>(

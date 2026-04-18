@@ -37,7 +37,7 @@ public sealed class GetAggregateTimelineRpcTests : IDisposable {
         var pipeline = new FlowEventPipeline(
             new FakeFlowSource(), timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
-            new TrafficStorageOptions(),
+            new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
             new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
 

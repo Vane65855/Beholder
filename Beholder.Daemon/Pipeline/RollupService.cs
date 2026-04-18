@@ -28,6 +28,15 @@ namespace Beholder.Daemon.Pipeline;
 /// overlapping retained range) is the acceptance criterion. See
 /// <c>RollupServiceTests.RollupInvariant_Holds_AcrossAllTiers</c>.
 /// </para>
+/// <para>
+/// Live preset reload: <see cref="_options"/> is an <see cref="IOptionsMonitor{TOptions}"/>
+/// and <c>CurrentValue</c> is re-read on each tick, so preset changes applied
+/// via <c>appsettings.json</c> take effect on the next tick — not mid-tick.
+/// In-flight cascade work on a tier completes against the tier list observed
+/// at its start-of-tick. Subsequent ticks use the new preset's tier list and
+/// retentions. There is no atomic mid-operation switch; the flip may cause
+/// one tick's worth of data to be retained under the older preset's boundaries.
+/// </para>
 /// </remarks>
 internal sealed class RollupService : IHostedService, IAsyncDisposable {
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(10);

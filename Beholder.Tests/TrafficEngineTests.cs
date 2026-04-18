@@ -184,7 +184,7 @@ public class TrafficEngineTests {
         var engine = new TrafficEngine(
             channel.Reader, fakeTime,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
-            new TrafficStorageOptions(),
+            new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
             NullLogger<TrafficEngine>.Instance);
         using var cts = new CancellationTokenSource();
 
@@ -335,7 +335,7 @@ public class TrafficEngineTests {
             trafficStore: new FakeTrafficStore(),
             dnsCacheStore: new FakeDnsCacheStore(),
             dnsCache: new FakeDnsCache(),
-            options: new TrafficStorageOptions(),
+            options: new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
             logger: NullLogger<TrafficEngine>.Instance));
     }
 
@@ -348,7 +348,7 @@ public class TrafficEngineTests {
             trafficStore: new FakeTrafficStore(),
             dnsCacheStore: new FakeDnsCacheStore(),
             dnsCache: new FakeDnsCache(),
-            options: new TrafficStorageOptions(),
+            options: new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
             logger: NullLogger<TrafficEngine>.Instance));
     }
 
@@ -361,7 +361,7 @@ public class TrafficEngineTests {
             trafficStore: null!,
             dnsCacheStore: new FakeDnsCacheStore(),
             dnsCache: new FakeDnsCache(),
-            options: new TrafficStorageOptions(),
+            options: new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
             logger: NullLogger<TrafficEngine>.Instance));
     }
 
@@ -374,7 +374,7 @@ public class TrafficEngineTests {
             trafficStore: new FakeTrafficStore(),
             dnsCacheStore: new FakeDnsCacheStore(),
             dnsCache: new FakeDnsCache(),
-            options: new TrafficStorageOptions(),
+            options: new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
             logger: null!));
     }
 
@@ -443,7 +443,7 @@ public class TrafficEngineTests {
                 trafficStore ?? new FakeTrafficStore(),
                 dnsCacheStore ?? new FakeDnsCacheStore(),
                 dnsCache ?? new FakeDnsCache(),
-                new TrafficStorageOptions(),
+                new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
                 NullLogger<TrafficEngine>.Instance);
             return new Fixture(channel, fakeTime, engine);
         }

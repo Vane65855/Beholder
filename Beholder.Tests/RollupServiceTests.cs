@@ -312,4 +312,22 @@ public class RollupServiceTests : IDisposable {
         Assert.True(CountRows("traffic_buckets_10s") > 0);
         Assert.True(CountRows("traffic_buckets_1m") > 0);
     }
+
+    [Fact]
+    public void PresetSwitchedLive_NextCurrentValueRead_ReflectsNewPreset() {
+        // Locks in the live-reload contract documented in RollupService's
+        // XML remarks: preset changes applied via appsettings.json take
+        // effect on the next read of CurrentValue (i.e. next rollup tick
+        // or next store query). The test does NOT assert race-free mid-
+        // operation behavior — that's the documented gap, not a contract.
+        var tiersBefore = _options.CurrentValue.Tiers;
+        // Balanced: _10s retention = 7d
+        Assert.Equal(TimeSpan.FromDays(7), tiersBefore[1].Retention);
+
+        _options.Set(new RollupOptions { Preset = RetentionPreset.Compact });
+
+        var tiersAfter = _options.CurrentValue.Tiers;
+        // Compact: _10s retention = 3d
+        Assert.Equal(TimeSpan.FromDays(3), tiersAfter[1].Retention);
+    }
 }

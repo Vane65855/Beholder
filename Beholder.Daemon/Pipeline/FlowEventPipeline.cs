@@ -49,7 +49,7 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
         ITrafficStore trafficStore,
         IDnsCacheStore dnsCacheStore,
         IDnsCache dnsCache,
-        TrafficStorageOptions options,
+        IOptionsMonitor<TrafficStorageOptions> options,
         IOptionsMonitor<RecordingOptions> recordingOptions,
         ILogger<FlowEventPipeline> logger,
         ILoggerFactory loggerFactory

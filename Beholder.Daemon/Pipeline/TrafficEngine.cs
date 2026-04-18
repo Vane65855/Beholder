@@ -2,6 +2,7 @@ using System.Net;
 using System.Threading.Channels;
 using Beholder.Core;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Beholder.Daemon.Pipeline;
 
@@ -28,7 +29,7 @@ internal sealed class TrafficEngine {
     private readonly ITrafficStore _trafficStore;
     private readonly IDnsCacheStore _dnsCacheStore;
     private readonly IDnsCache _dnsCache;
-    private readonly TrafficStorageOptions _options;
+    private readonly IOptionsMonitor<TrafficStorageOptions> _options;
     private readonly ILogger<TrafficEngine> _logger;
 
     private readonly Dictionary<DestinationKey, DestinationAggregate> _destinations = new();
@@ -46,7 +47,7 @@ internal sealed class TrafficEngine {
         ITrafficStore trafficStore,
         IDnsCacheStore dnsCacheStore,
         IDnsCache dnsCache,
-        TrafficStorageOptions options,
+        IOptionsMonitor<TrafficStorageOptions> options,
         ILogger<TrafficEngine> logger
     ) {
         ArgumentNullException.ThrowIfNull(reader);
@@ -329,7 +330,7 @@ internal sealed class TrafficEngine {
     }
 
     private void EvictIdleDestinations(DateTimeOffset now) {
-        var idleThreshold = now - TimeSpan.FromMinutes(_options.IdleDestinationTimeoutMinutes);
+        var idleThreshold = now - TimeSpan.FromMinutes(_options.CurrentValue.IdleDestinationTimeoutMinutes);
         var toRemove = new List<DestinationKey>();
 
         foreach (var (key, dest) in _destinations) {
@@ -349,7 +350,7 @@ internal sealed class TrafficEngine {
     }
 
     private void EvictIdleProcessTotals(DateTimeOffset now) {
-        var idleThreshold = now - TimeSpan.FromHours(_options.IdleProcessTimeoutHours);
+        var idleThreshold = now - TimeSpan.FromHours(_options.CurrentValue.IdleProcessTimeoutHours);
         var toRemove = new List<string>();
 
         foreach (var (path, totals) in _processLifetimeTotals) {
