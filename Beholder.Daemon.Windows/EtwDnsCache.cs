@@ -71,7 +71,15 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
                 session.Source.Dynamic.All += OnEtwEvent;
                 _processingTask = Task.Run(() => session.Source.Process());
                 _session = session;
-            } catch {
+            } catch (Exception ex) {
+                // EnableProvider is the path that actually throws
+                // UnauthorizedAccessException when the daemon isn't elevated —
+                // session construction at line 61 succeeds unelevated on Windows.
+                // Emit the admin hint here so the user sees it in the stack
+                // trace they'll actually encounter.
+                _logger.LogError(
+                    ex,
+                    "DNS ETW provider enable failed — ensure the daemon is running as Administrator");
                 session.Dispose();
                 throw;
             }

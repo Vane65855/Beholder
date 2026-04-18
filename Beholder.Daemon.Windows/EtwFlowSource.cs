@@ -74,7 +74,15 @@ public sealed class EtwFlowSource : IFlowSource, IAsyncDisposable, IDisposable {
                 kernel.UdpIpRecvIPV6 += OnUdpRecvV6;
                 _processingTask = Task.Run(() => session.Source.Process());
                 _session = session;
-            } catch {
+            } catch (Exception ex) {
+                // EnableKernelProvider is the path that actually throws
+                // UnauthorizedAccessException when unelevated — kernel session
+                // construction above can succeed without Administrator. Emit
+                // the admin hint here so the user sees it in the stack trace
+                // path they'll actually encounter.
+                _logger.LogError(
+                    ex,
+                    "ETW kernel provider enable failed — ensure the daemon is running as Administrator");
                 session.Dispose();
                 throw;
             }
