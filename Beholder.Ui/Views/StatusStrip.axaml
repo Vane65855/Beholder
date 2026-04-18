@@ -44,6 +44,7 @@
                     HorizontalAlignment="Stretch"
                     Margin="24,0"
                     MinWidth="100"
+                    MaxWidth="400"
                     ToolTip.Tip="Download/upload ratio. Teal = download share, purple = upload share.">
                 <Grid IsVisible="{Binding HasTraffic}">
                     <Grid.ColumnDefinitions>
