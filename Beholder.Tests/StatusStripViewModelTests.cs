@@ -6,6 +6,13 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Beholder.Tests;
 
 public class StatusStripViewModelTests {
+    // Fixed instant used for test-data LastSeen stamps — value doesn't matter
+    // for these tests (they don't assert on relative time), but fixing it
+    // removes wall-clock coupling that would show as spurious flake under
+    // clock skew.
+    private static readonly DateTimeOffset FixedLastSeen =
+        new(2026, 4, 10, 12, 0, 0, TimeSpan.Zero);
+
     private static (StatusStripViewModel Vm, ProcessStateService Service) CreateViewModelWithService() {
         var fakeClient = new FakeDaemonClient();
         var subscriber = new DaemonStreamSubscriber(
@@ -27,7 +34,7 @@ public class StatusStripViewModelTests {
                 TotalBytesOut = totalOut,
                 DeltaBytesIn = deltaIn,
                 DeltaBytesOut = deltaOut,
-                LastSeen = DateTimeOffset.UtcNow,
+                LastSeen = FixedLastSeen,
             };
         }
         return dict;

@@ -1,9 +1,14 @@
 using Beholder.Daemon.Storage;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Beholder.Tests;
 
 public class SqliteDnsCacheStoreTests : IDisposable {
+    private static readonly DateTimeOffset BaseTime =
+        new(2026, 4, 15, 12, 0, 0, TimeSpan.Zero);
+
     private readonly string _tempDir;
+    private readonly FakeTimeProvider _timeProvider;
     private readonly SqliteDnsCacheStore _store;
 
     public SqliteDnsCacheStoreTests() {
@@ -11,7 +16,8 @@ public class SqliteDnsCacheStoreTests : IDisposable {
         var databasePath = Path.Combine(_tempDir, "beholder.db");
         new DatabaseInitializer(databasePath, pooling: false).Initialize();
         var connectionFactory = new ConnectionFactory(databasePath, pooling: false);
-        _store = new SqliteDnsCacheStore(connectionFactory);
+        _timeProvider = new FakeTimeProvider(BaseTime);
+        _store = new SqliteDnsCacheStore(connectionFactory, _timeProvider);
     }
 
     public void Dispose() {
@@ -70,7 +76,7 @@ public class SqliteDnsCacheStoreTests : IDisposable {
             [("1.1.1.1", "example.com")], CancellationToken.None);
 
         var deleted = await _store.PruneAsync(
-            DateTimeOffset.UtcNow.AddMinutes(1), CancellationToken.None);
+            BaseTime.AddMinutes(1), CancellationToken.None);
 
         Assert.Equal(1, deleted);
         Assert.Null(await _store.ResolveAsync("1.1.1.1", CancellationToken.None));
@@ -82,7 +88,7 @@ public class SqliteDnsCacheStoreTests : IDisposable {
             [("1.1.1.1", "example.com")], CancellationToken.None);
 
         var deleted = await _store.PruneAsync(
-            DateTimeOffset.UtcNow.AddMinutes(-1), CancellationToken.None);
+            BaseTime.AddMinutes(-1), CancellationToken.None);
 
         Assert.Equal(0, deleted);
         Assert.Equal("example.com", await _store.ResolveAsync("1.1.1.1", CancellationToken.None));
@@ -91,7 +97,7 @@ public class SqliteDnsCacheStoreTests : IDisposable {
     [Fact]
     public async Task PruneAsync_NothingToDelete_ReturnsZero() {
         var deleted = await _store.PruneAsync(
-            DateTimeOffset.UtcNow, CancellationToken.None);
+            BaseTime, CancellationToken.None);
 
         Assert.Equal(0, deleted);
     }

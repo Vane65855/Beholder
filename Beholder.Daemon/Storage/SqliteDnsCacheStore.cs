@@ -10,10 +10,13 @@ namespace Beholder.Daemon.Storage;
 /// </summary>
 internal sealed class SqliteDnsCacheStore : IDnsCacheStore {
     private readonly ConnectionFactory _connectionFactory;
+    private readonly TimeProvider _timeProvider;
 
-    public SqliteDnsCacheStore(ConnectionFactory connectionFactory) {
+    public SqliteDnsCacheStore(ConnectionFactory connectionFactory, TimeProvider timeProvider) {
         ArgumentNullException.ThrowIfNull(connectionFactory);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         _connectionFactory = connectionFactory;
+        _timeProvider = timeProvider;
     }
 
     public async Task UpsertBatchAsync(
@@ -42,7 +45,7 @@ internal sealed class SqliteDnsCacheStore : IDnsCacheStore {
 
         command.Prepare();
 
-        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
         foreach (var (address, hostname) in entries) {
             pAddress.Value = address;
             pHostname.Value = hostname;
