@@ -22,6 +22,8 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? ProcessTimelineException { get; set; }
     public Exception? AggregateTimelineException { get; set; }
     public Exception? ProcessSummariesException { get; set; }
+    public Exception? ProcessDestinationsException { get; set; }
+    public Exception? CountryBreakdownException { get; set; }
 
     // Optional canned snapshot/response bodies so tests can drive real data
     // through the seeding path. Existing callers that don't set these get the
@@ -95,12 +97,16 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     }
 
     public Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(
-        GetProcessDestinationsRequest request, CancellationToken cancellationToken) =>
-        Task.FromResult(new GetProcessDestinationsResponse());
+        GetProcessDestinationsRequest request, CancellationToken cancellationToken) {
+        if (ProcessDestinationsException is not null) throw ProcessDestinationsException;
+        return Task.FromResult(new GetProcessDestinationsResponse());
+    }
 
     public Task<GetCountryBreakdownResponse> GetCountryBreakdownAsync(
-        GetCountryBreakdownRequest request, CancellationToken cancellationToken) =>
-        Task.FromResult(new GetCountryBreakdownResponse());
+        GetCountryBreakdownRequest request, CancellationToken cancellationToken) {
+        if (CountryBreakdownException is not null) throw CountryBreakdownException;
+        return Task.FromResult(new GetCountryBreakdownResponse());
+    }
 
     public Task<GetProcessSummariesResponse> GetProcessSummariesAsync(
         GetProcessSummariesRequest request, CancellationToken cancellationToken) {

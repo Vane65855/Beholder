@@ -43,6 +43,9 @@ internal static class ProtocolConverters {
     public static Core.RuleSource FromProto(this Local.RuleSource source)
         => (Core.RuleSource)(int)source;
 
+    public static Core.AlertKind FromProto(this Local.AlertKind source)
+        => (Core.AlertKind)(int)source;
+
     // ---- Value-message adapters (Core → Proto) ----
 
     /// <summary>Maps a counter snapshot onto its wire equivalent.</summary>

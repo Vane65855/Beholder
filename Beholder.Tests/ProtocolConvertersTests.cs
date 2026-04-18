@@ -132,7 +132,8 @@ public class ProtocolConvertersTests {
     [InlineData(Core.AlertKind.NewProcess)]
     [InlineData(Core.AlertKind.HashChanged)]
     [InlineData(Core.AlertKind.ChainError)]
-    public void AlertKind_ToProto_AllValues_MapToMatchingOrdinal(Core.AlertKind value) {
+    public void AlertKind_ToProto_And_FromProto_RoundTrip(Core.AlertKind value) {
+        Assert.Equal(value, value.ToProto().FromProto());
         Assert.Equal((int)value, (int)value.ToProto());
     }
 
