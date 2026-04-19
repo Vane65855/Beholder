@@ -29,17 +29,40 @@ schema that `DbIpProvider` actually reads:
 `DbIpProviderTests.Resolve_UnknownIp_ReturnsUnknown` exercises the
 "not in database" branch.
 
-### Regeneration
+### Regeneration (rare)
 
 The fixture is committed as a binary blob; regeneration is only needed
-when the schema or test coverage changes.
+when the schema or the table above changes. There is no maintained
+.NET NuGet package that *writes* MMDB files, so this one-shot offline
+step uses Python's [`mmdb_writer`](https://pypi.org/project/mmdb_writer/).
+
+Save the following as `generate-fixture.py` in this directory, run it
+once, commit the updated `beholder-test.mmdb`, and delete the script:
+
+```python
+from netaddr import IPNetwork, IPSet
+from mmdb_writer import MMDBWriter
+
+writer = MMDBWriter(
+    ip_version=6,
+    database_type="DB-IP-Country",
+    languages=["en"],
+    description={"en": "Beholder test fixture"},
+    ipv4_compatible=True,
+)
+writer.insert_network(IPSet([IPNetwork("8.8.8.8/32")]),   {"country": {"iso_code": "US"}})
+writer.insert_network(IPSet([IPNetwork("1.1.1.1/32")]),   {"country": {"iso_code": "AU"}})
+writer.insert_network(IPSet([IPNetwork("78.46.0.0/16")]), {"country": {"iso_code": "DE"}})
+writer.to_db_file("beholder-test.mmdb")
+```
+
+Then:
 
 ```
-pip install mmdb_writer
+pip install mmdb_writer netaddr
 python generate-fixture.py
+rm generate-fixture.py
 ```
 
-The generator script lives next to this file and uses
-[`mmdb_writer`](https://pypi.org/project/mmdb_writer/) — a pure-Python
-writer for the MaxMind DB format. There is no .NET NuGet package that
-writes MMDB files, which is why this one-shot offline process is used.
+The repository intentionally stays 100% C#; the Python snippet lives
+here only for the rare regeneration case, not as a checked-in tool.
