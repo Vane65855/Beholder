@@ -11,20 +11,20 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
     private readonly TrafficTabViewModel _trafficTab;
     private readonly FirewallTabViewModel _firewallTab = new();
     private readonly AlertsTabViewModel _alertsTab = new();
-    private readonly MapTabViewModel _mapTab = new();
     private readonly ScannerTabViewModel _scannerTab = new();
+    private readonly SettingsTabViewModel _settingsTab = new();
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsTrafficActive))]
     [NotifyPropertyChangedFor(nameof(IsFirewallActive))]
     [NotifyPropertyChangedFor(nameof(IsAlertsActive))]
-    [NotifyPropertyChangedFor(nameof(IsMapActive))]
     [NotifyPropertyChangedFor(nameof(IsScannerActive))]
+    [NotifyPropertyChangedFor(nameof(IsSettingsActive))]
     [NotifyPropertyChangedFor(nameof(TrafficLabel))]
     [NotifyPropertyChangedFor(nameof(FirewallLabel))]
     [NotifyPropertyChangedFor(nameof(AlertsLabel))]
-    [NotifyPropertyChangedFor(nameof(MapLabel))]
     [NotifyPropertyChangedFor(nameof(ScannerLabel))]
+    [NotifyPropertyChangedFor(nameof(SettingsLabel))]
     private TabKind _activeTab = TabKind.Traffic;
 
     [ObservableProperty]
@@ -45,14 +45,14 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
     public bool IsTrafficActive => ActiveTab == TabKind.Traffic;
     public bool IsFirewallActive => ActiveTab == TabKind.Firewall;
     public bool IsAlertsActive => ActiveTab == TabKind.Alerts;
-    public bool IsMapActive => ActiveTab == TabKind.Map;
     public bool IsScannerActive => ActiveTab == TabKind.Scanner;
+    public bool IsSettingsActive => ActiveTab == TabKind.Settings;
 
     public string TrafficLabel => ActiveTab == TabKind.Traffic ? "[ TRAFFIC ]" : "TRAFFIC";
     public string FirewallLabel => ActiveTab == TabKind.Firewall ? "[ FIREWALL ]" : "FIREWALL";
     public string AlertsLabel => ActiveTab == TabKind.Alerts ? "[ ALERTS ]" : "ALERTS";
-    public string MapLabel => ActiveTab == TabKind.Map ? "[ MAP ]" : "MAP";
     public string ScannerLabel => ActiveTab == TabKind.Scanner ? "[ SCANNER ]" : "SCANNER";
+    public string SettingsLabel => ActiveTab == TabKind.Settings ? "[ SETTINGS ]" : "SETTINGS";
 
     public StatusStripViewModel StatusStripVm { get; }
 
@@ -77,8 +77,8 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
         _trafficTab.Dispose();
         _firewallTab.Dispose();
         _alertsTab.Dispose();
-        _mapTab.Dispose();
         _scannerTab.Dispose();
+        _settingsTab.Dispose();
         StatusStripVm.Dispose();
     }
 
@@ -98,8 +98,8 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
             TabKind.Traffic => _trafficTab,
             TabKind.Firewall => _firewallTab,
             TabKind.Alerts => _alertsTab,
-            TabKind.Map => _mapTab,
             TabKind.Scanner => _scannerTab,
+            TabKind.Settings => _settingsTab,
             _ => _trafficTab,
         };
     }
