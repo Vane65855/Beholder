@@ -40,4 +40,20 @@
   <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
     <ProjectReference Include="..\Beholder.Daemon.Linux\Beholder.Daemon.Linux.csproj" />
   </ItemGroup>
+
+  <!-- DB-IP Lite GeoIP database, downloaded by Beholder.Tools.GeoIpFetcher.
+       Conditional: if the file is present in the repo's /data/ folder, copy
+       it into bin/.../data/ where Program.cs expects it. If missing, the
+       daemon degrades to NullGeoIpResolver at startup with a log warning —
+       the build never requires network access. -->
+  <ItemGroup>
+    <Content Include="..\data\dbip-country-lite.mmdb"
+             Link="data\dbip-country-lite.mmdb"
+             CopyToOutputDirectory="PreserveNewest"
+             Condition="Exists('..\data\dbip-country-lite.mmdb')" />
+    <Content Include="..\data\ATTRIBUTION.md"
+             Link="data\ATTRIBUTION.md"
+             CopyToOutputDirectory="PreserveNewest"
+             Condition="Exists('..\data\ATTRIBUTION.md')" />
+  </ItemGroup>
 </Project>
