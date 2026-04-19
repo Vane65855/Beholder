@@ -17,6 +17,32 @@
         <ResourceDictionary>
             <converters:DoubleToGridLengthConverter x:Key="RatioToGridLength" />
             <converters:SeriesIndexToBrushConverter x:Key="SeriesToBrush" />
+
+            <!-- Avalonia 12's WindowDrawnDecorations replaced the removed
+                 ExtendClientAreaChromeHints="NoChrome" flag. Overriding its
+                 ControlTheme with an empty overlay suppresses the default
+                 OS-style title text + caption glyphs that would otherwise
+                 render on top of our custom chrome when using
+                 WindowDecorations="Full" + ExtendClientAreaToDecorationsHint.
+                 The "Full" WindowDecorations keeps WS_CAPTION at the Win32
+                 level so DWM animates minimize/maximize/close; the empty
+                 overlay means we don't get doubled title text or extra
+                 caption buttons drawn over our own.
+                 See: https://github.com/AvaloniaUI/Avalonia/issues/21212 -->
+            <ControlTheme x:Key="{x:Type WindowDrawnDecorations}" TargetType="WindowDrawnDecorations">
+                <Setter Property="Template">
+                    <WindowDrawnDecorationsTemplate>
+                        <WindowDrawnDecorationsContent>
+                            <WindowDrawnDecorationsContent.Overlay>
+                                <DockPanel Height="{TemplateBinding TitleBarHeight}"
+                                           VerticalAlignment="Top"
+                                           Margin="{TemplateBinding ShadowThickness}" />
+                            </WindowDrawnDecorationsContent.Overlay>
+                        </WindowDrawnDecorationsContent>
+                    </WindowDrawnDecorationsTemplate>
+                </Setter>
+            </ControlTheme>
+
             <ResourceDictionary.MergedDictionaries>
                 <ResourceInclude Source="avares://Beholder.Ui/Themes/DarkTheme.axaml" />
             </ResourceDictionary.MergedDictionaries>

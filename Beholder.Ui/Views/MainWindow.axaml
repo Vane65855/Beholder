@@ -9,8 +9,8 @@
         x:DataType="vm:MainWindowViewModel"
         Title="Beholder NMT"
         Width="1280" Height="800"
-        MinWidth="1024" MinHeight="720"
-        WindowDecorations="BorderOnly"
+        MinWidth="1100" MinHeight="720"
+        WindowDecorations="Full"
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaTitleBarHeightHint="44"
         Background="{DynamicResource BackgroundRoot}">
