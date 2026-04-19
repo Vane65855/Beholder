@@ -12,6 +12,11 @@
 # Debug logs
 beholder-debug.log
 
+# DB-IP Lite GeoIP database (downloaded by Beholder.Tools.GeoIpFetcher,
+# monthly refresh, 8+ MB binary — do not commit).
+/data/*.mmdb
+/data/ATTRIBUTION.md
+
 # User-specific files
 *.rsuser
 *.suo
