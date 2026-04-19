@@ -282,7 +282,7 @@ Every UI phase must include verification at four levels. Each phase's verificati
 
 Capture screenshots and verify correctness at:
 
-- **Minimum supported size:** 1024x720 (the `MinWidth`/`MinHeight` from `MainWindow.axaml`)
+- **Minimum supported size:** 1100x720 (the `MinWidth`/`MinHeight` from `MainWindow.axaml`)
 - **Default size:** 1280x800 (the initial `Width`/`Height` from `MainWindow.axaml`)
 - **Maximized:** at the developer's actual monitor resolution
 
