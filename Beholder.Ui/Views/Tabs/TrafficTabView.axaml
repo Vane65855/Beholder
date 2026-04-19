@@ -166,6 +166,11 @@
                             Foreground="{DynamicResource TextMuted}"
                             IsEnabled="False"
                             ToolTip.Tip="Column view — coming soon" />
+                    <Button Content="MAP"
+                            Classes="toolbarPill"
+                            Foreground="{DynamicResource TextMuted}"
+                            IsEnabled="False"
+                            ToolTip.Tip="Geographic map — coming soon" />
                 </StackPanel>
             </Grid>
 

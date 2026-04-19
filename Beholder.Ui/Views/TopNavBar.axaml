@@ -70,19 +70,19 @@
                 </Button>
 
                 <Button Command="{Binding SwitchTabCommand}"
-                        CommandParameter="{x:Static vm:TabKind.Map}"
-                        Classes="navTab"
-                        chrome:WindowDecorationProperties.ElementRole="User"
-                        Classes.active="{Binding IsMapActive}">
-                    <TextBlock Text="{Binding MapLabel}" LetterSpacing="1.5" />
-                </Button>
-
-                <Button Command="{Binding SwitchTabCommand}"
                         CommandParameter="{x:Static vm:TabKind.Scanner}"
                         Classes="navTab"
                         chrome:WindowDecorationProperties.ElementRole="User"
                         Classes.active="{Binding IsScannerActive}">
                     <TextBlock Text="{Binding ScannerLabel}" LetterSpacing="1.5" />
+                </Button>
+
+                <Button Command="{Binding SwitchTabCommand}"
+                        CommandParameter="{x:Static vm:TabKind.Settings}"
+                        Classes="navTab"
+                        chrome:WindowDecorationProperties.ElementRole="User"
+                        Classes.active="{Binding IsSettingsActive}">
+                    <TextBlock Text="{Binding SettingsLabel}" LetterSpacing="1.5" />
                 </Button>
             </StackPanel>
 

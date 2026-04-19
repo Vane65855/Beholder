@@ -4,6 +4,6 @@ internal enum TabKind {
     Traffic,
     Firewall,
     Alerts,
-    Map,
     Scanner,
+    Settings,
 }

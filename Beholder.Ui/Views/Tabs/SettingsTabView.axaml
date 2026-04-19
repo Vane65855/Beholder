@@ -1,10 +1,10 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Beholder.Ui.ViewModels"
-             x:Class="Beholder.Ui.Views.Tabs.MapTabView"
-             x:DataType="vm:MapTabViewModel"
+             x:Class="Beholder.Ui.Views.Tabs.SettingsTabView"
+             x:DataType="vm:SettingsTabViewModel"
              Background="{DynamicResource BackgroundRoot}">
-    <TextBlock Text="Map tab content (deferred)"
+    <TextBlock Text="Settings content (deferred)"
                Foreground="{DynamicResource TextMuted}"
                FontSize="{DynamicResource FontSizeHeading}"
                HorizontalAlignment="Center"
