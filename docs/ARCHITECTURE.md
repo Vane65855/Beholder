@@ -334,6 +334,19 @@ CREATE TABLE dns_cache (
 
 Survives daemon restarts. Populated during 10-second bucket flush from the in-memory `IDnsCache`. Used to backfill hostnames on traffic records.
 
+### DNS observation limitations
+
+`IDnsCache` exists because reverse DNS on CDN IPs returns generic edge names (`server-52-84-150-39.fra2.r.cloudfront.net`) rather than the hostname the user actually typed. On Windows we observe DNS traffic passively via the `Microsoft-Windows-DNS-Client` ETW provider (`EtwDnsCache`), which gives us the user-intended name the moment any Windows app resolves it. **The daemon never issues its own DNS queries.**
+
+That strategy has two known gaps:
+
+1. **Bypassing resolvers.** Apps that run their own resolver inside the process — Brave, Firefox, or any other browser with DNS-over-HTTPS (DoH) enabled; some VPN clients; apps with bundled stub resolvers — never call the Windows DNS Client API. The ETW provider emits no event, so `EtwDnsCache` can't map those IPs to hostnames. Workaround: disable DoH in the browser's settings (Brave: `brave://settings/security` → *Use secure DNS* → Disabled; Firefox: `about:config` → `network.trr.mode = 5`).
+2. **Short-window races.** `TrafficEngine.FlushTickAndRawAsync` writes one raw bucket per destination per second. If the first bucket fires before the DNS event arrives (rare — ETW events normally precede the first packet by microseconds) the bucket is written with `hostname = NULL`. `SqliteTrafficStore.GetDestinationsAsync` uses `MAX(hostname)` grouped by remote address, so any later bucket with a non-null hostname promotes the row to the resolved name — the gap self-heals as traffic continues.
+
+Event coverage: `EtwDnsCache.OnEtwEvent` accepts any event from the provider that carries a query name + answer pair. That covers `3008` (`DnsQueryCompleted`), `3010` (cache lookup — the common case on a warm machine), `3020` (`DnsQueryCompletedEx` on Windows 11), and any future/variant events exposing the same logical fields. Events that only carry a query name (e.g. `3006` `DnsQueryStarted`) return early with no cache update.
+
+True TLS-level hostname visibility (SNI extraction from the ClientHello) is a future phase and would close the DoH gap — it requires a packet-capture layer that Beholder doesn't have today.
+
 ## IPC Protocol (Daemon ↔ UI)
 
 gRPC over named pipe (`\\.\pipe\beholder` on Windows) or Unix domain socket (`/run/beholder.sock` on Linux). The pipe/socket is DACL'd (Windows) or permission-restricted (Linux) to the local user or a `beholder-users` group.

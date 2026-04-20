@@ -33,7 +33,8 @@
 
             <!-- HOSTS -->
             <DockPanel Grid.Column="0">
-                <TextBlock DockPanel.Dock="Top" Classes="columnHeader" Text="HOSTS" />
+                <TextBlock DockPanel.Dock="Top" Classes="columnHeader" Text="HOSTS"
+                           ToolTip.Tip="Host names come from Windows DNS Client events. Apps that resolve DNS internally (browsers with DNS-over-HTTPS, bundled resolvers) bypass it and show as IPs. Disable secure DNS in the browser to restore host names for its traffic." />
                 <ItemsControl ItemsSource="{Binding Hosts}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
