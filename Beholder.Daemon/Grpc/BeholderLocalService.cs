@@ -240,7 +240,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
             var from = request.FromUnixNs.FromUnixTimeNanoseconds();
             var to = request.ToUnixNs.FromUnixTimeNanoseconds();
 
-            var destinations = await _trafficStore.GetProcessDestinationsAsync(
+            var destinations = await _trafficStore.GetDestinationsAsync(
                 request.ProcessPath, from, to, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -278,7 +278,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         var to = request.ToUnixNs.FromUnixTimeNanoseconds();
 
         var breakdown = await _trafficStore.GetCountryBreakdownAsync(
-            from, to, cancellationToken)
+            processPath: null, from, to, cancellationToken)
             .ConfigureAwait(false);
 
         var response = new Local.GetCountryBreakdownResponse();
