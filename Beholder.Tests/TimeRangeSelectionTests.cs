@@ -174,4 +174,90 @@ public class TimeRangeSelectionTests {
         Assert.Throws<ArgumentOutOfRangeException>("to",
             () => TimeRangeSelection.FromCustom(from, to));
     }
+
+    // ---- Resolve ----
+
+    [Fact]
+    public async Task Resolve_Preset_ReturnsFreshlyComputedRange() {
+        // The fix for the default "Last 5 Minutes" range being pinned to
+        // app-start time: calling Resolve() on a preset returns a new
+        // instance with From/To computed against the current wall clock.
+        var original = TimeRangeSelection.FromPreset(TimeRangePreset.Last5Minutes);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        var resolved = original.Resolve();
+
+        Assert.Equal(original.Preset, resolved.Preset);
+        Assert.True(resolved.To > original.To,
+            $"Expected resolved.To ({resolved.To:O}) to be strictly later than original.To ({original.To:O})");
+    }
+
+    [Fact]
+    public void Resolve_Custom_ReturnsSameInstance() {
+        // User-picked absolute windows must not drift — Resolve() is a no-op
+        // for Custom and returns the exact same object.
+        var from = new DateTimeOffset(2026, 4, 10, 0, 0, 0, TimeSpan.Zero);
+        var to = new DateTimeOffset(2026, 4, 14, 0, 0, 0, TimeSpan.Zero);
+        var original = TimeRangeSelection.FromCustom(from, to);
+
+        var resolved = original.Resolve();
+
+        Assert.Same(original, resolved);
+    }
+
+    // ---- IsSameSelectionAs ----
+
+    [Theory]
+    [InlineData(TimeRangePreset.Last5Minutes)]
+    [InlineData(TimeRangePreset.Last1Hour)]
+    [InlineData(TimeRangePreset.Last24Hours)]
+    [InlineData(TimeRangePreset.AllTime)]
+    public void IsSameSelectionAs_SamePreset_ReturnsTrueEvenWithDifferentFromTo(TimeRangePreset preset) {
+        // Two preset ranges of the same preset taken at different moments
+        // represent the same user selection — the guard in the VM must treat
+        // them as equivalent so Resolve()'d instances don't look like "the
+        // user switched away".
+        var a = TimeRangeSelection.FromPreset(preset);
+        var b = a.Resolve();
+
+        Assert.True(a.IsSameSelectionAs(b));
+        Assert.True(b.IsSameSelectionAs(a));
+    }
+
+    [Fact]
+    public void IsSameSelectionAs_DifferentPreset_ReturnsFalse() {
+        var a = TimeRangeSelection.FromPreset(TimeRangePreset.Last5Minutes);
+        var b = TimeRangeSelection.FromPreset(TimeRangePreset.Last1Hour);
+
+        Assert.False(a.IsSameSelectionAs(b));
+    }
+
+    [Fact]
+    public void IsSameSelectionAs_CustomSameFromTo_ReturnsTrue() {
+        var from = new DateTimeOffset(2026, 4, 10, 0, 0, 0, TimeSpan.Zero);
+        var to = new DateTimeOffset(2026, 4, 14, 0, 0, 0, TimeSpan.Zero);
+        var a = TimeRangeSelection.FromCustom(from, to);
+        var b = TimeRangeSelection.FromCustom(from, to);
+
+        Assert.True(a.IsSameSelectionAs(b));
+    }
+
+    [Fact]
+    public void IsSameSelectionAs_CustomDifferentFromTo_ReturnsFalse() {
+        var a = TimeRangeSelection.FromCustom(
+            new DateTimeOffset(2026, 4, 10, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 4, 14, 0, 0, 0, TimeSpan.Zero));
+        var b = TimeRangeSelection.FromCustom(
+            new DateTimeOffset(2026, 4, 11, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 4, 14, 0, 0, 0, TimeSpan.Zero));
+
+        Assert.False(a.IsSameSelectionAs(b));
+    }
+
+    [Fact]
+    public void IsSameSelectionAs_Null_Throws() {
+        var a = TimeRangeSelection.FromPreset(TimeRangePreset.Last5Minutes);
+
+        Assert.Throws<ArgumentNullException>(() => a.IsSameSelectionAs(null!));
+    }
 }
