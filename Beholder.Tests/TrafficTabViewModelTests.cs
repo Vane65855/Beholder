@@ -493,4 +493,98 @@ public class TrafficTabViewModelTests {
         var handler = field?.GetValue(client) as Delegate;
         return handler?.GetInvocationList().Length ?? 0;
     }
+
+    // ---- View-mode switching tests (Phase 6.3 COLS) ----
+
+    [Fact]
+    public void ViewMode_DefaultsToGraph() {
+        var vm = CreateViewModel();
+        Assert.Equal(TrafficViewMode.Graph, vm.ViewMode);
+        Assert.True(vm.IsGraphActive);
+        Assert.False(vm.IsColsActive);
+    }
+
+    [Fact]
+    public void SetColsViewCommand_SwitchesViewMode() {
+        var vm = CreateViewModel();
+        vm.SetColsViewCommand.Execute(null);
+
+        Assert.Equal(TrafficViewMode.Cols, vm.ViewMode);
+        Assert.True(vm.IsColsActive);
+        Assert.False(vm.IsGraphActive);
+    }
+
+    [Fact]
+    public async Task SwitchToCols_PopulatesColsViewModel() {
+        // Switching to COLS fires the 3 RPCs against the current range.
+        // Stage one destination so Hosts fills with at least one row.
+        var (vm, client) = CreateViewModelWithClient();
+        client.ProcessDestinationsResponder = _ => {
+            var response = new GetProcessDestinationsResponse();
+            response.Destinations.Add(new DestinationSummary {
+                RemoteAddress = "1.1.1.1", Hostname = "one",
+                Country = "US", TotalBytesIn = 100, TotalBytesOut = 50, ConnectionCount = 1,
+            });
+            return response;
+        };
+
+        vm.SetColsViewCommand.Execute(null);
+
+        // OnViewModeChanged fires RefreshAsync async. Yield a few times to let
+        // the await in RefreshAsync complete (FakeDaemonClient returns
+        // synchronously but the await state machine still posts continuations).
+        for (var i = 0; i < 5 && vm.ColsVm.Hosts.Count == 0; i++)
+            await Task.Yield();
+
+        Assert.Single(vm.ColsVm.Hosts);
+    }
+
+    [Fact]
+    public async Task RangeChangeInColsMode_RefetchesColsData() {
+        // COLS is live — range change must refetch the 3 breakdown RPCs.
+        // Capture how many times the destinations RPC fires; must be > once
+        // after a range flip.
+        var (vm, client) = CreateViewModelWithClient();
+        var destinationCalls = 0;
+        client.ProcessDestinationsResponder = _ => {
+            destinationCalls++;
+            return new GetProcessDestinationsResponse();
+        };
+
+        vm.SetColsViewCommand.Execute(null);
+        for (var i = 0; i < 5; i++) await Task.Yield();
+        var afterActivation = destinationCalls;
+
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last1Hour);
+        for (var i = 0; i < 5; i++) await Task.Yield();
+
+        Assert.True(destinationCalls > afterActivation,
+            $"Expected range change to refetch COLS data; calls before={afterActivation} after={destinationCalls}");
+    }
+
+    [Fact]
+    public async Task ProcessSelectionInColsMode_RefetchesColsData() {
+        // Per-process filter in COLS view: selecting a specific process
+        // must trigger a COLS refresh that propagates the process path to
+        // the 3 RPCs.
+        var (vm, client) = CreateViewModelWithClient();
+        string? observedPath = null;
+        client.ProcessDestinationsResponder = req => {
+            observedPath = req.ProcessPath;
+            return new GetProcessDestinationsResponse();
+        };
+
+        var states = new Dictionary<string, ProcessState> {
+            ["a.exe"] = MakeState("a.exe", "a", [100], [50]),
+        };
+        vm.UpdateFromStates(states);
+        vm.SetColsViewCommand.Execute(null);
+        for (var i = 0; i < 5; i++) await Task.Yield();
+
+        var aItem = vm.ProcessList.First(p => p.ProcessPath == "a.exe");
+        vm.SelectedProcess = aItem;
+        for (var i = 0; i < 5; i++) await Task.Yield();
+
+        Assert.Equal("a.exe", observedPath);
+    }
 }
