@@ -10,6 +10,7 @@ using Beholder.Ui.Helpers;
 using Beholder.Ui.Models;
 using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Grpc.Core;
 
 namespace Beholder.Ui.ViewModels;
@@ -19,6 +20,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     private readonly ProcessStateService _processStateService;
     private readonly ProcessListCoordinator _processList;
     private readonly HistoricalQueryOrchestrator _historicalQueries;
+    private TrafficColsViewModel? _colsVm;
     private IReadOnlyDictionary<string, ProcessState>? _lastStates;
 
     // Cached live-mode chart buffers. Reused across 1-Hz RebuildChartData calls
@@ -59,7 +61,29 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     [ObservableProperty]
     private TimeRangeSelection _selectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last5Minutes);
 
+    /// <summary>
+    /// Which sub-view the chart area is showing. Phase 6.3 adds COLS; MAP
+    /// stays deferred until Phase 8. Defaults to GRAPH so the existing
+    /// on-launch experience is unchanged.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsGraphActive))]
+    [NotifyPropertyChangedFor(nameof(IsColsActive))]
+    [NotifyPropertyChangedFor(nameof(IsMapActive))]
+    private TrafficViewMode _viewMode = TrafficViewMode.Graph;
+
+    public bool IsGraphActive => ViewMode == TrafficViewMode.Graph;
+    public bool IsColsActive => ViewMode == TrafficViewMode.Cols;
+    public bool IsMapActive => ViewMode == TrafficViewMode.Map;
+
     public ObservableCollection<ProcessListItem> ProcessList => _processList.List;
+
+    /// <summary>
+    /// Lazy-created COLS view-model — instantiated on first COLS activation
+    /// and cached for the tab's lifetime. Kept around so switching back to
+    /// COLS without a range/process change doesn't re-fetch unnecessarily.
+    /// </summary>
+    public TrafficColsViewModel ColsVm => _colsVm ??= new TrafficColsViewModel(_daemonClient);
 
     public TrafficTabViewModel(
         IDaemonClient daemonClient,
@@ -83,6 +107,37 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         _processStateService.ProcessStatesUpdated -= OnProcessStatesUpdated;
         _daemonClient.StateChanged -= OnDaemonStateChanged;
         _historicalQueries.Dispose();
+        _colsVm?.Dispose();
+    }
+
+    [RelayCommand]
+    private void SetGraphView() => ViewMode = TrafficViewMode.Graph;
+
+    [RelayCommand]
+    private void SetColsView() => ViewMode = TrafficViewMode.Cols;
+
+    partial void OnViewModeChanged(TrafficViewMode value) {
+        if (value == TrafficViewMode.Cols) {
+            // Refreshing on every GRAPH→COLS transition keeps the data in
+            // sync with whatever range/process selection happened while the
+            // user was on the chart. Cheap on small ranges; acceptable cost
+            // on large ones since the user deliberately requested a view
+            // change.
+            _ = RefreshColsAsync();
+        }
+    }
+
+    private Task RefreshColsAsync() {
+        var processPath = SelectedProcess is null || SelectedProcess.IsAll
+            ? null
+            : SelectedProcess.ProcessPath;
+        try {
+            return ColsVm.RefreshAsync(SelectedTimeRange, processPath);
+        } catch (OperationCanceledException) {
+            // Superseded by a later refresh — nothing to do, the next call
+            // owns the UI state.
+            return Task.CompletedTask;
+        }
     }
 
     private void OnDaemonStateChanged(DaemonStatusInfo status) {
@@ -121,6 +176,13 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             // Switching to historical mode — orchestrator cancels any prior
             // query and issues a new one under a fresh token.
             _ = LoadHistoricalRangeAsync(value);
+        }
+
+        // COLS columns follow the range regardless of live/historical
+        // distinction (the 3 RPCs accept any window — the daemon chooses the
+        // tier internally).
+        if (ViewMode == TrafficViewMode.Cols) {
+            _ = RefreshColsAsync();
         }
     }
 
@@ -191,6 +253,10 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             // rapid process-switching doesn't leave superseded daemon work
             // running.
             _ = LoadHistoricalChartForProcessAsync(SelectedTimeRange, value);
+        }
+
+        if (ViewMode == TrafficViewMode.Cols) {
+            _ = RefreshColsAsync();
         }
     }
 

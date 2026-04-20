@@ -1,0 +1,183 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Beholder.Ui.ViewModels"
+             x:Class="Beholder.Ui.Views.Tabs.TrafficColsView"
+             x:DataType="vm:TrafficColsViewModel"
+             Background="Transparent">
+
+    <UserControl.Styles>
+        <Style Selector="TextBlock.columnHeader">
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="LetterSpacing" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+        <Style Selector="TextBlock.rowLabel">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+        <Style Selector="TextBlock.rowBytes">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+        </Style>
+    </UserControl.Styles>
+
+    <Grid Margin="16,0,16,8">
+        <!-- Three parallel bar-list columns. Mirror row layout across the
+             three ItemsControls so alignment reads as a single table. -->
+        <Grid ColumnDefinitions="*,16,*,16,*" IsVisible="{Binding !IsLoading}">
+
+            <!-- HOSTS -->
+            <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" Classes="columnHeader" Text="HOSTS" />
+                <ItemsControl ItemsSource="{Binding Hosts}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:HostRow">
+                            <Grid ColumnDefinitions="*,80" Height="22" Margin="0,0,0,4">
+                                <TextBlock Grid.Column="0"
+                                           Classes="rowLabel"
+                                           Text="{Binding Display}" />
+                                <TextBlock Grid.Column="1"
+                                           Classes="rowBytes"
+                                           Text="{Binding BytesLabel}" />
+                                <!-- Bar: sits under the label/bytes row as a
+                                     thin accent line. Ratio-sized grid avoids
+                                     a code-behind MultiBinding. -->
+                                <Grid Grid.ColumnSpan="2"
+                                      VerticalAlignment="Bottom"
+                                      Height="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="{Binding BarRatio, Converter={StaticResource RatioToGridLength}}" />
+                                        <ColumnDefinition Width="{Binding EmptyRatio, Converter={StaticResource RatioToGridLength}}" />
+                                    </Grid.ColumnDefinitions>
+                                    <Rectangle Grid.Column="0"
+                                               Fill="{DynamicResource ChartOutboundStroke}"
+                                               HorizontalAlignment="Stretch" />
+                                </Grid>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </DockPanel>
+
+            <!-- TRAFFIC TYPE -->
+            <DockPanel Grid.Column="2">
+                <TextBlock DockPanel.Dock="Top" Classes="columnHeader" Text="TRAFFIC TYPE" />
+                <ItemsControl ItemsSource="{Binding Protocols}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ProtocolRow">
+                            <Grid ColumnDefinitions="*,80" Height="22" Margin="0,0,0,4">
+                                <TextBlock Grid.Column="0"
+                                           Classes="rowLabel"
+                                           Text="{Binding Name}" />
+                                <TextBlock Grid.Column="1"
+                                           Classes="rowBytes"
+                                           Text="{Binding BytesLabel}" />
+                                <Grid Grid.ColumnSpan="2"
+                                      VerticalAlignment="Bottom"
+                                      Height="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="{Binding BarRatio, Converter={StaticResource RatioToGridLength}}" />
+                                        <ColumnDefinition Width="{Binding EmptyRatio, Converter={StaticResource RatioToGridLength}}" />
+                                    </Grid.ColumnDefinitions>
+                                    <Rectangle Grid.Column="0"
+                                               Fill="{DynamicResource ChartInboundStroke}"
+                                               HorizontalAlignment="Stretch" />
+                                </Grid>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </DockPanel>
+
+            <!-- COUNTRIES -->
+            <DockPanel Grid.Column="4">
+                <TextBlock DockPanel.Dock="Top" Classes="columnHeader" Text="COUNTRIES" />
+                <ItemsControl ItemsSource="{Binding Countries}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:CountryRow">
+                            <Grid ColumnDefinitions="*,80" Height="22" Margin="0,0,0,4">
+                                <TextBlock Grid.Column="0"
+                                           Classes="rowLabel"
+                                           Text="{Binding Display}" />
+                                <TextBlock Grid.Column="1"
+                                           Classes="rowBytes"
+                                           Text="{Binding BytesLabel}" />
+                                <Grid Grid.ColumnSpan="2"
+                                      VerticalAlignment="Bottom"
+                                      Height="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="{Binding BarRatio, Converter={StaticResource RatioToGridLength}}" />
+                                        <ColumnDefinition Width="{Binding EmptyRatio, Converter={StaticResource RatioToGridLength}}" />
+                                    </Grid.ColumnDefinitions>
+                                    <Rectangle Grid.Column="0"
+                                               Fill="{DynamicResource AccentPrimary}"
+                                               HorizontalAlignment="Stretch" />
+                                </Grid>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </DockPanel>
+        </Grid>
+
+        <!-- Loading overlay -->
+        <StackPanel IsVisible="{Binding IsLoading}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+            <TextBlock Text="Loading columns..."
+                       Foreground="{DynamicResource TextMuted}"
+                       FontSize="{DynamicResource FontSizeHeading}"
+                       HorizontalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Empty overlay -->
+        <StackPanel IsVisible="{Binding IsEmpty}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Spacing="4">
+            <TextBlock Text="No traffic in this range"
+                       Foreground="{DynamicResource TextSecondary}"
+                       FontSize="{DynamicResource FontSizeHeading}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="Adjust the range or the process selection to see breakdown data."
+                       Foreground="{DynamicResource TextMuted}"
+                       FontSize="{DynamicResource FontSizeBody}"
+                       HorizontalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Error banner — matches the chart's error-banner placement -->
+        <Border IsVisible="{Binding HasError}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                Margin="0,8,0,0"
+                Padding="12,6"
+                Background="{DynamicResource BackgroundElevated}"
+                CornerRadius="4"
+                BorderBrush="{DynamicResource SeverityWarn}"
+                BorderThickness="1">
+            <TextBlock Text="{Binding ErrorMessage}"
+                       Foreground="{DynamicResource SeverityWarn}"
+                       FontSize="{DynamicResource FontSizeBody}" />
+        </Border>
+    </Grid>
+</UserControl>

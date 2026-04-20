@@ -3,6 +3,7 @@
              xmlns:vm="using:Beholder.Ui.ViewModels"
              xmlns:models="using:Beholder.Ui.Models"
              xmlns:controls="using:Beholder.Ui.Controls"
+             xmlns:tabs="using:Beholder.Ui.Views.Tabs"
              x:Class="Beholder.Ui.Views.Tabs.TrafficTabView"
              x:DataType="vm:TrafficTabViewModel"
              Background="{DynamicResource BackgroundRoot}">
@@ -17,6 +18,10 @@
             <Setter Property="CornerRadius" Value="3" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+        </Style>
+        <Style Selector="Button.toolbarPill.active">
+            <Setter Property="Foreground" Value="{DynamicResource AccentPrimary}" />
         </Style>
         <Style Selector="Button.toolbarPill:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
@@ -160,69 +165,82 @@
                             Spacing="2">
                     <Button Content="GRAPH"
                             Classes="toolbarPill"
-                            Foreground="{DynamicResource AccentPrimary}" />
+                            Classes.active="{Binding IsGraphActive}"
+                            Command="{Binding SetGraphViewCommand}" />
                     <Button Content="COLS"
                             Classes="toolbarPill"
-                            Foreground="{DynamicResource TextMuted}"
-                            IsEnabled="False"
-                            ToolTip.Tip="Column view — coming soon" />
+                            Classes.active="{Binding IsColsActive}"
+                            Command="{Binding SetColsViewCommand}" />
                     <Button Content="MAP"
                             Classes="toolbarPill"
-                            Foreground="{DynamicResource TextMuted}"
                             IsEnabled="False"
                             ToolTip.Tip="Geographic map — coming soon" />
                 </StackPanel>
             </Grid>
 
-            <!-- Chart + state overlays -->
+            <!-- Chart / COLS area. Graph and COLS views share the same
+                 pane — only one renders at a time based on ViewMode. MAP is
+                 deferred until Phase 8 and the pill stays disabled. -->
             <Grid>
-                <!-- Custom traffic chart -->
-                <controls:TrafficChartControl SeriesData="{Binding ChartData}"
-                                             DataSpan="{Binding ChartDataSpan}"
-                                             HorizontalAlignment="Stretch"
-                                             VerticalAlignment="Stretch"
-                                             Margin="8,0,8,8" />
+                <!-- GRAPH view: chart + state overlays -->
+                <Grid IsVisible="{Binding IsGraphActive}">
+                    <controls:TrafficChartControl SeriesData="{Binding ChartData}"
+                                                 DataSpan="{Binding ChartDataSpan}"
+                                                 HorizontalAlignment="Stretch"
+                                                 VerticalAlignment="Stretch"
+                                                 Margin="8,0,8,8" />
 
-                <!-- Loading overlay -->
-                <StackPanel IsVisible="{Binding IsLoading}"
+                    <!-- Loading overlay -->
+                    <StackPanel IsVisible="{Binding IsLoading}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Spacing="8">
+                        <TextBlock Text="Connecting to daemon..."
+                                   Foreground="{DynamicResource TextMuted}"
+                                   FontSize="{DynamicResource FontSizeHeading}"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+
+                    <!-- Empty overlay -->
+                    <StackPanel IsVisible="{Binding IsEmpty}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Spacing="4">
+                        <TextBlock Text="No traffic data yet"
+                                   Foreground="{DynamicResource TextSecondary}"
+                                   FontSize="{DynamicResource FontSizeHeading}"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="Traffic will appear when processes access the network."
+                                   Foreground="{DynamicResource TextMuted}"
+                                   FontSize="{DynamicResource FontSizeBody}"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+
+                    <!-- Error overlay -->
+                    <Border IsVisible="{Binding HasError}"
                             HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Spacing="8">
-                    <TextBlock Text="Connecting to daemon..."
-                               Foreground="{DynamicResource TextMuted}"
-                               FontSize="{DynamicResource FontSizeHeading}"
-                               HorizontalAlignment="Center" />
-                </StackPanel>
+                            VerticalAlignment="Top"
+                            Margin="0,8,0,0"
+                            Padding="12,6"
+                            Background="{DynamicResource BackgroundElevated}"
+                            CornerRadius="4"
+                            BorderBrush="{DynamicResource SeverityWarn}"
+                            BorderThickness="1">
+                        <TextBlock Text="{Binding ErrorMessage}"
+                                   Foreground="{DynamicResource SeverityWarn}"
+                                   FontSize="{DynamicResource FontSizeBody}" />
+                    </Border>
+                </Grid>
 
-                <!-- Empty overlay -->
-                <StackPanel IsVisible="{Binding IsEmpty}"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Spacing="4">
-                    <TextBlock Text="No traffic data yet"
-                               Foreground="{DynamicResource TextSecondary}"
-                               FontSize="{DynamicResource FontSizeHeading}"
-                               HorizontalAlignment="Center" />
-                    <TextBlock Text="Traffic will appear when processes access the network."
-                               Foreground="{DynamicResource TextMuted}"
-                               FontSize="{DynamicResource FontSizeBody}"
-                               HorizontalAlignment="Center" />
-                </StackPanel>
-
-                <!-- Error overlay -->
-                <Border IsVisible="{Binding HasError}"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Top"
-                        Margin="0,8,0,0"
-                        Padding="12,6"
-                        Background="{DynamicResource BackgroundElevated}"
-                        CornerRadius="4"
-                        BorderBrush="{DynamicResource SeverityWarn}"
-                        BorderThickness="1">
-                    <TextBlock Text="{Binding ErrorMessage}"
-                               Foreground="{DynamicResource SeverityWarn}"
-                               FontSize="{DynamicResource FontSizeBody}" />
-                </Border>
+                <!-- COLS view: Hosts / Traffic Type / Countries bar lists.
+                     The Panel wrapper carries IsVisible against the outer
+                     TrafficTabViewModel, then DataContext flips to ColsVm
+                     for the child control. Two bindings on the same element
+                     both using the DataContext can't resolve the context
+                     mid-evaluation, so we split them across two elements. -->
+                <Panel IsVisible="{Binding IsColsActive}">
+                    <tabs:TrafficColsView DataContext="{Binding ColsVm}" />
+                </Panel>
             </Grid>
         </DockPanel>
     </Grid>

@@ -33,6 +33,9 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Func<GetProcessTimelineRequest, GetProcessTimelineResponse>? ProcessTimelineResponder { get; set; }
     public GetProcessSummariesResponse? ProcessSummariesResponse { get; set; }
     public GetAggregateTimelineResponse? AggregateTimelineResponse { get; set; }
+    public Func<GetProcessDestinationsRequest, GetProcessDestinationsResponse>? ProcessDestinationsResponder { get; set; }
+    public Func<GetCountryBreakdownRequest, GetCountryBreakdownResponse>? CountryBreakdownResponder { get; set; }
+    public Func<GetProtocolBreakdownRequest, GetProtocolBreakdownResponse>? ProtocolBreakdownResponder { get; set; }
     // Responder variant for tests that need the CancellationToken the VM
     // passed (e.g., cancellation-plumbing tests). Takes precedence over
     // AggregateTimelineResponse when set.
@@ -100,19 +103,19 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(
         GetProcessDestinationsRequest request, CancellationToken cancellationToken) {
         if (ProcessDestinationsException is not null) throw ProcessDestinationsException;
-        return Task.FromResult(new GetProcessDestinationsResponse());
+        return Task.FromResult(ProcessDestinationsResponder?.Invoke(request) ?? new GetProcessDestinationsResponse());
     }
 
     public Task<GetCountryBreakdownResponse> GetCountryBreakdownAsync(
         GetCountryBreakdownRequest request, CancellationToken cancellationToken) {
         if (CountryBreakdownException is not null) throw CountryBreakdownException;
-        return Task.FromResult(new GetCountryBreakdownResponse());
+        return Task.FromResult(CountryBreakdownResponder?.Invoke(request) ?? new GetCountryBreakdownResponse());
     }
 
     public Task<GetProtocolBreakdownResponse> GetProtocolBreakdownAsync(
         GetProtocolBreakdownRequest request, CancellationToken cancellationToken) {
         if (ProtocolBreakdownException is not null) throw ProtocolBreakdownException;
-        return Task.FromResult(new GetProtocolBreakdownResponse());
+        return Task.FromResult(ProtocolBreakdownResponder?.Invoke(request) ?? new GetProtocolBreakdownResponse());
     }
 
     public Task<GetProcessSummariesResponse> GetProcessSummariesAsync(
