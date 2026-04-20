@@ -597,8 +597,8 @@ public class SqliteTrafficStoreTests : IDisposable {
 
     [Fact]
     public async Task GetProtocolBreakdownAsync_MapsWellKnownPorts() {
-        // Unknown port falls through to a "Port {N}" label; well-known port
-        // gets its canonical name. Locks in the ProtocolClassifier contract.
+        // Well-known port gets its canonical name; unknown port buckets into
+        // the shared "Other" row. Locks in the ProtocolClassifier contract.
         var buckets = new[] {
             CreateBucket(remoteAddress: "1.1.1.1", remotePort: 443, bytesIn: 100, bytesOut: 50),
             CreateBucket(remoteAddress: "2.2.2.2", remotePort: 8080, bytesIn: 20, bytesOut: 10),
@@ -611,7 +611,33 @@ public class SqliteTrafficStoreTests : IDisposable {
             CancellationToken.None);
 
         Assert.Contains(breakdown, p => p.ProtocolName == "HTTPS");
-        Assert.Contains(breakdown, p => p.ProtocolName == "Port 8080");
+        Assert.Contains(breakdown, p => p.ProtocolName == "Other");
+    }
+
+    [Fact]
+    public async Task GetProtocolBreakdownAsync_BucketsAllUnknownPortsIntoOther() {
+        // The motivating case: BitTorrent peers connect on many different
+        // ephemeral ports (51413, 60387, 8080…). Without bucketing, the
+        // Traffic Type column would be full of useless "Port 51413"-style
+        // rows. The classifier maps every unrecognised port to the single
+        // "Other" label and the client-side aggregator collapses them into
+        // one row.
+        var buckets = new[] {
+            CreateBucket(remoteAddress: "1.1.1.1", remotePort: 8080, bytesIn: 100, bytesOut: 50),
+            CreateBucket(remoteAddress: "2.2.2.2", remotePort: 51413, bytesIn: 200, bytesOut: 100),
+            CreateBucket(remoteAddress: "3.3.3.3", remotePort: 60387, bytesIn: 300, bytesOut: 150),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var breakdown = await _store.GetProtocolBreakdownAsync(
+            processPath: null,
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            CancellationToken.None);
+
+        Assert.Single(breakdown);
+        Assert.Equal("Other", breakdown[0].ProtocolName);
+        Assert.Equal(600, breakdown[0].TotalBytesIn);
+        Assert.Equal(300, breakdown[0].TotalBytesOut);
     }
 
     [Fact]

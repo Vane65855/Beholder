@@ -8,10 +8,11 @@ namespace Beholder.Core;
 /// <remarks>
 /// The <see cref="ProtocolName"/> is the daemon's port→name classification —
 /// callers don't re-derive it. Well-known ports map to their protocol name
-/// ("HTTPS" for 443, "DNS" for 53). Unknown ports fall through to a
-/// <c>"Port {N}"</c> label. All transports are currently reported as
-/// <c>"TCP"</c>; UDP support is deferred until the capture engine grows
-/// UDP flow tracking.
+/// ("HTTPS" for 443, "DNS" for 53). Every unrecognised port buckets into a
+/// single <c>"Other"</c> row so p2p/ephemeral traffic (BitTorrent peers,
+/// WebRTC, etc.) doesn't explode the list. All transports are currently
+/// reported as <c>"TCP"</c>; UDP support is deferred until the capture
+/// engine grows UDP flow tracking.
 /// </remarks>
 public sealed record ProtocolBreakdownSummary {
     /// <summary>Human-readable protocol name (e.g. "HTTPS", "DNS", "Port 8080").</summary>
