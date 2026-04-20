@@ -49,12 +49,15 @@ public interface ITrafficStore {
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Returns all distinct destinations contacted by a process in a time range,
-    /// with aggregated byte totals and connection (distinct port) counts. Tier
-    /// selection is retention-only (no resolution parameter).
+    /// Returns all distinct destinations contacted in a time range, with
+    /// aggregated byte totals and connection (distinct port) counts. When
+    /// <paramref name="processPath"/> is non-null, results are filtered to
+    /// that single process; when null, destinations aggregate across every
+    /// process in the range. Tier selection is retention-only (no resolution
+    /// parameter).
     /// </summary>
-    Task<IReadOnlyList<DestinationSummary>> GetProcessDestinationsAsync(
-        string processPath,
+    Task<IReadOnlyList<DestinationSummary>> GetDestinationsAsync(
+        string? processPath,
         DateTimeOffset from,
         DateTimeOffset to,
         CancellationToken cancellationToken);
@@ -83,10 +86,26 @@ public interface ITrafficStore {
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Returns per-country traffic totals for a time range, suitable for the map
-    /// tab's geographic heat map. Tier selection is retention-only.
+    /// Returns per-country traffic totals for a time range. When
+    /// <paramref name="processPath"/> is non-null, results are filtered to
+    /// that single process; when null, totals aggregate across every process
+    /// in the range. Tier selection is retention-only.
     /// </summary>
     Task<IReadOnlyList<CountryTrafficSummary>> GetCountryBreakdownAsync(
+        string? processPath,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns per-protocol traffic totals for a time range, derived from
+    /// remote port via the daemon's port→name classification. When
+    /// <paramref name="processPath"/> is non-null, results are filtered to
+    /// that single process; when null, totals aggregate across every process
+    /// in the range. Tier selection is retention-only.
+    /// </summary>
+    Task<IReadOnlyList<ProtocolBreakdownSummary>> GetProtocolBreakdownAsync(
+        string? processPath,
         DateTimeOffset from,
         DateTimeOffset to,
         CancellationToken cancellationToken);

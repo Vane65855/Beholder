@@ -90,7 +90,7 @@ public class SqliteTrafficStoreTests : IDisposable {
         };
         await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
 
-        var destinations = await _store.GetProcessDestinationsAsync(
+        var destinations = await _store.GetDestinationsAsync(
             "C:/app/firefox.exe",
             BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
             CancellationToken.None);
@@ -105,7 +105,7 @@ public class SqliteTrafficStoreTests : IDisposable {
         var bucket = CreateBucket(hostname: null);
         await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
 
-        var destinations = await _store.GetProcessDestinationsAsync(
+        var destinations = await _store.GetDestinationsAsync(
             "C:/app/firefox.exe",
             BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
             CancellationToken.None);
@@ -182,7 +182,7 @@ public class SqliteTrafficStoreTests : IDisposable {
     }
 
     [Fact]
-    public async Task GetProcessDestinationsAsync_AggregatesPerAddress() {
+    public async Task GetDestinationsAsync_AggregatesPerAddress() {
         var buckets = new[] {
             CreateBucket(remoteAddress: "1.1.1.1", remotePort: 443, bytesIn: 100, bytesOut: 50),
             CreateBucket(remoteAddress: "1.1.1.1", remotePort: 80, bytesIn: 200, bytesOut: 100),
@@ -190,7 +190,7 @@ public class SqliteTrafficStoreTests : IDisposable {
         };
         await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
 
-        var destinations = await _store.GetProcessDestinationsAsync(
+        var destinations = await _store.GetDestinationsAsync(
             "C:/app/firefox.exe",
             BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
             CancellationToken.None);
@@ -209,13 +209,13 @@ public class SqliteTrafficStoreTests : IDisposable {
     }
 
     [Fact]
-    public async Task GetProcessDestinationsAsync_PreservesCountryAndHostname() {
+    public async Task GetDestinationsAsync_PreservesCountryAndHostname() {
         var bucket = CreateBucket(
             hostname: "cdn.example.com",
             countryAlpha2: "DE");
         await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
 
-        var destinations = await _store.GetProcessDestinationsAsync(
+        var destinations = await _store.GetDestinationsAsync(
             "C:/app/firefox.exe",
             BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
             CancellationToken.None);
@@ -253,6 +253,7 @@ public class SqliteTrafficStoreTests : IDisposable {
         await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
 
         var breakdown = await _store.GetCountryBreakdownAsync(
+            processPath: null,
             BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
             CancellationToken.None);
 
@@ -276,6 +277,7 @@ public class SqliteTrafficStoreTests : IDisposable {
         await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
 
         var breakdown = await _store.GetCountryBreakdownAsync(
+            processPath: null,
             BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
             CancellationToken.None);
 
@@ -398,9 +400,9 @@ public class SqliteTrafficStoreTests : IDisposable {
                 TimeSpan.FromSeconds(1), CancellationToken.None));
 
     [Fact]
-    public async Task GetProcessDestinationsAsync_FromAfterTo_Throws() =>
+    public async Task GetDestinationsAsync_FromAfterTo_Throws() =>
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-            _store.GetProcessDestinationsAsync(
+            _store.GetDestinationsAsync(
                 "C:/app/firefox.exe", BaseTime.AddHours(1), BaseTime,
                 CancellationToken.None));
 
@@ -421,6 +423,7 @@ public class SqliteTrafficStoreTests : IDisposable {
     public async Task GetCountryBreakdownAsync_FromAfterTo_Throws() =>
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
             _store.GetCountryBreakdownAsync(
+                processPath: null,
                 BaseTime.AddHours(1), BaseTime, CancellationToken.None));
 
     // Zero-width range tests. Each test seeds a bucket at BaseTime and queries
@@ -448,11 +451,11 @@ public class SqliteTrafficStoreTests : IDisposable {
     }
 
     [Fact]
-    public async Task GetProcessDestinationsAsync_ZeroWidthRange_ReturnsEmpty() {
+    public async Task GetDestinationsAsync_ZeroWidthRange_ReturnsEmpty() {
         var bucket = CreateBucket();
         await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
 
-        var destinations = await _store.GetProcessDestinationsAsync(
+        var destinations = await _store.GetDestinationsAsync(
             "C:/app/firefox.exe",
             BaseTime, BaseTime,
             CancellationToken.None);
@@ -490,6 +493,206 @@ public class SqliteTrafficStoreTests : IDisposable {
         await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
 
         var breakdown = await _store.GetCountryBreakdownAsync(
+            processPath: null,
+            BaseTime, BaseTime, CancellationToken.None);
+
+        Assert.Empty(breakdown);
+    }
+
+    // ---- Per-process processPath filter + aggregate-mode tests (COLS view) ----
+
+    [Fact]
+    public async Task GetCountryBreakdownAsync_PerProcess_FiltersCorrectly() {
+        // Two processes writing to the same country. Per-process mode must
+        // only see one process's contribution; aggregate mode (covered
+        // elsewhere) sees both.
+        var buckets = new[] {
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         remoteAddress: "1.1.1.1", countryAlpha2: "US", bytesIn: 100, bytesOut: 50),
+            CreateBucket(processPath: "C:/app/chrome.exe", processName: "chrome.exe",
+                         remoteAddress: "2.2.2.2", countryAlpha2: "US", bytesIn: 999, bytesOut: 999),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var breakdown = await _store.GetCountryBreakdownAsync(
+            processPath: "C:/app/firefox.exe",
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            CancellationToken.None);
+
+        Assert.Single(breakdown);
+        Assert.Equal(100, breakdown[0].TotalBytesIn);
+        Assert.Equal(50, breakdown[0].TotalBytesOut);
+    }
+
+    [Fact]
+    public async Task GetDestinationsAsync_NullProcessPath_AggregatesAcrossAll() {
+        // Aggregate mode: both processes' destinations collapse into one row
+        // per remote address. Count checks that chrome's bytes add to firefox's.
+        var buckets = new[] {
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         remoteAddress: "1.1.1.1", remotePort: 443, bytesIn: 100, bytesOut: 50),
+            CreateBucket(processPath: "C:/app/chrome.exe", processName: "chrome.exe",
+                         remoteAddress: "1.1.1.1", remotePort: 443, bytesIn: 200, bytesOut: 100),
+            CreateBucket(processPath: "C:/app/chrome.exe", processName: "chrome.exe",
+                         remoteAddress: "2.2.2.2", remotePort: 443, bytesIn: 400, bytesOut: 200),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var destinations = await _store.GetDestinationsAsync(
+            processPath: null,
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            CancellationToken.None);
+
+        Assert.Equal(2, destinations.Count);
+        var addr1 = destinations.First(d => d.RemoteAddress == "1.1.1.1");
+        Assert.Equal(300, addr1.TotalBytesIn);  // firefox's 100 + chrome's 200
+        Assert.Equal(150, addr1.TotalBytesOut); // firefox's 50 + chrome's 100
+    }
+
+    [Fact]
+    public async Task GetDestinationsAsync_SpecificProcess_FiltersCorrectly() {
+        var buckets = new[] {
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         remoteAddress: "1.1.1.1", bytesIn: 100, bytesOut: 50),
+            CreateBucket(processPath: "C:/app/chrome.exe", processName: "chrome.exe",
+                         remoteAddress: "2.2.2.2", bytesIn: 999, bytesOut: 999),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var destinations = await _store.GetDestinationsAsync(
+            processPath: "C:/app/firefox.exe",
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            CancellationToken.None);
+
+        Assert.Single(destinations);
+        Assert.Equal("1.1.1.1", destinations[0].RemoteAddress);
+    }
+
+    // ---- GetProtocolBreakdownAsync ----
+
+    [Fact]
+    public async Task GetProtocolBreakdownAsync_AggregatesPerPort() {
+        // Two buckets to the same port merge into a single "HTTPS" row; a
+        // third bucket to a different port produces a second row.
+        var buckets = new[] {
+            CreateBucket(remoteAddress: "1.1.1.1", remotePort: 443, bytesIn: 100, bytesOut: 50),
+            CreateBucket(remoteAddress: "2.2.2.2", remotePort: 443, bytesIn: 200, bytesOut: 100),
+            CreateBucket(remoteAddress: "3.3.3.3", remotePort: 53, bytesIn: 10, bytesOut: 10),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var breakdown = await _store.GetProtocolBreakdownAsync(
+            processPath: null,
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            CancellationToken.None);
+
+        Assert.Equal(2, breakdown.Count);
+        var https = breakdown.First(p => p.ProtocolName == "HTTPS");
+        Assert.Equal(300, https.TotalBytesIn);
+        Assert.Equal(150, https.TotalBytesOut);
+        Assert.Equal("TCP", https.Transport);
+        var dns = breakdown.First(p => p.ProtocolName == "DNS");
+        Assert.Equal(10, dns.TotalBytesIn);
+    }
+
+    [Fact]
+    public async Task GetProtocolBreakdownAsync_MapsWellKnownPorts() {
+        // Unknown port falls through to a "Port {N}" label; well-known port
+        // gets its canonical name. Locks in the ProtocolClassifier contract.
+        var buckets = new[] {
+            CreateBucket(remoteAddress: "1.1.1.1", remotePort: 443, bytesIn: 100, bytesOut: 50),
+            CreateBucket(remoteAddress: "2.2.2.2", remotePort: 8080, bytesIn: 20, bytesOut: 10),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var breakdown = await _store.GetProtocolBreakdownAsync(
+            processPath: null,
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            CancellationToken.None);
+
+        Assert.Contains(breakdown, p => p.ProtocolName == "HTTPS");
+        Assert.Contains(breakdown, p => p.ProtocolName == "Port 8080");
+    }
+
+    [Fact]
+    public async Task GetProtocolBreakdownAsync_MergesPortsClassifyingToSameName() {
+        // 465 and 587 both → "SMTPS". The client-side re-aggregation in
+        // GetProtocolBreakdownAsync must sum these into a single row.
+        var buckets = new[] {
+            CreateBucket(remoteAddress: "1.1.1.1", remotePort: 465, bytesIn: 100, bytesOut: 50),
+            CreateBucket(remoteAddress: "2.2.2.2", remotePort: 587, bytesIn: 200, bytesOut: 100),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var breakdown = await _store.GetProtocolBreakdownAsync(
+            processPath: null,
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            CancellationToken.None);
+
+        Assert.Single(breakdown);
+        Assert.Equal("SMTPS", breakdown[0].ProtocolName);
+        Assert.Equal(300, breakdown[0].TotalBytesIn);
+        Assert.Equal(150, breakdown[0].TotalBytesOut);
+    }
+
+    [Fact]
+    public async Task GetProtocolBreakdownAsync_PerProcess_FiltersCorrectly() {
+        var buckets = new[] {
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         remoteAddress: "1.1.1.1", remotePort: 443, bytesIn: 100, bytesOut: 50),
+            CreateBucket(processPath: "C:/app/chrome.exe", processName: "chrome.exe",
+                         remoteAddress: "2.2.2.2", remotePort: 443, bytesIn: 999, bytesOut: 999),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var breakdown = await _store.GetProtocolBreakdownAsync(
+            processPath: "C:/app/firefox.exe",
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            CancellationToken.None);
+
+        Assert.Single(breakdown);
+        Assert.Equal(100, breakdown[0].TotalBytesIn);
+        Assert.Equal(50, breakdown[0].TotalBytesOut);
+    }
+
+    [Fact]
+    public async Task GetProtocolBreakdownAsync_SortsByTotalBytesDesc() {
+        // The final sort (done in C# after the port→name aggregation) must
+        // order rows so the "biggest" protocol lands first — that's what the
+        // COLS view iterates for its bar chart.
+        var buckets = new[] {
+            CreateBucket(remoteAddress: "1.1.1.1", remotePort: 53, bytesIn: 10, bytesOut: 10),
+            CreateBucket(remoteAddress: "2.2.2.2", remotePort: 443, bytesIn: 1000, bytesOut: 500),
+            CreateBucket(remoteAddress: "3.3.3.3", remotePort: 80, bytesIn: 100, bytesOut: 50),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var breakdown = await _store.GetProtocolBreakdownAsync(
+            processPath: null,
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            CancellationToken.None);
+
+        Assert.Equal(3, breakdown.Count);
+        Assert.Equal("HTTPS", breakdown[0].ProtocolName);
+        Assert.Equal("HTTP", breakdown[1].ProtocolName);
+        Assert.Equal("DNS", breakdown[2].ProtocolName);
+    }
+
+    [Fact]
+    public async Task GetProtocolBreakdownAsync_FromAfterTo_Throws() =>
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            _store.GetProtocolBreakdownAsync(
+                processPath: null,
+                BaseTime.AddHours(1), BaseTime,
+                CancellationToken.None));
+
+    [Fact]
+    public async Task GetProtocolBreakdownAsync_ZeroWidthRange_ReturnsEmpty() {
+        var bucket = CreateBucket();
+        await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
+
+        var breakdown = await _store.GetProtocolBreakdownAsync(
+            processPath: null,
             BaseTime, BaseTime, CancellationToken.None);
 
         Assert.Empty(breakdown);

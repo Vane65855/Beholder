@@ -2,7 +2,7 @@ namespace Beholder.Core;
 
 /// <summary>
 /// Aggregated traffic to a single remote address over a queried time range.
-/// Produced by <see cref="ITrafficStore.GetProcessDestinationsAsync"/> — the
+/// Produced by <see cref="ITrafficStore.GetDestinationsAsync"/> — the
 /// cumulative per-destination totals are reconstructed from SQLite, not held
 /// in memory.
 /// </summary>

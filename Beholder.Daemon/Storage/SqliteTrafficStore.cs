@@ -112,16 +112,17 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
             from, to, SnapNowMsToMinute(), processPath, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<DestinationSummary>> GetProcessDestinationsAsync(
-        string processPath,
+    public async Task<IReadOnlyList<DestinationSummary>> GetDestinationsAsync(
+        string? processPath,
         DateTimeOffset from,
         DateTimeOffset to,
         CancellationToken cancellationToken
     ) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
+        if (processPath is not null) ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
         ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
 
         var tier = SelectTierForRange(from, to);
+        var processFilter = processPath is null ? string.Empty : "AND process_path = $processPath";
 
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
@@ -133,13 +134,13 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
                    SUM(bytes_out),
                    COUNT(DISTINCT remote_port)
             FROM {tier.TableName}
-            WHERE process_path = $processPath
-              AND bucket_start_ms >= $fromMs
+            WHERE bucket_start_ms >= $fromMs
               AND bucket_start_ms < $toMs
+              {processFilter}
             GROUP BY remote_address
             ORDER BY SUM(bytes_in) + SUM(bytes_out) DESC;
             """;
-        command.Parameters.AddWithValue("$processPath", processPath);
+        if (processPath is not null) command.Parameters.AddWithValue("$processPath", processPath);
         command.Parameters.AddWithValue("$fromMs", from.ToUnixTimeMilliseconds());
         command.Parameters.AddWithValue("$toMs", to.ToUnixTimeMilliseconds());
 
@@ -231,12 +232,15 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
     }
 
     public async Task<IReadOnlyList<CountryTrafficSummary>> GetCountryBreakdownAsync(
+        string? processPath,
         DateTimeOffset from,
         DateTimeOffset to,
         CancellationToken cancellationToken
     ) {
+        if (processPath is not null) ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
         ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
         var tier = SelectTierForRange(from, to);
+        var processFilter = processPath is null ? string.Empty : "AND process_path = $processPath";
 
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
@@ -245,9 +249,11 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
             FROM {tier.TableName}
             WHERE bucket_start_ms >= $fromMs
               AND bucket_start_ms < $toMs
+              {processFilter}
             GROUP BY country
             ORDER BY SUM(bytes_in) + SUM(bytes_out) DESC;
             """;
+        if (processPath is not null) command.Parameters.AddWithValue("$processPath", processPath);
         command.Parameters.AddWithValue("$fromMs", from.ToUnixTimeMilliseconds());
         command.Parameters.AddWithValue("$toMs", to.ToUnixTimeMilliseconds());
 
@@ -263,9 +269,65 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         return results;
     }
 
+    public async Task<IReadOnlyList<ProtocolBreakdownSummary>> GetProtocolBreakdownAsync(
+        string? processPath,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken
+    ) {
+        if (processPath is not null) ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
+        ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
+        var tier = SelectTierForRange(from, to);
+        var processFilter = processPath is null ? string.Empty : "AND process_path = $processPath";
+
+        using var connection = _connectionFactory.CreateConnection();
+        using var command = connection.CreateCommand();
+        // GROUP BY remote_port first (SQL-side) — the port→name classification
+        // happens client-side so all rows with the same name merge into a
+        // single entry. Transport is hard-coded TCP until we capture UDP.
+        command.CommandText = $"""
+            SELECT remote_port, SUM(bytes_in), SUM(bytes_out)
+            FROM {tier.TableName}
+            WHERE bucket_start_ms >= $fromMs
+              AND bucket_start_ms < $toMs
+              {processFilter}
+            GROUP BY remote_port;
+            """;
+        if (processPath is not null) command.Parameters.AddWithValue("$processPath", processPath);
+        command.Parameters.AddWithValue("$fromMs", from.ToUnixTimeMilliseconds());
+        command.Parameters.AddWithValue("$toMs", to.ToUnixTimeMilliseconds());
+
+        // Accumulate per protocol name — multiple ports can classify to the
+        // same name (e.g. 465 and 587 both → "SMTPS"), so sum into a dict and
+        // sort at the end.
+        var accumulator = new Dictionary<string, (long BytesIn, long BytesOut)>();
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
+            var port = reader.GetInt32(0);
+            var bytesIn = reader.GetInt64(1);
+            var bytesOut = reader.GetInt64(2);
+            var name = ProtocolClassifier.Classify(port);
+            if (accumulator.TryGetValue(name, out var current)) {
+                accumulator[name] = (current.BytesIn + bytesIn, current.BytesOut + bytesOut);
+            } else {
+                accumulator[name] = (bytesIn, bytesOut);
+            }
+        }
+
+        return accumulator
+            .Select(kv => new ProtocolBreakdownSummary(
+                protocolName: kv.Key,
+                transport: "TCP",
+                totalBytesIn: kv.Value.BytesIn,
+                totalBytesOut: kv.Value.BytesOut))
+            .OrderByDescending(p => p.TotalBytesIn + p.TotalBytesOut)
+            .ToList();
+    }
+
     /// <summary>
     /// Tier selection for queries with no resolution parameter
-    /// (<see cref="GetProcessDestinationsAsync"/>, <see cref="GetCountryBreakdownAsync"/>).
+    /// (<see cref="GetDestinationsAsync"/>, <see cref="GetCountryBreakdownAsync"/>,
+    /// <see cref="GetProtocolBreakdownAsync"/>).
     /// Treats the query as if the caller wanted ~300 points of temporal
     /// granularity — the same heuristic timeline queries use implicitly through
     /// their resolution parameter. This keeps tier selection consistent between
