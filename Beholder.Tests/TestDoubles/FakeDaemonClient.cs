@@ -24,6 +24,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? ProcessSummariesException { get; set; }
     public Exception? ProcessDestinationsException { get; set; }
     public Exception? CountryBreakdownException { get; set; }
+    public Exception? ProtocolBreakdownException { get; set; }
 
     // Optional canned snapshot/response bodies so tests can drive real data
     // through the seeding path. Existing callers that don't set these get the
@@ -106,6 +107,12 @@ internal sealed class FakeDaemonClient : IDaemonClient {
         GetCountryBreakdownRequest request, CancellationToken cancellationToken) {
         if (CountryBreakdownException is not null) throw CountryBreakdownException;
         return Task.FromResult(new GetCountryBreakdownResponse());
+    }
+
+    public Task<GetProtocolBreakdownResponse> GetProtocolBreakdownAsync(
+        GetProtocolBreakdownRequest request, CancellationToken cancellationToken) {
+        if (ProtocolBreakdownException is not null) throw ProtocolBreakdownException;
+        return Task.FromResult(new GetProtocolBreakdownResponse());
     }
 
     public Task<GetProcessSummariesResponse> GetProcessSummariesAsync(

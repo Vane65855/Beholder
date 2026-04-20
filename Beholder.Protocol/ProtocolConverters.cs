@@ -146,6 +146,17 @@ internal static class ProtocolConverters {
         };
     }
 
+    /// <summary>Maps a protocol breakdown summary onto its wire equivalent.</summary>
+    public static Local.ProtocolBreakdownSummary ToProto(this Core.ProtocolBreakdownSummary source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Local.ProtocolBreakdownSummary {
+            ProtocolName = source.ProtocolName,
+            Transport = source.Transport,
+            TotalBytesIn = source.TotalBytesIn,
+            TotalBytesOut = source.TotalBytesOut,
+        };
+    }
+
     /// <summary>Maps a process traffic summary onto its wire equivalent.</summary>
     public static Local.ProcessTrafficSummaryProto ToProto(this Core.ProcessTrafficSummary source) {
         return new Local.ProcessTrafficSummaryProto {
@@ -188,6 +199,16 @@ internal static class ProtocolConverters {
         ArgumentNullException.ThrowIfNull(source);
         return new Core.CountryTrafficSummary(
             country: ParseCountryCode(source.Country),
+            totalBytesIn: source.TotalBytesIn,
+            totalBytesOut: source.TotalBytesOut);
+    }
+
+    /// <summary>Maps a wire protocol breakdown summary to its domain equivalent.</summary>
+    public static Core.ProtocolBreakdownSummary ToDomain(this Local.ProtocolBreakdownSummary source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Core.ProtocolBreakdownSummary(
+            protocolName: source.ProtocolName,
+            transport: source.Transport,
             totalBytesIn: source.TotalBytesIn,
             totalBytesOut: source.TotalBytesOut);
     }
