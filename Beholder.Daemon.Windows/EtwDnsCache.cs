@@ -17,8 +17,17 @@ namespace Beholder.Daemon.Windows;
 /// </summary>
 public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, IDisposable {
     private const string SessionName = "Beholder-DnsTrace";
-    private const int DnsQueryCompletedEventId = 3008;
     private static readonly Guid DnsClientProviderGuid = new("1C95126E-7EEA-49A9-A3FE-A378B03DDB4D");
+
+    // Candidate payload field names across Windows DNS Client ETW event
+    // variants. 3008 (DnsQueryCompleted) uses QueryName + QueryResults. 3010
+    // (cache lookup) and 3020 (DnsQueryCompletedEx on Win11+) use the same
+    // names on current builds, but earlier builds / variant events have used
+    // QueryString / Answer / CachedAddresses. We probe each in order and
+    // accept the first match, which makes us forward-compatible with minor
+    // schema drift without chasing specific event IDs.
+    private static readonly string[] QueryNameFields = ["QueryName", "QueryString"];
+    private static readonly string[] QueryResultsFields = ["QueryResults", "Answer", "CachedAddresses"];
 
     // ETW Source.Process() drains on a background thread. 5 s is well above any
     // observed drain time in practice; long enough to flush buffered events,
@@ -84,7 +93,8 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
                 throw;
             }
 
-            _logger.LogInformation("DNS ETW trace session started");
+            _logger.LogInformation(
+                "DNS ETW trace session started (accepting any event that carries a query name + answer)");
         }
 
         return Task.CompletedTask;
@@ -148,22 +158,55 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
 
     private void OnEtwEvent(TraceEvent data) {
         try {
-            if ((int)data.ID != DnsQueryCompletedEventId) return;
-
-            var queryName = data.PayloadByName("QueryName") as string;
-            var queryResults = data.PayloadByName("QueryResults") as string;
+            // Originally we hard-filtered to event id 3008 (DnsQueryCompleted)
+            // only. That misses cache-hit lookups (event 3010) which are the
+            // common case on a warm machine — revisiting a domain rarely fires
+            // 3008 because Windows serves it from the resolver cache. The
+            // payload-field probe below covers 3008, 3010, 3020 (Win11
+            // DnsQueryCompletedEx), and any future/variant events that expose
+            // the same logical fields.
+            var queryName = ReadPayloadString(data, QueryNameFields);
             if (string.IsNullOrWhiteSpace(queryName)) return;
+
+            var queryResults = ReadPayloadString(data, QueryResultsFields);
             if (string.IsNullOrWhiteSpace(queryResults)) return;
 
-            foreach (var address in ExtractAddresses(queryResults)) {
-                _cache[address] = queryName;
-            }
+            Ingest(queryName, queryResults);
         } catch (Exception ex) {
             // Outer ETW boundary: exceptions propagating back into TraceEvent can tear
             // down the entire trace session and, on some Windows SKUs, leave it in a
             // zombie state that persists until reboot. Log and swallow.
             _logger.LogWarning(ex, "Failed to process DNS ETW event {EventName}", data.EventName);
         }
+    }
+
+    /// <summary>
+    /// Ingests a decoded (queryName, queryResults) pair into the cache — the
+    /// same step <see cref="OnEtwEvent"/> performs once it has successfully
+    /// pulled both from the raw ETW payload. Exposed as <c>internal</c> so
+    /// tests can drive the cache-population path without constructing a
+    /// <c>TraceEvent</c>.
+    /// </summary>
+    internal void Ingest(string queryName, string queryResults) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(queryName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(queryResults);
+        foreach (var address in ExtractAddresses(queryResults)) {
+            _cache[address] = queryName;
+        }
+    }
+
+    /// <summary>
+    /// Probes an ETW event's payload for the first of <paramref name="candidateFields"/>
+    /// that returns a non-empty string. Returns <c>null</c> if none of the
+    /// candidates resolve. Folds the per-event-id field-name differences
+    /// inside <see cref="OnEtwEvent"/> into a single call site.
+    /// </summary>
+    private static string? ReadPayloadString(TraceEvent data, string[] candidateFields) {
+        foreach (var field in candidateFields) {
+            if (data.PayloadByName(field) is string value && !string.IsNullOrWhiteSpace(value))
+                return value;
+        }
+        return null;
     }
 
     // Windows formats QueryResults as a semicolon-separated list. Individual entries
