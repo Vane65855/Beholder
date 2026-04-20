@@ -131,8 +131,12 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         var processPath = SelectedProcess is null || SelectedProcess.IsAll
             ? null
             : SelectedProcess.ProcessPath;
+        // Resolve the preset against the current wall clock — otherwise the
+        // default "Last 5 Minutes" window stays pinned to app-start and every
+        // COLS query looks at an empty pre-launch window.
+        var range = SelectedTimeRange.Resolve();
         try {
-            return ColsVm.RefreshAsync(SelectedTimeRange, processPath);
+            return ColsVm.RefreshAsync(range, processPath);
         } catch (OperationCanceledException) {
             // Superseded by a later refresh — nothing to do, the next call
             // owns the UI state.
@@ -251,8 +255,9 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             // (or the aggregate if "All processes" is selected). The
             // orchestrator cancels any prior in-flight historical query so
             // rapid process-switching doesn't leave superseded daemon work
-            // running.
-            _ = LoadHistoricalChartForProcessAsync(SelectedTimeRange, value);
+            // running. Resolve the preset so the window tracks the current
+            // wall clock instead of whenever the dropdown was last touched.
+            _ = LoadHistoricalChartForProcessAsync(SelectedTimeRange.Resolve(), value);
         }
 
         if (ViewMode == TrafficViewMode.Cols) {
@@ -266,7 +271,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             var processPath = selected.IsAll ? null : selected.ProcessPath;
             var result = await _historicalQueries.LoadProcessChartAsync(range, processPath);
 
-            if (SelectedTimeRange != range || SelectedProcess != selected) return;
+            if (!SelectedTimeRange.IsSameSelectionAs(range) || SelectedProcess != selected) return;
 
             if (result.Points.Count == 0) {
                 ChartData = [];

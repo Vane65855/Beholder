@@ -63,6 +63,33 @@ public sealed class TimeRangeSelection {
     }
 
     /// <summary>
+    /// Returns a copy of this selection with <see cref="From"/>/<see cref="To"/>
+    /// recomputed against the current wall clock for preset ranges. Custom
+    /// ranges return themselves untouched (a user-picked absolute window must
+    /// not drift). Call this right before building a query request so the
+    /// daemon sees a window that matches the preset's semantics
+    /// ("Last 5 Minutes" = the last 5 minutes from <em>now</em>, not from
+    /// whenever the VM was constructed).
+    /// </summary>
+    public TimeRangeSelection Resolve() =>
+        Preset == TimeRangePreset.Custom ? this : FromPreset(Preset);
+
+    /// <summary>
+    /// True when this selection represents the same user choice as
+    /// <paramref name="other"/> — same preset, or same <see cref="From"/>/
+    /// <see cref="To"/> for Custom. Exists because the VM's
+    /// "did the user switch away while we queried" guards can't use reference
+    /// equality after <see cref="Resolve"/> (which returns a fresh preset
+    /// instance) started being called mid-query.
+    /// </summary>
+    public bool IsSameSelectionAs(TimeRangeSelection other) {
+        ArgumentNullException.ThrowIfNull(other);
+        if (Preset != other.Preset) return false;
+        if (Preset == TimeRangePreset.Custom) return From == other.From && To == other.To;
+        return true;
+    }
+
+    /// <summary>
     /// Build a Custom <see cref="TimeRangeSelection"/> from two local calendar
     /// dates the user picked (e.g., from <c>CalendarDatePicker.SelectedDate</c>,
     /// which returns an <see cref="DateTimeKind.Unspecified"/> <see cref="DateTime"/>
