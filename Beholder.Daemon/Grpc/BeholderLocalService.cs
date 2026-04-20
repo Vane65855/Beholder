@@ -232,23 +232,21 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
 
     public override Task<Local.GetProcessDestinationsResponse> GetProcessDestinations(
         Local.GetProcessDestinationsRequest request, ServerCallContext context
-    ) {
-        if (string.IsNullOrWhiteSpace(request.ProcessPath))
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "process_path is required"));
+    ) => ExecuteQueryAsync(nameof(GetProcessDestinations), async cancellationToken => {
+        var from = request.FromUnixNs.FromUnixTimeNanoseconds();
+        var to = request.ToUnixNs.FromUnixTimeNanoseconds();
+        // Empty process_path = aggregate across all processes (Phase 6.3
+        // widening for the Traffic tab's COLS view).
+        var processPath = string.IsNullOrWhiteSpace(request.ProcessPath) ? null : request.ProcessPath;
 
-        return ExecuteQueryAsync(nameof(GetProcessDestinations), async cancellationToken => {
-            var from = request.FromUnixNs.FromUnixTimeNanoseconds();
-            var to = request.ToUnixNs.FromUnixTimeNanoseconds();
+        var destinations = await _trafficStore.GetDestinationsAsync(
+            processPath, from, to, cancellationToken)
+            .ConfigureAwait(false);
 
-            var destinations = await _trafficStore.GetDestinationsAsync(
-                request.ProcessPath, from, to, cancellationToken)
-                .ConfigureAwait(false);
-
-            var response = new Local.GetProcessDestinationsResponse();
-            foreach (var dest in destinations) response.Destinations.Add(dest.ToProto());
-            return response;
-        }, context);
-    }
+        var response = new Local.GetProcessDestinationsResponse();
+        foreach (var dest in destinations) response.Destinations.Add(dest.ToProto());
+        return response;
+    }, context);
 
     public override Task<Local.GetAggregateTimelineResponse> GetAggregateTimeline(
         Local.GetAggregateTimelineRequest request, ServerCallContext context
@@ -276,13 +274,30 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     ) => ExecuteQueryAsync(nameof(GetCountryBreakdown), async cancellationToken => {
         var from = request.FromUnixNs.FromUnixTimeNanoseconds();
         var to = request.ToUnixNs.FromUnixTimeNanoseconds();
+        var processPath = string.IsNullOrWhiteSpace(request.ProcessPath) ? null : request.ProcessPath;
 
         var breakdown = await _trafficStore.GetCountryBreakdownAsync(
-            processPath: null, from, to, cancellationToken)
+            processPath, from, to, cancellationToken)
             .ConfigureAwait(false);
 
         var response = new Local.GetCountryBreakdownResponse();
         foreach (var summary in breakdown) response.Countries.Add(summary.ToProto());
+        return response;
+    }, context);
+
+    public override Task<Local.GetProtocolBreakdownResponse> GetProtocolBreakdown(
+        Local.GetProtocolBreakdownRequest request, ServerCallContext context
+    ) => ExecuteQueryAsync(nameof(GetProtocolBreakdown), async cancellationToken => {
+        var from = request.FromUnixNs.FromUnixTimeNanoseconds();
+        var to = request.ToUnixNs.FromUnixTimeNanoseconds();
+        var processPath = string.IsNullOrWhiteSpace(request.ProcessPath) ? null : request.ProcessPath;
+
+        var breakdown = await _trafficStore.GetProtocolBreakdownAsync(
+            processPath, from, to, cancellationToken)
+            .ConfigureAwait(false);
+
+        var response = new Local.GetProtocolBreakdownResponse();
+        foreach (var summary in breakdown) response.Protocols.Add(summary.ToProto());
         return response;
     }, context);
 

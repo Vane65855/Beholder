@@ -167,6 +167,13 @@ message CountryTrafficSummary {
   int64 total_bytes_out = 3;
 }
 
+message ProtocolBreakdownSummary {
+  string protocol_name = 1;    // "HTTPS", "DNS", "Port 8080", etc.
+  string transport = 2;        // "TCP" (UDP deferred)
+  int64 total_bytes_in = 3;
+  int64 total_bytes_out = 4;
+}
+
 message GetProcessTimelineRequest {
   string process_path = 1;
   int64 from_unix_ns = 2;
@@ -179,6 +186,10 @@ message GetProcessTimelineResponse {
 }
 
 message GetProcessDestinationsRequest {
+  // Empty string = aggregate across all processes; non-empty = filter to
+  // that single process. Phase 6.3 widened this RPC to support both modes
+  // for the Traffic tab's COLS view; "Process" in the name is retained
+  // for wire compatibility.
   string process_path = 1;
   int64 from_unix_ns = 2;
   int64 to_unix_ns = 3;
@@ -201,10 +212,25 @@ message GetAggregateTimelineResponse {
 message GetCountryBreakdownRequest {
   int64 from_unix_ns = 1;
   int64 to_unix_ns = 2;
+  // Empty string = aggregate across all processes; non-empty = filter to
+  // that single process. Added in Phase 6.3 for the Traffic tab's COLS view.
+  string process_path = 3;
 }
 
 message GetCountryBreakdownResponse {
   repeated CountryTrafficSummary countries = 1;
+}
+
+message GetProtocolBreakdownRequest {
+  int64 from_unix_ns = 1;
+  int64 to_unix_ns = 2;
+  // Empty string = aggregate across all processes; non-empty = filter to
+  // that single process.
+  string process_path = 3;
+}
+
+message GetProtocolBreakdownResponse {
+  repeated ProtocolBreakdownSummary protocols = 1;
 }
 
 message GetProcessSummariesRequest {
@@ -235,5 +261,6 @@ service BeholderLocal {
   rpc GetProcessDestinations(GetProcessDestinationsRequest) returns (GetProcessDestinationsResponse);
   rpc GetAggregateTimeline(GetAggregateTimelineRequest) returns (GetAggregateTimelineResponse);
   rpc GetCountryBreakdown(GetCountryBreakdownRequest) returns (GetCountryBreakdownResponse);
+  rpc GetProtocolBreakdown(GetProtocolBreakdownRequest) returns (GetProtocolBreakdownResponse);
   rpc GetProcessSummaries(GetProcessSummariesRequest) returns (GetProcessSummariesResponse);
 }

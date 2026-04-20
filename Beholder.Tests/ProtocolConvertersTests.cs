@@ -250,6 +250,26 @@ public class ProtocolConvertersTests {
     }
 
     [Fact]
+    public void ProtocolBreakdownSummary_ToProto_AllFieldsPreserved() {
+        var source = new Core.ProtocolBreakdownSummary("HTTPS", "TCP", 10_000, 5_000);
+
+        var proto = source.ToProto();
+
+        Assert.Equal("HTTPS", proto.ProtocolName);
+        Assert.Equal("TCP", proto.Transport);
+        Assert.Equal(10_000, proto.TotalBytesIn);
+        Assert.Equal(5_000, proto.TotalBytesOut);
+    }
+
+    [Fact]
+    public void ProtocolBreakdownSummary_ToDomain_RoundTrips() {
+        var source = new Core.ProtocolBreakdownSummary("DNS", "TCP", 100, 50);
+        var roundTripped = source.ToProto().ToDomain();
+
+        Assert.Equal(source, roundTripped);
+    }
+
+    [Fact]
     public void FromUnixTimeNanoseconds_ConvertsCorrectly() {
         var ns = 1_700_000_000_000_000_000L;
         var result = ns.FromUnixTimeNanoseconds();
