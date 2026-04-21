@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Text;
 using System.Threading.Channels;
 using Beholder.Core;
 using Microsoft.Diagnostics.Tracing;
@@ -67,8 +68,17 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
     private Task? _metricsTask;
     private CancellationTokenSource? _backgroundCts;
     private long _droppedCount;       // Interlocked
+    private long _eventsReceived;     // Interlocked; every OnEtwEvent invocation
+    private long _eventsIngested;     // Interlocked; every successful TryWrite
     private int _eventsLostBaseline;  // Interlocked; TraceEventSession.EventsLost is int
     private bool _disposed;
+
+    // One-shot schema dump: keyed by (EventId << 8 | Version), value is an
+    // unused byte. TryAdd returns true on first sight of a given (id, version)
+    // tuple, triggering a structured log of the event's payload shape. Runs
+    // at most ~10 times over a daemon lifetime since the DNS Client provider
+    // has a fixed event table.
+    private readonly ConcurrentDictionary<int, byte> _schemaDumped = new();
 
     public EtwDnsCache(ILogger<EtwDnsCache> logger, IOptionsMonitor<DnsOptions> options) {
         ArgumentNullException.ThrowIfNull(logger);
@@ -298,6 +308,18 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
         // fast as possible to keep the session's kernel ring from filling.
         // Do only the minimum needed to pull the query-name + answer pair,
         // then enqueue. All parsing + cache updates happen in ConsumeAsync.
+
+        // Diagnostic: count every callback invocation, regardless of whether
+        // we recognise the event. The gap between this and _eventsIngested
+        // is the payload-probe miss count — the metric that tells us whether
+        // Win11 shipped a schema our field probe doesn't handle.
+        Interlocked.Increment(ref _eventsReceived);
+
+        // One-shot per-event-id schema dump, so the first sighting of each
+        // event variant the provider emits on THIS machine is visible in
+        // logs. Runs at most once per (id, version) tuple.
+        MaybeDumpSchemaOnce(data);
+
         try {
             var queryName = ReadPayloadString(data, QueryNameFields);
             if (string.IsNullOrWhiteSpace(queryName)) return;
@@ -314,14 +336,64 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
             //
             // TryWrite always returns true under DropOldest — we rely on the
             // ItemDropped callback wired at channel-creation time to count
-            // overflow events.
-            _queue?.Writer.TryWrite(new DnsEventSnapshot(queryName, queryResults));
+            // overflow events. When it does return true we count the success.
+            if (_queue?.Writer.TryWrite(new DnsEventSnapshot(queryName, queryResults)) == true)
+                Interlocked.Increment(ref _eventsIngested);
         } catch (Exception ex) {
             // Outer ETW boundary: exceptions propagating back into TraceEvent can tear
             // down the entire trace session and, on some Windows SKUs, leave it in a
             // zombie state that persists until reboot. Log and swallow.
             _logger.LogWarning(ex, "Failed to enqueue DNS ETW event {EventName}", data.EventName);
         }
+    }
+
+    private void MaybeDumpSchemaOnce(TraceEvent data) {
+        // Key includes version so a provider that ships a v2 variant of an
+        // event ID we already saw as v1 still gets a fresh schema dump.
+        var key = ((int)data.ID << 8) | (data.Version & 0xFF);
+        if (!_schemaDumped.TryAdd(key, 0)) return;
+
+        try {
+            var summary = BuildSchemaSummary(data);
+            _logger.LogInformation(
+                "DNS ETW event first-seen id={EventId} v={Version} name={EventName} fields={Fields}",
+                (int)data.ID,
+                data.Version,
+                data.EventName ?? "(unknown)",
+                summary);
+        } catch (Exception ex) {
+            // Schema introspection failure must not tear down the session —
+            // log and move on. The ingest happy path stays intact.
+            _logger.LogWarning(
+                ex, "Failed to build schema summary for DNS event id={EventId}", (int)data.ID);
+        }
+    }
+
+    private static string BuildSchemaSummary(TraceEvent data) {
+        var sb = new StringBuilder();
+        sb.Append('{');
+        var names = data.PayloadNames;
+        for (var i = 0; i < names.Length; i++) {
+            if (i > 0) sb.Append(", ");
+            var name = names[i];
+            object? value = null;
+            try {
+                value = data.PayloadValue(i);
+            } catch {
+                // Best-effort dump — a field that fails to marshal still
+                // tells us its name, which is enough to extend the probe.
+            }
+            var typeName = value?.GetType().Name ?? "null";
+            var repr = value switch {
+                null => "null",
+                string s when s.Length > 80 => "\"" + s[..80] + "…\"",
+                string s => "\"" + s + "\"",
+                _ => value.ToString() ?? "?",
+            };
+            sb.Append(name).Append('=').Append(typeName).Append('(').Append(repr).Append(')');
+        }
+        sb.Append('}');
+        return sb.ToString();
     }
 
     private async Task ConsumeAsync(
@@ -374,15 +446,41 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
         var eventsLostDelta = currentEventsLost - previousEventsLost;
         if (eventsLostDelta < 0) eventsLostDelta = 0;  // counter reset — treat as zero this window
 
-        // Exchange drop counter to zero and capture the delta for the window.
+        // Exchange all per-window counters to zero and capture the deltas for
+        // this window. Ordering note: the reads happen close together so a
+        // burst arriving mid-read skews a window by at most one tick; for
+        // diagnostics that's fine.
         var queueDrops = Interlocked.Exchange(ref _droppedCount, 0);
+        var receivedDelta = Interlocked.Exchange(ref _eventsReceived, 0);
+        var ingestedDelta = Interlocked.Exchange(ref _eventsIngested, 0);
         var queueDepth = queue.Reader.Count;
 
-        // Only log when something's happening — steady-state silence is the goal.
-        if (eventsLostDelta == 0 && queueDrops == 0 && queueDepth == 0) return;
+        // probe-dropped = events the callback saw but whose QueryName or
+        // QueryResults field didn't decode to a string via our probe. The
+        // classic diagnostic for Win11 schema drift. Channel drops ARE
+        // counted in `ingested` (the successful TryWrite happened) so we
+        // subtract them out — the leftover is true probe failure.
+        var probeDropped = receivedDelta - ingestedDelta - queueDrops;
+        if (probeDropped < 0) probeDropped = 0;  // defensive; shouldn't happen
 
-        _logger.LogWarning(
-            "DNS capture pressure: ETW EventsLost delta {EventsLostDelta}, queue drops {QueueDrops}, queue depth {QueueDepth}/{QueueCapacity}",
+        // Silent when truly idle — no events seen, no pressure, no backlog.
+        if (receivedDelta == 0 && ingestedDelta == 0 && eventsLostDelta == 0
+            && queueDrops == 0 && queueDepth == 0) return;
+
+        // Warning when ANY pressure signal fired in this window; Information
+        // when we're just reporting healthy activity so troubleshooting
+        // sessions can see the system is working.
+        var healthy = eventsLostDelta == 0 && queueDrops == 0 && probeDropped == 0;
+        var level = healthy ? LogLevel.Information : LogLevel.Warning;
+        var status = healthy ? "steady" : "pressure";
+
+        _logger.Log(
+            level,
+            "DNS capture {Status}: received={Received} ingested={Ingested} probe-dropped={ProbeDropped} ETW-lost={Lost} queue-drops={Drops} depth={Depth}/{Capacity}",
+            status,
+            receivedDelta,
+            ingestedDelta,
+            probeDropped,
             eventsLostDelta,
             queueDrops,
             queueDepth,
