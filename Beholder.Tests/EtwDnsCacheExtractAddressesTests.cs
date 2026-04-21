@@ -1,11 +1,16 @@
 #if PLATFORM_WINDOWS
 using System.Net;
 using Beholder.Daemon.Windows;
+using Beholder.Tests.TestDoubles;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Beholder.Tests;
 
 public class EtwDnsCacheExtractAddressesTests {
+    private static EtwDnsCache CreateCache(int queueCapacity = 1024) =>
+        new(NullLogger<EtwDnsCache>.Instance,
+            new FakeOptionsMonitor<DnsOptions>(new DnsOptions { QueueCapacity = queueCapacity }));
+
     [Fact]
     public void ExtractAddresses_EmptyInput_ReturnsEmpty() {
         var addresses = EtwDnsCache.ExtractAddresses(string.Empty).ToList();
@@ -69,7 +74,7 @@ public class EtwDnsCacheExtractAddressesTests {
 
     [Fact]
     public void Ingest_PopulatesCacheForSingleIpv4() {
-        var cache = new EtwDnsCache(NullLogger<EtwDnsCache>.Instance);
+        var cache = CreateCache();
 
         cache.Ingest("example.com", "93.184.216.34");
 
@@ -80,7 +85,7 @@ public class EtwDnsCacheExtractAddressesTests {
     public void Ingest_PopulatesCacheForMultiAnswerEvent() {
         // Mirrors what a cache-hit event (3010) typically contains — a record
         // with multiple addresses for the same query.
-        var cache = new EtwDnsCache(NullLogger<EtwDnsCache>.Instance);
+        var cache = CreateCache();
 
         cache.Ingest("cdn.example.com", "104.16.0.1;104.16.0.2;104.16.0.3");
 
@@ -93,7 +98,7 @@ public class EtwDnsCacheExtractAddressesTests {
     public void Ingest_LaterQueryOverwritesPreviousHostnameForSameIp() {
         // IPs can be reused across domains (shared hosting, CDN edges). Most
         // recent wins — matches the existing docstring on IDnsCache.
-        var cache = new EtwDnsCache(NullLogger<EtwDnsCache>.Instance);
+        var cache = CreateCache();
 
         cache.Ingest("first.example.com", "93.184.216.34");
         cache.Ingest("second.example.com", "93.184.216.34");
@@ -107,7 +112,7 @@ public class EtwDnsCacheExtractAddressesTests {
         // interleaved with type-1 A rows. ExtractAddresses skips CNAMEs
         // (their tail tokens don't parse as IPs), so only the actual A
         // records land in the cache.
-        var cache = new EtwDnsCache(NullLogger<EtwDnsCache>.Instance);
+        var cache = CreateCache();
 
         cache.Ingest(
             "www.example.com",
@@ -119,21 +124,21 @@ public class EtwDnsCacheExtractAddressesTests {
 
     [Fact]
     public void Resolve_Miss_ReturnsNull() {
-        var cache = new EtwDnsCache(NullLogger<EtwDnsCache>.Instance);
+        var cache = CreateCache();
 
         Assert.Null(cache.Resolve(IPAddress.Parse("1.2.3.4")));
     }
 
     [Fact]
     public void Ingest_WhitespaceQueryName_Throws() {
-        var cache = new EtwDnsCache(NullLogger<EtwDnsCache>.Instance);
+        var cache = CreateCache();
 
         Assert.Throws<ArgumentException>(() => cache.Ingest("  ", "93.184.216.34"));
     }
 
     [Fact]
     public void Ingest_WhitespaceQueryResults_Throws() {
-        var cache = new EtwDnsCache(NullLogger<EtwDnsCache>.Instance);
+        var cache = CreateCache();
 
         Assert.Throws<ArgumentException>(() => cache.Ingest("example.com", "  "));
     }
