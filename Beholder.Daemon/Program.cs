@@ -68,6 +68,8 @@ if (OperatingSystem.IsWindows()) {
         builder.Configuration.GetSection("Recording"));
     builder.Services.Configure<RollupOptions>(
         builder.Configuration.GetSection("Rollup"));
+    builder.Services.Configure<DnsOptions>(
+        builder.Configuration.GetSection("Dns"));
 
     // Broadcast service must be registered BEFORE the pipeline so its StartAsync
     // runs first and subscribes to ISnapshotBatchSource.OnSnapshotBatch before
