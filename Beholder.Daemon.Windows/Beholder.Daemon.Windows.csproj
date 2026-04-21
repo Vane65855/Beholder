@@ -18,7 +18,14 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <SupportedOSPlatform>windows</SupportedOSPlatform>
+    <!-- Windows 11+ only: narrows the Roslyn platform-compatibility analyzer
+         to Win11 APIs, documents the runtime requirement in assembly metadata,
+         and lets DnsApiInterop assume a single DNS_CACHE_ENTRY layout. -->
+    <SupportedOSPlatform>windows10.0.22000</SupportedOSPlatform>
+    <!-- Required by the LibraryImport source generator — it emits stubs that
+         use unmanaged function pointers. No hand-written unsafe blocks in the
+         codebase; this only enables the generator's output. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
 </Project>
