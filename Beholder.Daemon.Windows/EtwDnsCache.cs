@@ -149,8 +149,25 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
                     SingleWriter = true,
                 },
                 itemDropped: OnItemDropped);
+
+            // Preload BEFORE the consumer starts so IngestResolved writes go
+            // directly into _cache (which is thread-safe); the ordering also
+            // means any very-early ETW event that arrives on the drain thread
+            // finds a populated cache and won't overwrite a fresh resolution
+            // with a stale preload value. Synchronous on purpose — preload
+            // completes in single-digit ms on a typical warm machine.
+            PreloadFromWindowsDnsCache();
+
             _backgroundCts = new CancellationTokenSource();
-            _consumerTask = Task.Run(() => ConsumeAsync(_backgroundCts.Token));
+            // Pass the channel as a captured local rather than letting the
+            // consumer re-read _queue at start — StopAsync nulls _queue
+            // before awaiting the consumer task, and under thread-pool
+            // pressure the consumer can start AFTER that nulling and see a
+            // null _queue, silently skipping the drain. Captured local keeps
+            // the consumer's view stable across the lifecycle transition.
+            var queueForConsumer = _queue;
+            var ctsForConsumer = _backgroundCts;
+            _consumerTask = Task.Run(() => ConsumeAsync(queueForConsumer, ctsForConsumer.Token));
             _metricsTask = Task.Run(() => RunMetricsLoopAsync(_backgroundCts.Token));
 
             _logger.LogInformation(
@@ -307,9 +324,10 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
         }
     }
 
-    private async Task ConsumeAsync(CancellationToken cancellationToken) {
-        var queue = _queue;
-        if (queue is null) return;
+    private async Task ConsumeAsync(
+        Channel<DnsEventSnapshot> queue,
+        CancellationToken cancellationToken
+    ) {
         try {
             await foreach (var ev in queue.Reader.ReadAllAsync(cancellationToken)
                                                  .ConfigureAwait(false)) {
@@ -386,6 +404,41 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
     }
 
     /// <summary>
+    /// Writes a pre-parsed (queryName, address) pair directly into the cache,
+    /// bypassing <see cref="ExtractAddresses"/>. Used by the preload path
+    /// (<see cref="PreloadFromWindowsDnsCache"/>) where records come from
+    /// <c>DnsQuery_W</c> already typed, and by tests that want deterministic
+    /// control over cache contents without building a Windows-formatted
+    /// answer string. Same last-writer-wins semantics as <see cref="Ingest"/>.
+    /// </summary>
+    internal void IngestResolved(string queryName, IPAddress address) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(queryName);
+        ArgumentNullException.ThrowIfNull(address);
+        _cache[address] = queryName;
+    }
+
+    /// <summary>
+    /// One-shot preload: enumerates the Windows DNS resolver cache via
+    /// <see cref="DnsApiInterop.TryEnumerateResolverCache"/> and folds each
+    /// (name, address) pair into <c>_cache</c>. Runs at the tail of
+    /// <see cref="StartAsync"/>, before the ETW consumer starts, to close
+    /// the cold-start gap where flows opened before the daemon attached to
+    /// ETW would otherwise show as raw IPs indefinitely. Any failure inside
+    /// the interop layer is logged there and surfaces here as a zero-element
+    /// enumeration — the daemon still starts successfully.
+    /// </summary>
+    private void PreloadFromWindowsDnsCache() {
+        var loaded = 0;
+        foreach (var (name, address) in DnsApiInterop.TryEnumerateResolverCache(_logger)) {
+            IngestResolved(name, address);
+            loaded++;
+        }
+        if (loaded > 0)
+            _logger.LogInformation(
+                "Preloaded {Count} entries from Windows DNS resolver cache", loaded);
+    }
+
+    /// <summary>
     /// Test-only: pushes a synthetic event onto the queue as if it had been
     /// decoded from an ETW payload. Under <see cref="BoundedChannelFullMode.DropOldest"/>
     /// this always succeeds — overflows are counted via the channel's
@@ -423,7 +476,11 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
                 },
                 itemDropped: OnItemDropped);
             _backgroundCts = new CancellationTokenSource();
-            _consumerTask = Task.Run(() => ConsumeAsync(_backgroundCts.Token));
+            // Capture locals so the consumer's view is stable across the
+            // StopAsync / TestStopQueueOnlyAsync teardown that nulls _queue.
+            var queueForConsumer = _queue;
+            var ctsForConsumer = _backgroundCts;
+            _consumerTask = Task.Run(() => ConsumeAsync(queueForConsumer, ctsForConsumer.Token));
         }
     }
 
