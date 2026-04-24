@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Net;
 using System.Text;
 using System.Threading.Channels;
@@ -47,6 +48,25 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
     private static readonly string[] QueryNameFields = ["QueryName", "QueryString"];
     private static readonly string[] QueryResultsFields = ["QueryResults", "Answer", "CachedAddresses"];
 
+    // Per-query lifecycle events emitted by the DNS Client provider that
+    // carry metadata (QueryName, server IP, response status) but no answer
+    // we can cache. Enumerating a single DNS resolution typically fires 6-7
+    // of these around each useful 3008/3018/3020 event, which inflates the
+    // "probe-dropped" metric and makes healthy sessions look pressured. We
+    // count them separately so the probe-dropped gap reflects only genuine
+    // probe misses (schema drift, unhandled event IDs).
+    //
+    // Event IDs drawn from the Win10-18990 and Win11 DNS Client manifests:
+    //   3006 — DnsQueryStarted
+    //   3009 — NetworkQueryInitiated
+    //   3010 — SentToServer
+    //   3011 — ReceivedFromServer
+    //   3016 — (routing event)
+    //   3019 — (routing event)
+    //   1015 — DnsServerTimeout
+    private static readonly FrozenSet<int> LifecycleEventIds =
+        new HashSet<int> { 3006, 3009, 3010, 3011, 3016, 3019, 1015 }.ToFrozenSet();
+
     // ETW Source.Process() drains on a background thread. 5 s is well above any
     // observed drain time in practice; long enough to flush buffered events,
     // short enough that a stuck session doesn't block daemon shutdown.
@@ -70,6 +90,7 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
     private long _droppedCount;       // Interlocked
     private long _eventsReceived;     // Interlocked; every OnEtwEvent invocation
     private long _eventsIngested;     // Interlocked; every successful TryWrite
+    private long _eventsLifecycle;    // Interlocked; per-query events without answers (not a probe miss)
     private int _eventsLostBaseline;  // Interlocked; TraceEventSession.EventsLost is int
     private bool _disposed;
 
@@ -315,6 +336,14 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
         // Win11 shipped a schema our field probe doesn't handle.
         Interlocked.Increment(ref _eventsReceived);
 
+        // Lifecycle events (3006 start / 3010 sent / 3011 response / 1015
+        // timeout / etc.) legitimately have no answer to cache. Counting
+        // them separately keeps probe-dropped focused on genuine misses.
+        if (LifecycleEventIds.Contains((int)data.ID)) {
+            Interlocked.Increment(ref _eventsLifecycle);
+            return;
+        }
+
         // One-shot per-event-id schema dump, so the first sighting of each
         // event variant the provider emits on THIS machine is visible in
         // logs. Runs at most once per (id, version) tuple.
@@ -453,14 +482,16 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
         var queueDrops = Interlocked.Exchange(ref _droppedCount, 0);
         var receivedDelta = Interlocked.Exchange(ref _eventsReceived, 0);
         var ingestedDelta = Interlocked.Exchange(ref _eventsIngested, 0);
+        var lifecycleDelta = Interlocked.Exchange(ref _eventsLifecycle, 0);
         var queueDepth = queue.Reader.Count;
 
-        // probe-dropped = events the callback saw but whose QueryName or
-        // QueryResults field didn't decode to a string via our probe. The
-        // classic diagnostic for Win11 schema drift. Channel drops ARE
-        // counted in `ingested` (the successful TryWrite happened) so we
-        // subtract them out — the leftover is true probe failure.
-        var probeDropped = receivedDelta - ingestedDelta - queueDrops;
+        // probe-dropped = events the callback saw, weren't known lifecycle
+        // events, yet whose QueryName or QueryResults field didn't decode to
+        // a string via our probe. That gap is the classic diagnostic for
+        // Win11 schema drift or an unhandled event ID with useful payload.
+        // Channel drops ARE counted in `ingested` (the successful TryWrite
+        // happened) so we subtract them to isolate true probe failure.
+        var probeDropped = receivedDelta - ingestedDelta - queueDrops - lifecycleDelta;
         if (probeDropped < 0) probeDropped = 0;  // defensive; shouldn't happen
 
         // Silent when truly idle — no events seen, no pressure, no backlog.
@@ -476,10 +507,11 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
 
         _logger.Log(
             level,
-            "DNS capture {Status}: received={Received} ingested={Ingested} probe-dropped={ProbeDropped} ETW-lost={Lost} queue-drops={Drops} depth={Depth}/{Capacity}",
+            "DNS capture {Status}: received={Received} ingested={Ingested} lifecycle={Lifecycle} probe-dropped={ProbeDropped} ETW-lost={Lost} queue-drops={Drops} depth={Depth}/{Capacity}",
             status,
             receivedDelta,
             ingestedDelta,
+            lifecycleDelta,
             probeDropped,
             eventsLostDelta,
             queueDrops,
@@ -635,20 +667,31 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
     // "type: <code>" prefix ("type:  1 93.184.216.34"). For CNAME records the entry
     // is a hostname, which we skip. The parser is deliberately lenient: it tries the
     // whole segment first, then falls back to the last whitespace-separated token.
+    //
+    // Windows uses the all-zero sentinel ("0.0.0.0" / "::") as a negative-cache
+    // marker — event 3018 fires with QueryResults="0.0.0.0;" for a domain whose
+    // resolution failed and was cached as "do not retry" by the resolver. Those
+    // aren't real destinations and would pollute our IP → hostname map if we
+    // cached them, so we filter them out here rather than in the caller.
     internal static IEnumerable<IPAddress> ExtractAddresses(string queryResults) {
         var segments = queryResults.Split(
             ';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         foreach (var raw in segments) {
             if (IPAddress.TryParse(raw, out var direct)) {
+                if (IsZeroAddress(direct)) continue;
                 yield return direct;
                 continue;
             }
             var lastSpace = raw.LastIndexOf(' ');
             if (lastSpace >= 0 && IPAddress.TryParse(raw[(lastSpace + 1)..], out var trailing)) {
+                if (IsZeroAddress(trailing)) continue;
                 yield return trailing;
             }
         }
     }
+
+    private static bool IsZeroAddress(IPAddress address) =>
+        address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any);
 
     /// <summary>
     /// In-flight snapshot of a decoded ETW event — the two fields
