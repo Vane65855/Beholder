@@ -558,6 +558,11 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
     /// enumeration — the daemon still starts successfully.
     /// </summary>
     private void PreloadFromWindowsDnsCache() {
+        if (!_options.EnablePreload) {
+            _logger.LogInformation("DNS cache preload disabled by config (DnsOptions.EnablePreload=false)");
+            return;
+        }
+
         var loaded = 0;
         foreach (var (name, address) in DnsApiInterop.TryEnumerateResolverCache(_logger)) {
             IngestResolved(name, address);
