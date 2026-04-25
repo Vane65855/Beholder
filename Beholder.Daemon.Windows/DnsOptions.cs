@@ -41,4 +41,22 @@ public sealed class DnsOptions {
     /// into <c>EventsLost</c>.
     /// </summary>
     public int SessionBufferSizeMB { get; set; } = 16;
+
+    /// <summary>
+    /// Whether the daemon attempts to preload its hostname cache from the
+    /// Windows DNS resolver cache at startup via the undocumented
+    /// <c>DnsGetCacheDataTable</c> export. Default <c>true</c>.
+    /// </summary>
+    /// <remarks>
+    /// Kill-switch for environments where the underlying P/Invoke
+    /// misbehaves. The Win11 22H2+ behaviour where the legacy export
+    /// returns <c>ERROR_INVALID_FUNCTION</c> is logged-and-skipped already,
+    /// so this flag exists for the harder failure mode: a future Windows
+    /// update that surfaces a different signature or a process-isolation
+    /// rule that makes the call itself dangerous. Set to <c>false</c> in
+    /// <c>appsettings.json</c> under section <c>"Dns"</c> (or via env var
+    /// <c>Dns__EnablePreload=false</c>) to skip the preload entirely. See
+    /// <c>docs/decisions/004-dns-cache-preload-undocumented-api.md</c>.
+    /// </remarks>
+    public bool EnablePreload { get; set; } = true;
 }

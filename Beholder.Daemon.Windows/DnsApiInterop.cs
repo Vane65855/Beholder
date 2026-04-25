@@ -76,14 +76,20 @@ internal static partial class DnsApiInterop {
     [LibraryImport("dnsapi.dll", EntryPoint = "DnsGetCacheDataTable")]
     private static partial uint DnsGetCacheDataTable(out IntPtr ppCacheTable);
 
-    // Newer Win11 variant of the same function. On some Win11 builds the old
-    // <c>DnsGetCacheDataTable</c> export is present but returns
-    // <c>ERROR_INVALID_FUNCTION</c> (status 1), forcing callers onto the Ex
-    // variant. Signature is the same as the old one on current builds — a
-    // single PDNS_CACHE_ENTRY out-pointer — so we can try one then the other
-    // without a different struct layout.
-    [LibraryImport("dnsapi.dll", EntryPoint = "DnsGetCacheDataTableEx")]
-    private static partial uint DnsGetCacheDataTableEx(out IntPtr ppCacheTable);
+    // The DnsGetCacheDataTableEx export exists on Win11 22H2+ — it's the
+    // path the OS itself takes when the legacy DnsGetCacheDataTable returns
+    // ERROR_INVALID_FUNCTION (status 1). Calling it is tempting but its
+    // exact prototype is undocumented. A previous attempt at this declared
+    // it with the same single-out-pointer signature as the legacy export
+    // and immediately produced 0xC0000005 (STATUS_ACCESS_VIOLATION) at
+    // daemon startup on a real user's machine: marshalled call, wrong arg
+    // count, stack corruption, hard crash. Until a verified prototype is
+    // available (Microsoft SDK header, osquery-style real-world reference,
+    // or a definitive disassembly), we deliberately do NOT call Ex. Users
+    // on builds where the legacy export returns status 1 lose the preload
+    // benefit but the daemon still starts and the live ETW path keeps
+    // populating the cache from this point forward. See
+    // docs/decisions/004-dns-cache-preload-undocumented-api.md.
 
     [LibraryImport("dnsapi.dll", EntryPoint = "DnsQuery_W", StringMarshalling = StringMarshalling.Utf16)]
     private static partial uint DnsQueryW(
@@ -132,41 +138,46 @@ internal static partial class DnsApiInterop {
                 "DNS cache preload skipped: could not load dnsapi.dll");
             yield break;
         }
-        bool exHasExport;
-        bool legacyHasExport;
         try {
-            exHasExport = NativeLibrary.TryGetExport(handle, "DnsGetCacheDataTableEx", out _);
-            legacyHasExport = NativeLibrary.TryGetExport(handle, "DnsGetCacheDataTable", out _);
+            if (!NativeLibrary.TryGetExport(handle, "DnsGetCacheDataTable", out _)) {
+                logger.LogWarning(
+                    "DNS cache preload skipped: DnsGetCacheDataTable export not found on this Windows build");
+                yield break;
+            }
         } finally {
             NativeLibrary.Free(handle);
         }
 
-        if (!exHasExport && !legacyHasExport) {
+        IntPtr cacheTable;
+        uint status;
+        try {
+            status = DnsGetCacheDataTable(out cacheTable);
+        } catch (Exception ex) {
+            logger.LogWarning(ex, "DNS cache preload skipped: DnsGetCacheDataTable threw");
+            yield break;
+        }
+
+        if (status != ERROR_SUCCESS) {
+            // On Win11 22H2+ the legacy export sometimes returns
+            // ERROR_INVALID_FUNCTION (status 1); the working implementation
+            // moved under DnsGetCacheDataTableEx whose exact prototype is
+            // undocumented and unsafe to call without verification. Users
+            // on these builds lose the preload but the daemon starts fine
+            // and live ETW continues to populate the cache. The
+            // EnablePreload kill-switch in DnsOptions exists for any case
+            // where calling the legacy export itself is dangerous on a
+            // given build.
             logger.LogWarning(
-                "DNS cache preload skipped: neither DnsGetCacheDataTableEx nor DnsGetCacheDataTable export found on this Windows build");
+                "DNS cache preload skipped: DnsGetCacheDataTable returned status {Status}; on Win11 22H2+ this is expected (see docs/decisions/004-dns-cache-preload-undocumented-api.md)",
+                status);
             yield break;
         }
 
-        // Prefer Ex on Win11 — the legacy export survives but returns
-        // ERROR_INVALID_FUNCTION (1) on recent builds. If Ex is absent or
-        // itself fails, fall back to the legacy export. Either outcome is
-        // acceptable; both failing means we log and continue with empty
-        // preload.
-        var result = AcquireCacheTable(exHasExport, legacyHasExport, logger);
-        if (result.CacheTable == IntPtr.Zero) {
-            if (result.SuccessfulEntryPoint is null) {
-                logger.LogWarning(
-                    "DNS cache preload skipped: all resolver-cache entry points returned non-zero (last status {LastStatus}, attempts {Attempts})",
-                    result.LastStatus, result.AttemptsTried);
-                yield break;
-            }
-            // Call succeeded but returned an empty table — legitimate empty cache.
-            logger.LogDebug("DNS cache preload: Windows resolver cache is empty (via {EntryPoint})",
-                result.SuccessfulEntryPoint);
+        if (cacheTable == IntPtr.Zero) {
+            // Legitimate empty cache — log at Debug only.
+            logger.LogDebug("DNS cache preload: Windows resolver cache is empty");
             yield break;
         }
-
-        var cacheTable = result.CacheTable;
 
         try {
             foreach (var tuple in EnumerateTable(cacheTable, logger))
@@ -178,63 +189,6 @@ internal static partial class DnsApiInterop {
                 logger.LogWarning(ex, "DnsFree on cache table failed during preload teardown");
             }
         }
-    }
-
-    /// <summary>
-    /// Result of a best-effort call to DnsGetCacheDataTableEx / legacy. If
-    /// <c>CacheTable</c> is non-zero the caller must DnsFree it after use.
-    /// <c>SuccessfulEntryPoint</c> is the string name of whichever variant
-    /// returned success (even an empty cache counts as success); null means
-    /// every variant returned an error.
-    /// </summary>
-    private readonly record struct CacheTableResult(
-        IntPtr CacheTable,
-        uint LastStatus,
-        string? SuccessfulEntryPoint,
-        string AttemptsTried);
-
-    /// <summary>
-    /// Calls DnsGetCacheDataTableEx first (preferred on Win11 — the legacy
-    /// export can return <c>ERROR_INVALID_FUNCTION</c> on recent builds).
-    /// Falls back to the legacy export only if Ex is missing or failed. The
-    /// struct layout is identical between the two variants, so the caller
-    /// enumerates whichever returned a non-null table identically.
-    /// </summary>
-    private static CacheTableResult AcquireCacheTable(
-        bool hasEx, bool hasLegacy, ILogger logger
-    ) {
-        var attempts = string.Empty;
-        uint lastStatus = 0;
-
-        if (hasEx) {
-            attempts = "Ex";
-            try {
-                var status = DnsGetCacheDataTableEx(out var table);
-                if (status == ERROR_SUCCESS) {
-                    // Non-zero table is "has entries"; zero table + success is
-                    // "empty cache". Both cases are successful calls.
-                    return new CacheTableResult(table, status, "Ex", attempts);
-                }
-                lastStatus = status;
-            } catch (Exception ex) {
-                logger.LogWarning(ex, "DnsGetCacheDataTableEx threw");
-            }
-        }
-
-        if (hasLegacy) {
-            attempts = attempts.Length == 0 ? "legacy" : attempts + "+legacy";
-            try {
-                var status = DnsGetCacheDataTable(out var table);
-                if (status == ERROR_SUCCESS) {
-                    return new CacheTableResult(table, status, "legacy", attempts);
-                }
-                lastStatus = status;
-            } catch (Exception ex) {
-                logger.LogWarning(ex, "DnsGetCacheDataTable threw");
-            }
-        }
-
-        return new CacheTableResult(IntPtr.Zero, lastStatus, null, attempts);
     }
 
     private static IEnumerable<(string QueryName, IPAddress Address)> EnumerateTable(
