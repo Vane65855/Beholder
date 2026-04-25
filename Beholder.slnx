@@ -8,7 +8,6 @@
   <Project Path="Beholder.Protocol/Beholder.Protocol.csproj" />
   <Project Path="Beholder.Tests.UplinkStub/Beholder.Tests.UplinkStub.csproj" />
   <Project Path="Beholder.Tests/Beholder.Tests.csproj" />
-  <Project Path="Beholder.Tools.DnsCacheProbe/Beholder.Tools.DnsCacheProbe.csproj" />
   <Project Path="Beholder.Tools.GeoIpFetcher/Beholder.Tools.GeoIpFetcher.csproj" />
   <Project Path="Beholder.Ui/Beholder.Ui.csproj" />
 </Solution>

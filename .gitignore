@@ -498,6 +498,13 @@ $RECYCLE.BIN/
 # Text files (scratch notes, outdated plans)
 *.txt
 
-# Beholder.Tools.DnsCacheProbe output (per-machine, per-run JSON results
-# from probing dnsapi.dll signatures — not source).
+# Beholder.Tools.DnsCacheProbe — one-off harness used to discover the
+# DnsGetCacheDataTableEx prototype on Win11 22H2+. Project source removed
+# from master; preserved at commit 3a05477 in git history. If recreated
+# locally (e.g. for a future Windows signature regression check), keep
+# it local — `git checkout 3a05477 -- Beholder.Tools.DnsCacheProbe/`
+# will restore it.
+/Beholder.Tools.DnsCacheProbe/
+
+# Probe output directory (per-machine, per-run JSON results).
 /probe-results/
