@@ -64,6 +64,13 @@ if (OperatingSystem.IsWindows()) {
         logger: sp.GetRequiredService<ILogger<ReverseDnsFallbackCache>>()));
     builder.Services.AddSingleton<IDnsCache>(sp => sp.GetRequiredService<ReverseDnsFallbackCache>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ReverseDnsFallbackCache>());
+
+    // SNI capture: closes the long-lived-connection hostname gap that DNS
+    // observation + reverse-DNS fallback can't reach. Feeds resolved
+    // (hostname, dest IP) pairs into IDnsCacheIngest. See ADR 006.
+    builder.Services.AddSingleton<PktmonSniSource>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<PktmonSniSource>());
+
     builder.Services.AddSingleton<IFirewallController, WfpFirewallController>();
 
     builder.Services.AddSingleton(new ConnectionFactory(databasePath));
@@ -86,6 +93,8 @@ if (OperatingSystem.IsWindows()) {
         builder.Configuration.GetSection("Rollup"));
     builder.Services.Configure<DnsOptions>(
         builder.Configuration.GetSection("Dns"));
+    builder.Services.Configure<SniOptions>(
+        builder.Configuration.GetSection("Sni"));
 
     // Broadcast service must be registered BEFORE the pipeline so its StartAsync
     // runs first and subscribes to ISnapshotBatchSource.OnSnapshotBatch before
