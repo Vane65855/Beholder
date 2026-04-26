@@ -26,12 +26,41 @@ Every path that could fail — `OperatingSystem.IsWindowsVersionAtLeast` false, 
 - **Negative: undocumented API => no SLA.** There is no support contract; behaviour is validated by production use in osquery and peers, not by Microsoft docs. If the struct layout drifts in a future Win11 update, we'd see garbage data through our marshalling — the `try/catch` around `Marshal.PtrToStructure` means we log and skip individual bad entries, and the `try/catch` around the outer enumeration means a wholly-broken schema degrades to empty preload.
 - **Unresolved gap (out of scope).** Flows older than Windows' own cache TTL (typically 5-15 min) have hostnames that are *not recoverable at our layer* — Windows has already forgotten them. The full fix is Phase 11's Windows Service autostart, which makes the daemon a first-class bootstrap-time participant so nothing resolves a DNS before we do.
 
-## Known issue (Windows 11 22H2+)
+## Resolution: verified `DnsGetCacheDataTableEx` prototype, try-Ex-then-legacy in production
 
-On some Win11 22H2+ builds the legacy `DnsGetCacheDataTable` export resolves and is callable, but every call returns `ERROR_INVALID_FUNCTION` (status `1`) without populating the cache table. The working implementation has moved under `DnsGetCacheDataTableEx`, also exported by `dnsapi.dll` on the same builds — but its prototype is not documented anywhere we can verify it. A speculative `out IntPtr ppCacheTable` LibraryImport for the Ex variant (matching the legacy signature) was attempted in commit `f6d7bf3` and immediately produced `0xC0000005` (`STATUS_ACCESS_VIOLATION`) at daemon startup on a real user machine — wrong arg count corrupts the stack on the marshalled call. That commit's Ex P/Invoke was reverted.
+The Win11 22H2+ regression was closed empirically. A throwaway probe (`Beholder.Tools.DnsCacheProbe`, committed at `3a05477` and removed at `8ef32e3` per `PRINCIPLES.md §No Dead Weight`; resurrectable via `git checkout 3a05477 -- Beholder.Tools.DnsCacheProbe/`) ran seven candidate signatures in separate processes so a wrong-shape AV in one couldn't take down the others. The result matrix on the user's Win11 22H2+ machine:
 
-**Current behaviour on those builds:** legacy is the only call we make. It returns status `1`, we log a warning, the daemon starts normally, and the live ETW path keeps populating the cache from that point forward. Users lose the preload benefit but nothing else.
+| Candidate | Status | Outcome |
+|---|---|---|
+| legacy `DnsGetCacheDataTable(out IntPtr)` | 1 (`ERROR_INVALID_FUNCTION`) | confirms the regression |
+| `DnsGetCacheDataTableEx(uint flags, out IntPtr)` (this is the answer) | 0 | 469 entries walked, sample names `rr5---sn-4g5ednrl.googlevideo.com`, `plus.l.google.com`, `bunnyfonts.b-cdn.net`, `yt3.googleusercontent.com`, `images.skyscnr.com` — all matched the user's active browsing session |
+| `DnsGetCacheDataTableEx(out IntPtr, uint flags)` (wrong arg order) | 87 (`ERROR_INVALID_PARAMETER`) | rejected by Win11 parameter validation, no AV |
+| `DnsGetCacheDataTableEx(uint flags=0x8000, out IntPtr)` | 0 | identical 469 entries — the FRex `0x8000` "private cache tier" bit makes no observable difference here, so production passes `flags=0` |
+| `DnsGetCacheDataTableEx(uint, out uint count, out IntPtr)` | 0 with null table | false positive — extra parameter shifted the out-pointer |
+| `DnsGetCacheDataTableEx(out IntPtr, out uint count)` | 0 with null table | same false positive shape |
+| `DnsGetCacheDataTable(uint flags, out IntPtr)` (testing if legacy was widened) | 0 with null table | false positive — confirms legacy still has the original arity |
 
-**Kill-switch:** `DnsOptions.EnablePreload` (default `true`). Setting it to `false` in `appsettings.json` under `"Dns"` (or env var `Dns__EnablePreload=false`) makes `EtwDnsCache.PreloadFromWindowsDnsCache` early-return without entering the interop at all. Provided as defence against any future Windows change that turns the legacy export's failure into a crash rather than a status code.
+No candidate AV'd. The earlier `f6d7bf3` crash from a wrong-arity Ex declaration was an x64 stack-state coincidence; the same wrong-arity case in this run exited cleanly because the surrounding stack happened to differ.
 
-**Future work:** a verified `DnsGetCacheDataTableEx` prototype would let us re-enable the Ex path and recover the preload on these builds. Sources to look for: a Microsoft SDK header that finally documents it, a public reverse-engineering reference (osquery, Sysinternals, etc.), or a definitive disassembly. As an alternative the documented `MSFT_DNSClientCache` CIM class in `ROOT\StandardCimv2` is crash-safe and works on every modern Windows build, but is heavier infra (WMI session, CIM marshalling) than we want for a startup-time helper today.
+### Production wiring
+
+`Beholder.Daemon.Windows/DnsApiInterop.cs` declares both exports and tries Ex first via `AcquireCacheTable`. If Ex returns status 0 (Win11 22H2+ happy path), we use its table. If Ex returns non-zero (older Win11 builds where the regression hasn't shipped) we fall through to legacy. If both return non-zero or throw, we log a warning citing this decision record and skip the preload — daemon still starts, live ETW continues to populate the cache from then on.
+
+The verified prototype is:
+
+```c
+DWORD WINAPI DnsGetCacheDataTableEx(
+    DWORD              dwFlags,        // pass 0
+    PDNS_CACHE_ENTRY  *ppCacheTable    // out: head of singly-linked list, free with DnsFree(...DnsFreeFlat)
+);
+```
+
+`DNSCACHEENTRY` layout is unchanged from the legacy export: `pNext`, `pszName`, `wType`, `wDataLength`, `dwFlags`. Both exports populate the same kernel-side state, so `EnumerateTable` doesn't need to know which path served.
+
+### Kill-switch
+
+`DnsOptions.EnablePreload` (default `true`) stays in place. Setting it to `false` in `appsettings.json` under `"Dns"` (or env var `Dns__EnablePreload=false`) makes `EtwDnsCache.PreloadFromWindowsDnsCache` early-return without entering the interop at all. Defence against any future Windows update that breaks both Ex and legacy.
+
+### What's next if both ever fail
+
+`MSFT_DNSClientCache` CIM class in `ROOT\StandardCimv2` is the documented, crash-safe escape hatch — heavier infra (WMI session + CIM marshalling), but it works on every Windows version that supports `Get-DnsClientCache` in PowerShell. Plan B if a future Windows update breaks both undocumented `dnsapi.dll` exports.
