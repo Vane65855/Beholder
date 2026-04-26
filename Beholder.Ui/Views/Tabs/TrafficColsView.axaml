@@ -35,109 +35,118 @@
             <DockPanel Grid.Column="0">
                 <TextBlock DockPanel.Dock="Top" Classes="columnHeader" Text="HOSTS"
                            ToolTip.Tip="Host names come from Windows DNS Client events. Apps that resolve DNS internally (browsers with DNS-over-HTTPS, bundled resolvers) bypass it and show as IPs. Disable secure DNS in the browser to restore host names for its traffic." />
-                <ItemsControl ItemsSource="{Binding Hosts}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <VirtualizingStackPanel />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:HostRow">
-                            <Grid ColumnDefinitions="*,80" Height="22" Margin="0,0,0,4">
-                                <TextBlock Grid.Column="0"
-                                           Classes="rowLabel"
-                                           Text="{Binding Display}" />
-                                <TextBlock Grid.Column="1"
-                                           Classes="rowBytes"
-                                           Text="{Binding BytesLabel}" />
-                                <!-- Bar: sits under the label/bytes row as a
-                                     thin accent line. Ratio-sized grid avoids
-                                     a code-behind MultiBinding. -->
-                                <Grid Grid.ColumnSpan="2"
-                                      VerticalAlignment="Bottom"
-                                      Height="2">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="{Binding BarRatio, Converter={StaticResource RatioToGridLength}}" />
-                                        <ColumnDefinition Width="{Binding EmptyRatio, Converter={StaticResource RatioToGridLength}}" />
-                                    </Grid.ColumnDefinitions>
-                                    <Rectangle Grid.Column="0"
-                                               Fill="{DynamicResource ChartOutboundStroke}"
-                                               HorizontalAlignment="Stretch" />
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Hosts}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:HostRow">
+                                <Grid ColumnDefinitions="*,80" Height="22" Margin="0,0,0,4">
+                                    <TextBlock Grid.Column="0"
+                                               Classes="rowLabel"
+                                               Text="{Binding Display}" />
+                                    <TextBlock Grid.Column="1"
+                                               Classes="rowBytes"
+                                               Text="{Binding BytesLabel}" />
+                                    <!-- Bar: sits under the label/bytes row as a
+                                         thin accent line. Ratio-sized grid avoids
+                                         a code-behind MultiBinding. -->
+                                    <Grid Grid.ColumnSpan="2"
+                                          VerticalAlignment="Bottom"
+                                          Height="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="{Binding BarRatio, Converter={StaticResource RatioToGridLength}}" />
+                                            <ColumnDefinition Width="{Binding EmptyRatio, Converter={StaticResource RatioToGridLength}}" />
+                                        </Grid.ColumnDefinitions>
+                                        <Rectangle Grid.Column="0"
+                                                   Fill="{DynamicResource ChartOutboundStroke}"
+                                                   HorizontalAlignment="Stretch" />
+                                    </Grid>
                                 </Grid>
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
             </DockPanel>
 
             <!-- TRAFFIC TYPE -->
             <DockPanel Grid.Column="2">
                 <TextBlock DockPanel.Dock="Top" Classes="columnHeader" Text="TRAFFIC TYPE" />
-                <ItemsControl ItemsSource="{Binding Protocols}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <VirtualizingStackPanel />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:ProtocolRow">
-                            <Grid ColumnDefinitions="*,80" Height="22" Margin="0,0,0,4">
-                                <TextBlock Grid.Column="0"
-                                           Classes="rowLabel"
-                                           Text="{Binding Name}" />
-                                <TextBlock Grid.Column="1"
-                                           Classes="rowBytes"
-                                           Text="{Binding BytesLabel}" />
-                                <Grid Grid.ColumnSpan="2"
-                                      VerticalAlignment="Bottom"
-                                      Height="2">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="{Binding BarRatio, Converter={StaticResource RatioToGridLength}}" />
-                                        <ColumnDefinition Width="{Binding EmptyRatio, Converter={StaticResource RatioToGridLength}}" />
-                                    </Grid.ColumnDefinitions>
-                                    <Rectangle Grid.Column="0"
-                                               Fill="{DynamicResource ChartInboundStroke}"
-                                               HorizontalAlignment="Stretch" />
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Protocols}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ProtocolRow">
+                                <Grid ColumnDefinitions="*,80" Height="22" Margin="0,0,0,4">
+                                    <TextBlock Grid.Column="0"
+                                               Classes="rowLabel"
+                                               Text="{Binding Name}" />
+                                    <TextBlock Grid.Column="1"
+                                               Classes="rowBytes"
+                                               Text="{Binding BytesLabel}" />
+                                    <Grid Grid.ColumnSpan="2"
+                                          VerticalAlignment="Bottom"
+                                          Height="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="{Binding BarRatio, Converter={StaticResource RatioToGridLength}}" />
+                                            <ColumnDefinition Width="{Binding EmptyRatio, Converter={StaticResource RatioToGridLength}}" />
+                                        </Grid.ColumnDefinitions>
+                                        <Rectangle Grid.Column="0"
+                                                   Fill="{DynamicResource ChartInboundStroke}"
+                                                   HorizontalAlignment="Stretch" />
+                                    </Grid>
                                 </Grid>
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
             </DockPanel>
 
             <!-- COUNTRIES -->
             <DockPanel Grid.Column="4">
                 <TextBlock DockPanel.Dock="Top" Classes="columnHeader" Text="COUNTRIES" />
-                <ItemsControl ItemsSource="{Binding Countries}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <VirtualizingStackPanel />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:CountryRow">
-                            <Grid ColumnDefinitions="*,80" Height="22" Margin="0,0,0,4">
-                                <TextBlock Grid.Column="0"
-                                           Classes="rowLabel"
-                                           Text="{Binding Display}" />
-                                <TextBlock Grid.Column="1"
-                                           Classes="rowBytes"
-                                           Text="{Binding BytesLabel}" />
-                                <Grid Grid.ColumnSpan="2"
-                                      VerticalAlignment="Bottom"
-                                      Height="2">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="{Binding BarRatio, Converter={StaticResource RatioToGridLength}}" />
-                                        <ColumnDefinition Width="{Binding EmptyRatio, Converter={StaticResource RatioToGridLength}}" />
-                                    </Grid.ColumnDefinitions>
-                                    <Rectangle Grid.Column="0"
-                                               Fill="{DynamicResource AccentPrimary}"
-                                               HorizontalAlignment="Stretch" />
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Countries}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:CountryRow">
+                                <Grid ColumnDefinitions="*,80" Height="22" Margin="0,0,0,4">
+                                    <TextBlock Grid.Column="0"
+                                               Classes="rowLabel"
+                                               Text="{Binding Display}" />
+                                    <TextBlock Grid.Column="1"
+                                               Classes="rowBytes"
+                                               Text="{Binding BytesLabel}" />
+                                    <Grid Grid.ColumnSpan="2"
+                                          VerticalAlignment="Bottom"
+                                          Height="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="{Binding BarRatio, Converter={StaticResource RatioToGridLength}}" />
+                                            <ColumnDefinition Width="{Binding EmptyRatio, Converter={StaticResource RatioToGridLength}}" />
+                                        </Grid.ColumnDefinitions>
+                                        <Rectangle Grid.Column="0"
+                                                   Fill="{DynamicResource AccentPrimary}"
+                                                   HorizontalAlignment="Stretch" />
+                                    </Grid>
                                 </Grid>
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
             </DockPanel>
         </Grid>
 
