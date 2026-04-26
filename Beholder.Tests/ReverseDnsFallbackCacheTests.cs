@@ -184,7 +184,7 @@ public sealed class ReverseDnsFallbackCacheTests {
         // StopAsync completes promptly because no second worker call is
         // outstanding.
         var stopTask = cache.StopAsync(CancellationToken.None);
-        var winner = await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(2)));
+        var winner = await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
         Assert.Same(stopTask, winner);
     }
 
@@ -231,7 +231,7 @@ public sealed class ReverseDnsFallbackCacheTests {
         // cancellation-aware waiter throws OCE; the loop exits cleanly.
         // Must complete well within the 5 s grace period.
         var stopTask = cache.StopAsync(CancellationToken.None);
-        var winner = await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(7)));
+        var winner = await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(7), TestContext.Current.CancellationToken));
         Assert.Same(stopTask, winner);
     }
 
@@ -292,7 +292,7 @@ public sealed class ReverseDnsFallbackCacheTests {
 
         // StopAsync still completes promptly — worker survived the throw.
         var stopTask = cache.StopAsync(CancellationToken.None);
-        var winner = await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(2)));
+        var winner = await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
         Assert.Same(stopTask, winner);
     }
 }

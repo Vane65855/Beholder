@@ -1001,14 +1001,15 @@ public class SqliteTrafficStoreTests : IDisposable {
         // Exactly one row updated — the null one. The observed-DNS row stays.
         Assert.Equal(1, updated);
 
+        var ct = TestContext.Current.CancellationToken;
         using var connection = connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT hostname FROM traffic_raw WHERE remote_address = $addr ORDER BY bucket_start_ms;";
         command.Parameters.AddWithValue("$addr", address.ToString());
-        using var reader = await command.ExecuteReaderAsync();
-        Assert.True(await reader.ReadAsync()); Assert.Equal("observed.example.com", reader.GetString(0));
-        Assert.True(await reader.ReadAsync()); Assert.Equal("rdns.example.com", reader.GetString(0));
-        Assert.False(await reader.ReadAsync());
+        using var reader = await command.ExecuteReaderAsync(ct);
+        Assert.True(await reader.ReadAsync(ct)); Assert.Equal("observed.example.com", reader.GetString(0));
+        Assert.True(await reader.ReadAsync(ct)); Assert.Equal("rdns.example.com", reader.GetString(0));
+        Assert.False(await reader.ReadAsync(ct));
     }
 
     [Fact]
