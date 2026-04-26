@@ -158,7 +158,19 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     }
 
     private void OnProcessStatesUpdated(IReadOnlyDictionary<string, ProcessState> states) {
-        Dispatcher.UIThread.Post(() => UpdateFromStates(states));
+        Dispatcher.UIThread.Post(() => {
+            UpdateFromStates(states);
+            // Live COLS refresh: same cadence as the chart (1 Hz, driven by
+            // the daemon's snapshot broadcast). ColsVm.RefreshAsync cancels
+            // any in-flight refresh via its owned CTS, so we never stack
+            // RPCs even if a tick fires before the previous trio of
+            // GetProcessDestinations / GetProtocolBreakdown /
+            // GetCountryBreakdown calls completes. Skipped in historical
+            // mode where the data is fixed for the queried range.
+            if (ViewMode == TrafficViewMode.Cols && SelectedTimeRange.IsLive) {
+                _ = RefreshColsAsync();
+            }
+        });
     }
 
     partial void OnSelectedTimeRangeChanged(TimeRangeSelection value) {
