@@ -25,12 +25,15 @@ public sealed class ReverseDnsFallbackCacheTests {
         FakeDnsCache inner,
         FakeReverseDnsResolver resolver,
         FakeTimeProvider timeProvider,
+        FakeDnsHostnameBackfill? backfill = null,
         bool enabled = true
     ) {
+        backfill ??= new FakeDnsHostnameBackfill();
         var options = new DnsOptions { EnableReverseDnsFallback = enabled };
         return new ReverseDnsFallbackCache(
             inner: inner,
             ingest: inner,
+            backfill: backfill,
             resolver: resolver,
             options: new FakeOptionsMonitor<DnsOptions>(options),
             timeProvider: timeProvider,
@@ -239,6 +242,58 @@ public sealed class ReverseDnsFallbackCacheTests {
         using var cache = CreateCache(inner, resolver, new FakeTimeProvider(FixedTimestamp));
 
         Assert.Throws<ArgumentNullException>(() => cache.Resolve(null!));
+    }
+
+    [Fact]
+    public async Task Resolve_PublicMiss_BackfillsAfterIngest() {
+        // Verifies the ADR-005 follow-up: after the worker writes to the
+        // in-memory cache via IDnsCacheIngest it must also call the
+        // persistent-layer backfill so historical SQLite rows for this IP
+        // pick up the resolved name retroactively (one-off-flow problem).
+        var inner = new FakeDnsCache();
+        var resolver = new FakeReverseDnsResolver();
+        var backfill = new FakeDnsHostnameBackfill { RowsToReturn = 7 };
+        resolver.EnqueueAnswer(PublicIpv4, "rdns.example.com");
+        using var cache = CreateCache(inner, resolver, new FakeTimeProvider(FixedTimestamp), backfill);
+        await cache.StartAsync(CancellationToken.None);
+
+        Assert.Null(cache.Resolve(PublicIpv4));
+        await WaitForResolutionAsync(inner, PublicIpv4, "rdns.example.com");
+        await WaitForLookupsAttemptedAsync(cache, 1);
+
+        var calls = backfill.Calls.ToArray();
+        Assert.Single(calls);
+        Assert.Equal(PublicIpv4, calls[0].Address);
+        Assert.Equal("rdns.example.com", calls[0].Hostname);
+
+        await cache.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Resolve_BackfillThrows_DoesNotCrashWorker() {
+        // Defensive: a SQLite failure during backfill must not poison the
+        // worker. The in-memory ingest already happened, so live traffic
+        // continues to resolve; only persisted history misses out.
+        var inner = new FakeDnsCache();
+        var resolver = new FakeReverseDnsResolver();
+        var backfill = new FakeDnsHostnameBackfill {
+            ThrowOnNextCall = new InvalidOperationException("simulated SQLite failure"),
+        };
+        resolver.EnqueueAnswer(PublicIpv4, "rdns.example.com");
+        using var cache = CreateCache(inner, resolver, new FakeTimeProvider(FixedTimestamp), backfill);
+        await cache.StartAsync(CancellationToken.None);
+
+        Assert.Null(cache.Resolve(PublicIpv4));
+        await WaitForResolutionAsync(inner, PublicIpv4, "rdns.example.com");
+        await WaitForLookupsAttemptedAsync(cache, 1);
+
+        // In-memory ingest still landed even though backfill threw.
+        Assert.Equal("rdns.example.com", inner.Resolve(PublicIpv4));
+
+        // StopAsync still completes promptly — worker survived the throw.
+        var stopTask = cache.StopAsync(CancellationToken.None);
+        var winner = await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.Same(stopTask, winner);
     }
 }
 #endif

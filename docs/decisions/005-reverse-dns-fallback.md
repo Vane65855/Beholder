@@ -69,10 +69,18 @@ Wired on Windows only today (Program.cs Windows-only block). `Beholder.Daemon.Li
 
 Set at daemon startup; the decorator snapshots `CurrentValue` once and does not honour hot-reload (matches `EnablePreload`'s behaviour from ADR 004's resolution).
 
+### Backfill of historical SQLite rows
+
+Closing the original "first (null) bucket" gap from this ADR's earlier out-of-scope list: the worker now writes the resolved hostname not just into the in-memory cache but also retroactively into every persisted bucket for that IP. `IDnsHostnameBackfill.BackfillHostnameAsync` (in `Beholder.Core`) is implemented by `SqliteTrafficStore` and runs an `UPDATE {tier} SET hostname = ? WHERE remote_address = ? AND hostname IS NULL` across all five rollup tiers in a single transaction.
+
+Without this, one-off direct-IP flows (a 30-byte handshake that never gets a follow-up packet) had no further flush tick to carry the resolved name into SQLite, so the UI's `MAX(hostname) GROUP BY remote_address` kept seeing all-NULL rows for that IP and displayed the raw IP forever. With it, the next UI refresh after the worker resolves an IP shows the resolved hostname even for completed connections.
+
+`hostname IS NULL` in the `WHERE` clause means the backfill never overwrites observed-DNS names — those are strictly more authoritative than reverse DNS. Backfill failure (DB locked, IO error) is caught at the worker boundary and degraded to a `Warning` log; the in-memory ingest already succeeded so live traffic still resolves, only persisted history misses out for that one IP.
+
 ## Out of scope
 
 - Distinguishing reverse-DNS-derived names from observed-DNS names in the cache or UI. Both end up in `EtwDnsCache._cache` indistinguishably. A "provenance" field is a future enhancement if users want a visual marker (e.g., a subtle icon next to PTR-resolved rows).
-- Backfilling the first (null) bucket once the resolution completes. The first flush tick for a new direct-IP shows raw; subsequent ticks show the hostname. Acceptable.
 - Per-query timeout / parallelism / cooldown configurability. Hardcoded sane defaults today (3 s timeout, 1 worker, 30 min cooldown). Make configurable later if real usage demands it.
 - Distinguishing NXDOMAIN from timeout for differentiated cooldowns. Single uniform cooldown for v1.
 - Persisting the negative cache across restarts. In-memory only.
+- Adding an index on `remote_address` to speed up the backfill UPDATE. The reverse-DNS worker is rate-limited (single in-flight, 500-capacity bounded channel); the per-resolution cost of five tier UPDATEs without the index is microseconds-to-milliseconds and adding the index slows down every `WriteRawBucketsAsync` insert. Revisit only if measurements show the backfill is a hotspot on terabyte-scale databases.

@@ -57,6 +57,7 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<ReverseDnsFallbackCache>(sp => new ReverseDnsFallbackCache(
         inner: sp.GetRequiredService<EtwDnsCache>(),
         ingest: sp.GetRequiredService<IDnsCacheIngest>(),
+        backfill: sp.GetRequiredService<IDnsHostnameBackfill>(),
         resolver: sp.GetRequiredService<IReverseDnsResolver>(),
         options: sp.GetRequiredService<IOptionsMonitor<DnsOptions>>(),
         timeProvider: sp.GetRequiredService<TimeProvider>(),
@@ -74,6 +75,7 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<IAlertStore>(sp => sp.GetRequiredService<SqliteAlertStore>());
     builder.Services.AddSingleton<SqliteTrafficStore>();
     builder.Services.AddSingleton<ITrafficStore>(sp => sp.GetRequiredService<SqliteTrafficStore>());
+    builder.Services.AddSingleton<IDnsHostnameBackfill>(sp => sp.GetRequiredService<SqliteTrafficStore>());
     builder.Services.AddSingleton<SqliteDnsCacheStore>();
     builder.Services.AddSingleton<IDnsCacheStore>(sp => sp.GetRequiredService<SqliteDnsCacheStore>());
     builder.Services.Configure<TrafficStorageOptions>(
