@@ -1,3 +1,4 @@
+using System.Net;
 using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.Storage;
@@ -906,5 +907,132 @@ public class SqliteTrafficStoreTests : IDisposable {
         command.Parameters.AddWithValue("$bucketStartMs", bucketStart.ToUnixTimeMilliseconds());
         command.Parameters.AddWithValue("$bucketSeconds", bucketSeconds);
         await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Inserts a single row into the given tier with a NULL hostname,
+    /// using a configurable remote address. Used by the backfill tests
+    /// to simulate the "PTR resolved after the bucket was persisted"
+    /// scenario without going through WriteRawBucketsAsync's bucket model.
+    /// </summary>
+    private static async Task InsertNullHostnameAsync(
+        ConnectionFactory factory,
+        string tableName,
+        string remoteAddress,
+        DateTimeOffset bucketStart,
+        int bucketSeconds = 1
+    ) {
+        using var connection = factory.CreateConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            INSERT INTO {tableName}
+                (process_path, process_name, remote_address, remote_port,
+                 hostname, country, bytes_in, bytes_out, bucket_start_ms, bucket_seconds)
+            VALUES
+                ('C:/app/firefox.exe', 'firefox.exe', $addr, 443,
+                 NULL, 'US', 100, 50, $bucketStartMs, $bucketSeconds);
+            """;
+        command.Parameters.AddWithValue("$addr", remoteAddress);
+        command.Parameters.AddWithValue("$bucketStartMs", bucketStart.ToUnixTimeMilliseconds());
+        command.Parameters.AddWithValue("$bucketSeconds", bucketSeconds);
+        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads back the hostname column of any row matching <paramref name="remoteAddress"/>
+    /// in <paramref name="tableName"/>. Returns the hostname (possibly NULL)
+    /// or, if there's no row, throws — the caller should have inserted one.
+    /// Used by backfill tests to assert the UPDATE landed on the right tier.
+    /// </summary>
+    private static async Task<string?> SelectHostnameAsync(
+        ConnectionFactory factory,
+        string tableName,
+        string remoteAddress
+    ) {
+        using var connection = factory.CreateConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT hostname FROM {tableName} WHERE remote_address = $addr LIMIT 1;";
+        command.Parameters.AddWithValue("$addr", remoteAddress);
+        using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+        var found = await reader.ReadAsync().ConfigureAwait(false);
+        Assert.True(found, $"No row found in {tableName} for {remoteAddress}");
+        return reader.IsDBNull(0) ? null : reader.GetString(0);
+    }
+
+    [Fact]
+    public async Task BackfillHostnameAsync_NullHostnameRows_AreUpdated() {
+        // Write 3 buckets with hostname=null for the same IP via the public
+        // WriteRawBucketsAsync seam (writes to traffic_raw), then backfill.
+        var connectionFactory = new ConnectionFactory(
+            Path.Combine(_tempDir, "beholder.db"), pooling: false);
+        var address = IPAddress.Parse("203.0.113.10");
+        var buckets = Enumerable.Range(0, 3).Select(i => CreateBucket(
+            remoteAddress: address.ToString(),
+            hostname: null,
+            bucketStart: BaseTime.AddSeconds(i))).ToList();
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var updated = await _store.BackfillHostnameAsync(address, "rdns.example.com", CancellationToken.None);
+
+        Assert.Equal(3, updated);
+        // Each of the 3 rows now has the resolved name.
+        for (var i = 0; i < 3; i++) {
+            var row = await SelectHostnameAsync(connectionFactory, "traffic_raw", address.ToString());
+            Assert.Equal("rdns.example.com", row);
+        }
+    }
+
+    [Fact]
+    public async Task BackfillHostnameAsync_AlreadyResolvedRows_NotOverwritten() {
+        // Observed-DNS names (e.g. from the live ETW path) are strictly more
+        // authoritative than reverse DNS — backfill must NOT overwrite them.
+        var connectionFactory = new ConnectionFactory(
+            Path.Combine(_tempDir, "beholder.db"), pooling: false);
+        var address = IPAddress.Parse("203.0.113.20");
+        await _store.WriteRawBucketsAsync(new[] {
+            CreateBucket(remoteAddress: address.ToString(), hostname: "observed.example.com",
+                bucketStart: BaseTime),
+        }, CancellationToken.None);
+        await InsertNullHostnameAsync(connectionFactory, "traffic_raw", address.ToString(),
+            BaseTime.AddSeconds(1));
+
+        var updated = await _store.BackfillHostnameAsync(address, "rdns.example.com", CancellationToken.None);
+
+        // Exactly one row updated — the null one. The observed-DNS row stays.
+        Assert.Equal(1, updated);
+
+        using var connection = connectionFactory.CreateConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT hostname FROM traffic_raw WHERE remote_address = $addr ORDER BY bucket_start_ms;";
+        command.Parameters.AddWithValue("$addr", address.ToString());
+        using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync()); Assert.Equal("observed.example.com", reader.GetString(0));
+        Assert.True(await reader.ReadAsync()); Assert.Equal("rdns.example.com", reader.GetString(0));
+        Assert.False(await reader.ReadAsync());
+    }
+
+    [Fact]
+    public async Task BackfillHostnameAsync_AcrossTiers_UpdatesAllTables() {
+        // The backfill is supposed to update every tier table — otherwise a
+        // historical query that lands on (say) traffic_buckets_1m would still
+        // see NULL even though traffic_raw was updated.
+        var connectionFactory = new ConnectionFactory(
+            Path.Combine(_tempDir, "beholder.db"), pooling: false);
+        var address = IPAddress.Parse("203.0.113.30");
+        string[] tierTables = [
+            "traffic_raw", "traffic_buckets_10s", "traffic_buckets_1m",
+            "traffic_buckets_10m", "traffic_buckets_1h",
+        ];
+        foreach (var table in tierTables) {
+            await InsertNullHostnameAsync(connectionFactory, table, address.ToString(), BaseTime);
+        }
+
+        var updated = await _store.BackfillHostnameAsync(address, "rdns.example.com", CancellationToken.None);
+
+        Assert.Equal(tierTables.Length, updated);
+        foreach (var table in tierTables) {
+            var hostname = await SelectHostnameAsync(connectionFactory, table, address.ToString());
+            Assert.Equal("rdns.example.com", hostname);
+        }
     }
 }

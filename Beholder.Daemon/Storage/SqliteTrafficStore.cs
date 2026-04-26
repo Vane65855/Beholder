@@ -1,3 +1,4 @@
+using System.Net;
 using Beholder.Core;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
@@ -11,7 +12,7 @@ namespace Beholder.Daemon.Storage;
 /// <see cref="TierSelector"/>; the SQL body of each query method is identical
 /// across tiers — only the table name changes.
 /// </summary>
-internal sealed class SqliteTrafficStore : ITrafficStore {
+internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
     private readonly ConnectionFactory _connectionFactory;
     private readonly IOptionsMonitor<RollupOptions> _options;
     private readonly TimeProvider _timeProvider;
@@ -79,6 +80,55 @@ internal sealed class SqliteTrafficStore : ITrafficStore {
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Retroactively fills <c>hostname</c> on null-hostname rows for the given
+    /// IP across every rollup tier. Called by the reverse-DNS fallback worker
+    /// (<c>ReverseDnsFallbackCache</c>) after a successful PTR query so that
+    /// historical buckets recorded before the resolution completed pick up
+    /// the resolved name. See ADR 005.
+    /// </summary>
+    /// <remarks>
+    /// All five tier UPDATEs run in a single transaction — partial failure
+    /// would leave one tier with the resolved name and another without,
+    /// which the destination query (<c>MAX(hostname) GROUP BY remote_address</c>)
+    /// could surface as a flicker if the read tier changed between calls.
+    /// Rows that already have a non-null hostname are not overwritten:
+    /// observed-DNS names are strictly more authoritative than reverse DNS,
+    /// and the live ETW path may have populated the hostname between the
+    /// reverse-DNS lookup starting and finishing.
+    /// </remarks>
+    public async Task<int> BackfillHostnameAsync(
+        IPAddress address,
+        string hostname,
+        CancellationToken cancellationToken
+    ) {
+        ArgumentNullException.ThrowIfNull(address);
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostname);
+
+        using var connection = _connectionFactory.CreateConnection();
+        using var transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        var addrText = address.ToString();
+        var total = 0;
+
+        foreach (var tier in _options.CurrentValue.Tiers) {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = $"""
+                UPDATE {tier.TableName}
+                SET hostname = $hostname
+                WHERE remote_address = $addr AND hostname IS NULL;
+                """;
+            command.Parameters.AddWithValue("$hostname", hostname);
+            command.Parameters.AddWithValue("$addr", addrText);
+            total += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return total;
     }
 
     /// <summary>

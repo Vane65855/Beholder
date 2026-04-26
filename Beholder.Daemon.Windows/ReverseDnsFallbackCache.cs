@@ -53,6 +53,7 @@ public sealed class ReverseDnsFallbackCache
 
     private readonly IDnsCache _inner;
     private readonly IDnsCacheIngest _ingest;
+    private readonly IDnsHostnameBackfill _backfill;
     private readonly IReverseDnsResolver _resolver;
     private readonly DnsOptions _options;
     private readonly TimeProvider _timeProvider;
@@ -80,6 +81,7 @@ public sealed class ReverseDnsFallbackCache
     public ReverseDnsFallbackCache(
         IDnsCache inner,
         IDnsCacheIngest ingest,
+        IDnsHostnameBackfill backfill,
         IReverseDnsResolver resolver,
         IOptionsMonitor<DnsOptions> options,
         TimeProvider timeProvider,
@@ -87,12 +89,14 @@ public sealed class ReverseDnsFallbackCache
     ) {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentNullException.ThrowIfNull(ingest);
+        ArgumentNullException.ThrowIfNull(backfill);
         ArgumentNullException.ThrowIfNull(resolver);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _inner = inner;
         _ingest = ingest;
+        _backfill = backfill;
         _resolver = resolver;
         // Snapshot at construction. EnableReverseDnsFallback can't be
         // hot-reloaded — matches EnablePreload's contract on the same options
@@ -202,7 +206,29 @@ public sealed class ReverseDnsFallbackCache
                 // Clear any prior negative entry — the IP now has a name and
                 // a future cache eviction shouldn't reapply the cooldown.
                 _negative.TryRemove(address, out _);
-                _logger.LogDebug("Reverse-DNS resolved {Address} -> {Hostname}", address, hostname);
+
+                // Backfill historical SQLite rows so one-off flows that
+                // ended before this lookup completed pick up the resolved
+                // name retroactively. Failure here must NOT poison the
+                // worker — the in-memory ingest already succeeded and live
+                // traffic still resolves; only persisted history misses out.
+                var backfilled = 0;
+                try {
+                    backfilled = await _backfill
+                        .BackfillHostnameAsync(address, hostname, cancellationToken)
+                        .ConfigureAwait(false);
+                } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                    // Shutdown in flight — propagate so the worker exits.
+                    throw;
+                } catch (Exception ex) {
+                    _logger.LogWarning(ex,
+                        "Reverse-DNS backfill failed for {Address} (hostname already in memory cache)",
+                        address);
+                }
+
+                _logger.LogDebug(
+                    "Reverse-DNS resolved {Address} -> {Hostname} (backfilled {Updated} rows)",
+                    address, hostname, backfilled);
                 succeeded = true;
             } else {
                 _negative[address] = _timeProvider.GetUtcNow();
