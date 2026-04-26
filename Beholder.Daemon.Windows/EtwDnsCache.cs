@@ -31,7 +31,7 @@ namespace Beholder.Daemon.Windows;
 /// 30 s metrics timer logs non-zero drop counts and <c>EventsLost</c> deltas so
 /// capture gaps are visible instead of invisible.
 /// </remarks>
-public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, IDisposable {
+public sealed class EtwDnsCache : IDnsCache, IDnsCacheIngest, IHostedService, IAsyncDisposable, IDisposable {
     private const string SessionName = "Beholder-DnsTrace";
     private static readonly Guid DnsClientProviderGuid = new("1C95126E-7EEA-49A9-A3FE-A378B03DDB4D");
 
@@ -537,11 +537,13 @@ public sealed class EtwDnsCache : IDnsCache, IHostedService, IAsyncDisposable, I
     /// Writes a pre-parsed (queryName, address) pair directly into the cache,
     /// bypassing <see cref="ExtractAddresses"/>. Used by the preload path
     /// (<see cref="PreloadFromWindowsDnsCache"/>) where records come from
-    /// <c>DnsQuery_W</c> already typed, and by tests that want deterministic
-    /// control over cache contents without building a Windows-formatted
-    /// answer string. Same last-writer-wins semantics as <see cref="Ingest"/>.
+    /// <c>DnsQuery_W</c> already typed, by the reverse-DNS fallback decorator
+    /// (see ADR 005) for direct-IP destinations, and by tests that want
+    /// deterministic control over cache contents without building a Windows-
+    /// formatted answer string. Same last-writer-wins semantics as
+    /// <see cref="Ingest"/>. Implements <see cref="IDnsCacheIngest"/>.
     /// </summary>
-    internal void IngestResolved(string queryName, IPAddress address) {
+    public void IngestResolved(string queryName, IPAddress address) {
         ArgumentException.ThrowIfNullOrWhiteSpace(queryName);
         ArgumentNullException.ThrowIfNull(address);
         _cache[address] = queryName;

@@ -336,7 +336,7 @@ Survives daemon restarts. Populated during 10-second bucket flush from the in-me
 
 ### DNS observation limitations
 
-`IDnsCache` exists because reverse DNS on CDN IPs returns generic edge names (`server-52-84-150-39.fra2.r.cloudfront.net`) rather than the hostname the user actually typed. On Windows we observe DNS traffic passively via the `Microsoft-Windows-DNS-Client` ETW provider (`EtwDnsCache`), which gives us the user-intended name the moment any Windows app resolves it. **The daemon never issues its own DNS queries.**
+`IDnsCache` exists because reverse DNS on CDN IPs returns generic edge names (`server-52-84-150-39.fra2.r.cloudfront.net`) rather than the hostname the user actually typed. On Windows we observe DNS traffic passively via the `Microsoft-Windows-DNS-Client` ETW provider (`EtwDnsCache`), which gives us the user-intended name the moment any Windows app resolves it. **The daemon issues no outbound DNS queries except PTR (reverse-DNS) lookups for direct-IP destinations that have no hostname from the Windows DNS cache or the ETW capture path** — those are the residual class no passive method can ever cover (BitTorrent peers, P2P bootstrap addresses, hardcoded endpoints). The fallback is implemented as `ReverseDnsFallbackCache` (a decorator over `EtwDnsCache`) and is gated by `DnsOptions.EnableReverseDnsFallback` (default `true`); see `docs/decisions/005-reverse-dns-fallback.md`.
 
 That strategy has three known gaps:
 
