@@ -348,7 +348,7 @@ Event coverage: `EtwDnsCache.OnEtwEvent` accepts any event from the provider tha
 
 **Preload at startup.** To close the cold-start portion of the cache-bypass gap, `EtwDnsCache.StartAsync` reads whatever Windows already has cached via `DnsGetCacheDataTableEx` (preferred on Win11; falls back to the legacy `DnsGetCacheDataTable` export if Ex is absent). Entries are fetched by re-querying each cached name with `DNS_QUERY_NO_WIRE_QUERY` — a flag that restricts `DnsQuery_W` to the local cache + HOSTS file, guaranteeing zero outbound traffic. See `docs/decisions/004-dns-cache-preload-undocumented-api.md`.
 
-True TLS-level hostname visibility (SNI extraction from the ClientHello) is a future phase and would close both the DoH and the in-process-cache bypasses — it requires a packet-capture layer that Beholder doesn't have today.
+**TLS-level hostname visibility via SNI extraction.** The fourth and final layer of the resolution ladder, added in ADR 006. `Beholder.Daemon.Windows/PktmonSniSource.cs` subscribes to the `Microsoft-Windows-PktMon` ETW provider, parses captured TCP/443 packets for TLS ClientHello records via `Beholder.Core/Tls/TlsClientHelloParser.cs`, and feeds resolved (hostname, dest IP) pairs into the existing `IDnsCacheIngest` seam. Closes the DoH bypass and the in-process-cache bypass simultaneously: every fresh TLS handshake emits a plaintext SNI on the wire regardless of how DNS was resolved. Gated by `SniOptions.EnableSniCapture` (default `true`). TLS 1.3 ECH (Encrypted ClientHello) defeats this by design — those flows fall through to reverse DNS or raw IP — but ECH is opt-in for browsers today and not in widespread production use.
 
 ## IPC Protocol (Daemon ↔ UI)
 
