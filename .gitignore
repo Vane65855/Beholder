@@ -508,3 +508,6 @@ $RECYCLE.BIN/
 
 # Probe output directory (per-machine, per-run JSON results).
 /probe-results/
+
+# Pktmon capture output (written to daemon CWD during SNI capture lifecycle)
+*.etl
