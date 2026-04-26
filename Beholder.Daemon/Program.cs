@@ -6,6 +6,7 @@ using Beholder.Daemon.Storage;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 #if PLATFORM_WINDOWS
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Windows;
@@ -47,8 +48,21 @@ if (OperatingSystem.IsWindows()) {
         sp.GetRequiredService<IGeoIpResolver>(),
         sp.GetRequiredService<ILogger<GeoIpFlowSourceDecorator>>()));
     builder.Services.AddSingleton<EtwDnsCache>();
-    builder.Services.AddSingleton<IDnsCache>(sp => sp.GetRequiredService<EtwDnsCache>());
+    builder.Services.AddSingleton<IDnsCacheIngest>(sp => sp.GetRequiredService<EtwDnsCache>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<EtwDnsCache>());
+
+    // Reverse-DNS fallback: decorator wrapping EtwDnsCache. IDnsCache
+    // consumers (TrafficEngine) get the decorator transparently. See ADR 005.
+    builder.Services.AddSingleton<IReverseDnsResolver, SystemReverseDnsResolver>();
+    builder.Services.AddSingleton<ReverseDnsFallbackCache>(sp => new ReverseDnsFallbackCache(
+        inner: sp.GetRequiredService<EtwDnsCache>(),
+        ingest: sp.GetRequiredService<IDnsCacheIngest>(),
+        resolver: sp.GetRequiredService<IReverseDnsResolver>(),
+        options: sp.GetRequiredService<IOptionsMonitor<DnsOptions>>(),
+        timeProvider: sp.GetRequiredService<TimeProvider>(),
+        logger: sp.GetRequiredService<ILogger<ReverseDnsFallbackCache>>()));
+    builder.Services.AddSingleton<IDnsCache>(sp => sp.GetRequiredService<ReverseDnsFallbackCache>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<ReverseDnsFallbackCache>());
     builder.Services.AddSingleton<IFirewallController, WfpFirewallController>();
 
     builder.Services.AddSingleton(new ConnectionFactory(databasePath));
