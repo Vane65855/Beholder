@@ -57,7 +57,7 @@ internal sealed class DaemonClient : IDaemonClient {
         // We never transition to a permanent "offline" state — the user explicitly
         // stopping the daemon is the dominant scenario in Phase 5, so the UI's
         // job is to be ready to reconnect the moment the daemon returns. This
-        // will be revisited when the daemon becomes a Windows Service in Phase 11.
+        // will be revisited when the daemon becomes a Windows Service in Phase 12.
         var attempt = 0;
         while (!token.IsCancellationRequested) {
             SetState(attempt == 0 ? ConnectionState.Connecting : ConnectionState.Reconnecting);

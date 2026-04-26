@@ -412,7 +412,7 @@ When implementing UI work in Phase 5 or later:
 
 ## 10. Light Theme Roadmap
 
-A light theme is planned for a later phase (likely Phase 11 polish, or earlier if user demand appears).
+A light theme is planned for a later phase (likely Phase 12 polish, or earlier if user demand appears).
 
 **Rules for all Phase 5+ UI work:**
 

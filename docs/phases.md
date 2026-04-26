@@ -1,14 +1,14 @@
 # Beholder NMT — Project Status & Phase Plan
 
-**Last updated:** 2026-04-26
-**Current checkpoint:** Phase 5.4.4 (Hostname capture quality)
+**Last updated:** 2026-04-27
+**Current checkpoint:** Phase 5.4.4 (Hostname capture quality) + roadmap reorganization
 **Test count:** 611
 
 ---
 
 ## 1. Status Summary
 
-As of 2026-04-26, the daemon captures per-process network telemetry via ETW on Windows, enriches flows with DB-IP country codes, and persists per-destination traffic to SQLite through a five-tier rollup cascade (`traffic_raw` → `_10s` → `_1m` → `_10m` → `_1h`). Historical timeline RPCs use a stitched multi-tier query that serves each time slice from the finest-retention tier that covers it — recent data at 1-second fidelity, older data smoothly coarser. The UI shell ships a Traffic tab with a time-range dropdown (5 Minutes live + 1 Hour / 24 Hours / 7 Days / 30 Days / All Time / Custom historical) and a chart that guarantees "same data → same shape" regardless of which range preset is selected. Five `Get*` RPCs serve aggregated traffic data from SQLite. The hostname-resolution ladder now has four layers: (1) Windows DNS resolver-cache preload at startup via the verified `DnsGetCacheDataTableEx` export (ADR 004), (2) live `Microsoft-Windows-DNS-Client` ETW capture (`EtwDnsCache`), (3) reverse-DNS PTR fallback for direct-IP destinations gated by `DnsOptions.EnableReverseDnsFallback` (ADR 005), and (4) SNI extraction from TCP/443 ClientHello packets via `Microsoft-Windows-PktMon` ETW gated by `SniOptions.EnableSniCapture` (ADR 006). DNS hostname mappings are persisted to a `dns_cache` table; SQLite-side hostname backfill retroactively names historical buckets when a late resolution arrives. The gRPC IPC surface has ten RPCs. 611 tests pass deterministically. Next up: Phase 6 (remaining tab content, starting with Firewall) or Phase 5.5 (settings page exposing the new resolution-ladder toggles + retention preset picker).
+As of 2026-04-26, the daemon captures per-process network telemetry via ETW on Windows, enriches flows with DB-IP country codes, and persists per-destination traffic to SQLite through a five-tier rollup cascade (`traffic_raw` → `_10s` → `_1m` → `_10m` → `_1h`). Historical timeline RPCs use a stitched multi-tier query that serves each time slice from the finest-retention tier that covers it — recent data at 1-second fidelity, older data smoothly coarser. The UI shell ships a Traffic tab with a time-range dropdown (5 Minutes live + 1 Hour / 24 Hours / 7 Days / 30 Days / All Time / Custom historical) and a chart that guarantees "same data → same shape" regardless of which range preset is selected. Five `Get*` RPCs serve aggregated traffic data from SQLite. The hostname-resolution ladder now has four layers: (1) Windows DNS resolver-cache preload at startup via the verified `DnsGetCacheDataTableEx` export (ADR 004), (2) live `Microsoft-Windows-DNS-Client` ETW capture (`EtwDnsCache`), (3) reverse-DNS PTR fallback for direct-IP destinations gated by `DnsOptions.EnableReverseDnsFallback` (ADR 005), and (4) SNI extraction from TCP/443 ClientHello packets via `Microsoft-Windows-PktMon` ETW gated by `SniOptions.EnableSniCapture` (ADR 006). DNS hostname mappings are persisted to a `dns_cache` table; SQLite-side hostname backfill retroactively names historical buckets when a late resolution arrives. The gRPC IPC surface has ten RPCs. 611 tests pass deterministically. Next up: Phase 6.4 (Firewall tab) is the active queue head. Settings is repositioned as **Phase 13** — the dedicated final UI phase — so its information architecture can encompass every option that accumulates across Phases 6–12 rather than being retrofitted. Scanner sits at **Phase 9** as a placeholder slot whose feature set is scoped by ADR before implementation begins.
 
 ---
 
@@ -463,11 +463,11 @@ Existing tests updated: `SqliteTrafficStoreTests` (rename pass + `CreateBucket` 
 ## 5. Known Gaps and Forward-Looking Notes
 
 - **RemoveFirewallRule RPC** — needed before Phase 6.4 (firewall tab pill toggle). Currently only `ApplyFirewallRule` exists; removing a rule requires a new RPC or extending the existing one with a `Remove` action.
-- **O(n) chain verification** — `VerifyAsync` reads all rows sequentially. Fine for weeks of uptime, but months of data will need checkpoint-based verification (verify from last checkpoint instead of seq 1). Address in Phase 10.
-- **Startup OS/SQLite firewall reconciliation** — on daemon restart, OS firewall rules and SQLite `firewall_rules` table may diverge (crash during apply, manual OS changes). A reconciliation pass at startup is deferred to Phase 11.
+- **O(n) chain verification** — `VerifyAsync` reads all rows sequentially. Fine for weeks of uptime, but months of data will need checkpoint-based verification (verify from last checkpoint instead of seq 1). Address in Phase 11.
+- **Startup OS/SQLite firewall reconciliation** — on daemon restart, OS firewall rules and SQLite `firewall_rules` table may diverge (crash during apply, manual OS changes). A reconciliation pass at startup is deferred to Phase 12.
 - **Linux platform (Beholder.Daemon.Linux)** — project stub exists. `NetlinkFlowSource` and `NftablesFirewallController` implementations are deferred. No timeline; Windows is the primary platform.
-- **Uplink client (Beholder.Daemon.Uplink)** — project stub exists. Outbound gRPC client with connection state machine, JWT auth, and telemetry forwarding. Phase 9.
-- **Uplink test stub (Beholder.Tests.UplinkStub)** — project stub exists. Reference gRPC server for uplink integration testing. Phase 9.
+- **Uplink client (Beholder.Daemon.Uplink)** — project stub exists. Outbound gRPC client with connection state machine, JWT auth, and telemetry forwarding. Phase 10.
+- **Uplink test stub (Beholder.Tests.UplinkStub)** — project stub exists. Reference gRPC server for uplink integration testing. Phase 10.
 - **Alert pipeline (daemon side)** — `NewProcessDetector`, `BinaryHashMonitor`, `ChainIntegrityMonitor` not yet implemented. The `AlertKind` enum and `IAlertStore` interface are defined, but no daemon code generates alerts yet. Phase 7.
 - **TrafficEngineTests residual flakiness** — inherited from AccumulatorTests. The settle-signal fix eliminated most failures, but ~1-2% timeout rate may persist under extreme CPU contention. Monitor during future test runs.
 - **UI quality standards enforcement** — Phase 5.4 onward must comply with `docs/UI_QUALITY_STANDARDS.md`. Phases 5.1–5.3 are retroactively compliant (their quality issues were caught and fixed during manual review). Every future UI phase plan must include the verification and reference comparison sections defined in that document.
@@ -487,7 +487,7 @@ Not a code deliverable. A project milestone marking the point at which the Traff
 - Destination breakdown panel (hosts/ports inside a selected process) — deferred; data is available via `GetProcessDestinationsAsync` but no panel exists yet.
 - Per-tier retention tuning in `appsettings.json` — current values are hard-coded in `TrafficStorageOptions` C# defaults.
 
-**Decision point.** Natural pause to validate the historical-traffic story before moving to the Firewall tab (Phase 5.5 / 6.4) or revisiting any architectural questions surfaced during 4.6b / 5.4.2 implementation (e.g., rollup cadence, eviction timing under load, or the `TrafficStorageOptions` binding wart flagged in Phase 4.7's plan).
+**Decision point.** Natural pause to validate the historical-traffic story before moving to the Firewall tab (Phase 6.4) or revisiting any architectural questions surfaced during 4.6b / 5.4.2 implementation (e.g., rollup cadence, eviction timing under load, or the `TrafficStorageOptions` binding wart flagged in Phase 4.7's plan).
 
 ### Phase 5 — UI shell and daemon connection
 
@@ -524,28 +524,52 @@ Not a code deliverable. A project milestone marking the point at which the Traff
 - 8.1 — Map tab ViewModel: aggregates per-country byte totals, converts alpha-2 to alpha-3 for LiveCharts2
 - 8.2 — Map tab View: LiveCharts2 GeoMap with Mercator projection. **Depends on:** LiveCharts2 `2.1.0-dev-247` stability (currently installed but unused). If unstable, implement as custom `Canvas`-drawn world map.
 
-### Phase 9 — Uplink client
+### Phase 9 — Scanner
 
-- 9.1 — `UplinkClient` state machine (Disconnected → Connecting → Authenticated → Streaming) with exponential backoff
-- 9.2 — Telemetry forwarding (counter batches + alerts to aggregator)
-- 9.3 — Remote command handling (firewall commands with capability validation)
-- 9.4 — Configuration and Ed25519 key management
+*Feature set to be scoped before implementation begins.* The SCANNER tab is wired into the top navigation but `ScannerTabView.axaml` and `ScannerTabViewModel.cs` are stubs ("Scanner tab content (deferred)") and no ADR or design doc currently defines what Scanner does. Likely candidate features: port scan of locally-known destinations, vulnerability lookup against a CVE feed, anomaly detection (deviation-from-baseline alerts on existing flows), network discovery (LAN sweep). The phase plan begins with a scoping ADR proposing the feature surface, gets user approval, then splits into sub-phases per the chosen scope. The slot exists in the roadmap so Phase 13 (Settings) can sit "after Scanner" as a cleanly-ordered queue position even before Scanner's contents are decided.
+
+### Phase 10 — Uplink client
+
+- 10.1 — `UplinkClient` state machine (Disconnected → Connecting → Authenticated → Streaming) with exponential backoff
+- 10.2 — Telemetry forwarding (counter batches + alerts to aggregator)
+- 10.3 — Remote command handling (firewall commands with capability validation)
+- 10.4 — Configuration and Ed25519 key management
 - Checkpoint: uplink works end-to-end against `Beholder.Tests.UplinkStub`.
 
-### Phase 10 — Signed checkpoints and chain export
+### Phase 11 — Signed checkpoints and chain export
 
-- 10.1 — `CheckpointSigner`: periodic Ed25519 signing of chain head, writes to `checkpoint` table
-- 10.2 — Enhanced `VerifyChain`: also verifies checkpoint signatures. **Note:** this improves the O(n) verification gap — verify from last checkpoint instead of seq 1.
-- 10.3 — Chain export: CLI subcommand or RPC for signed JSON export of filtered events
+- 11.1 — `CheckpointSigner`: periodic Ed25519 signing of chain head, writes to `checkpoint` table
+- 11.2 — Enhanced `VerifyChain`: also verifies checkpoint signatures. **Note:** this improves the O(n) verification gap — verify from last checkpoint instead of seq 1.
+- 11.3 — Chain export: CLI subcommand or RPC for signed JSON export of filtered events
 
-### Phase 11 — Polish and hardening
+### Phase 12 — Polish and hardening
 
-- 11.1 — Windows service installation (sc.exe or WiX installer, auto-start)
-- 11.2 — Error handling sweep (every catch, every log call, every edge case)
-- 11.3 — Performance profiling (24-hour soak test: memory, CPU, SQLite size, GC pressure)
-- 11.4 — Configuration documentation (reference `beholder.toml` with comments)
-- 11.5 — Startup reconciliation: sync OS firewall rules with SQLite `firewall_rules` table on daemon start
+- 12.1 — Windows service installation (sc.exe or WiX installer, auto-start)
+- 12.2 — Error handling sweep (every catch, every log call, every edge case)
+- 12.3 — Performance profiling (24-hour soak test: memory, CPU, SQLite size, GC pressure)
+- 12.4 — Configuration documentation (reference `beholder.toml` with comments)
+- 12.5 — Startup reconciliation: sync OS firewall rules with SQLite `firewall_rules` table on daemon start
 - Final checkpoint: install on clean machine, run for a week, understand what happened.
+
+### Phase 13 — Settings (final UI deliverable)
+
+**Why last.** Each prior phase adds options to surface (firewall defaults, uplink server URL + JWT, alert thresholds, scanner-specific config, etc.). Building Settings last means the information architecture is designed once, around the full set of options that exist, rather than being retrofitted every time another phase adds a configurable. The five toggles already known at this writing (`RollupOptions.Preset`, `RecordingOptions.FilterSelfTraffic`, `DnsOptions.EnablePreload`, `DnsOptions.EnableReverseDnsFallback`, `SniOptions.EnableSniCapture`) plus whatever Phases 6–12 add gives a meaningful surface area to design against.
+
+**Quality gate.** Full compliance with `docs/UI_QUALITY_STANDARDS.md`. Each sub-phase plan must include the states-implemented, verification (three window sizes, 30 s daemon uptime, real data, extreme scenario), and reference-comparison sections that document defines.
+
+- 13.1 — **Settings shell.** Vertical category sidebar + content pane (Windows 11 Settings pattern). Replaces `SettingsTabView.axaml`'s "Settings content (deferred)" placeholder. `SettingsTabViewModel` orchestrates child section VMs (one per category). Theme tokens, FontSize tokens, hover states consistent with the rest of the app.
+- 13.2 — **Capture & DNS section.** Surfaces `DnsOptions.EnablePreload`, `DnsOptions.EnableReverseDnsFallback`, `SniOptions.EnableSniCapture`. Each toggle: label + one-line description (drawn from the option's existing XML doc comment), "Live" or "Restart required" indicator, privacy-impact icon for toggles that change observability surface (turning SNI off = some flows lose hostnames; turning reverse-DNS off = direct-IP flows show as raw IPs forever).
+- 13.3 — **Storage section.** `RollupOptions.Preset` (Balanced default vs. Compact picker, with estimated disk-footprint labels). `RecordingOptions.FilterSelfTraffic`. Plus any storage-related options added by intervening phases.
+- 13.4 — **Firewall section.** *Content depends on Phase 6.4–6.5 outcomes.* Likely candidates: default action for unknown apps, alert thresholds, undo retention window.
+- 13.5 — **Map section.** *Content depends on Phase 8 outcome.* Likely candidates: projection, color scheme, dot opacity.
+- 13.6 — **Scanner section.** *Content depends on Phase 9 outcome.* Likely candidates: TBD; the Scanner feature itself is unscoped at this writing.
+- 13.7 — **Connection / Uplink section.** *Content depends on Phase 10 outcome.* Server URL, JWT credentials, enable/disable, retry interval, keepalive.
+- 13.8 — **About / Diagnostics section.** Daemon version, build hash, last-restart timestamp, storage size (sum across the five tier tables + dns_cache + event_log + firewall_rules), test count + skipped count from the most recent build, "Open log folder" button, "Restart daemon" button (admin gate, confirmation dialog), ADRs hyperlinked.
+- 13.9 — **Dirty-state + apply/cancel UX.** Track per-option whether it's been changed since load. "Apply" button enabled only when dirty. "Cancel" reverts the in-memory copy to last-saved state. Leaving with unsaved changes prompts confirmation. Options that are *always live* (`IOptionsMonitor.OnChange`-driven) bypass the apply pattern; the UI clearly distinguishes immediate-effect from apply-required.
+- 13.10 — **Settings persistence + reload.** Settings persist to `appsettings.json` (or a sidecar override file — design choice). Live-reload validated end-to-end: toggle a setting, observe the daemon's log line confirming `IOptionsMonitor.OnChange` fired and the relevant component re-read the value. "Reset to defaults" available per-option, per-category, and all-at-once (the all-at-once version requires confirmation).
+- 13.11 — **Quality-gate sign-off.** States documented (loading, populated, error, extreme). Three window sizes verified (1100×720, 1280×800, maximized) with screenshots. 30 s daemon uptime against real network activity. Reference comparison against Windows 11 Settings or 1Password Settings at the same resolution. Banned-pattern audit (no fixed widths, no raw hex colors, no unvirtualized 100+ item lists, no buttons without hover states).
+- 13.12 — **Tests.** ViewModel tests for dirty-state tracking, apply/cancel, validation, reset-to-defaults. Integration smoke: toggle each option, observe daemon log line, verify behavior changed. State tests for daemon-disconnected mid-edit + dirty-state preservation on reconnect. Test-count target: existing 611 + ~30 new = ~641, depending on how much of the persistence + live-reload path is unit-testable vs. integration-only.
+- Final checkpoint: every option in the daemon and UI is reachable from Settings, every toggle's effect is observable in real time or with a clearly-indicated restart, the page passes the UI quality bar at all three window sizes, and the project is shippable.
 
 ---
 
