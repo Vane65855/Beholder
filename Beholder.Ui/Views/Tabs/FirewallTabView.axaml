@@ -206,7 +206,7 @@
                        Foreground="{DynamicResource TextSecondary}"
                        FontSize="{DynamicResource FontSizeHeading}"
                        HorizontalAlignment="Center" />
-            <TextBlock Text="As applications make connections, they'll appear here. Use the IN / OUT pills to allow or block traffic."
+            <TextBlock Text="As applications make connections, they'll appear here. Click any pill to block an app's traffic — apps default to allowed unless you block them."
                        Foreground="{DynamicResource TextMuted}"
                        FontSize="{DynamicResource FontSizeBody}"
                        MaxWidth="420"

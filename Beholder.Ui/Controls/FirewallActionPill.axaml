@@ -27,10 +27,10 @@
             <Setter Property="Foreground" Value="{DynamicResource SeverityDanger}" />
             <Setter Property="BorderBrush" Value="{DynamicResource SeverityDanger}" />
         </Style>
-        <Style Selector="Button.firewallPill.default">
-            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
-        </Style>
+        <!-- No "default" style: rows with no rule are visually identical to rows
+             with an explicit Allow rule (both show ALLOW green). The pill is a
+             status indicator for effective connectivity, not the underlying
+             rule state — "no rule" means Windows defaults to allow. -->
         <Style Selector="Button.firewallPill:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
         </Style>

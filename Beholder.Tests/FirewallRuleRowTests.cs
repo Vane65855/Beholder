@@ -37,10 +37,13 @@ public class FirewallRuleRowTests {
     }
 
     [Fact]
-    public void OverallStatus_BothDefault_ReturnsDefault() {
+    public void OverallStatus_BothDefault_ReturnsAllowed() {
+        // Status-indicator semantics: Default (no rule) and Allow both fold
+        // into Allowed because the user-visible outcome is identical
+        // (the app can connect).
         var row = new FirewallRuleRow(@"C:\app.exe");
 
-        Assert.Equal(FirewallRowStatus.Default, row.OverallStatus);
+        Assert.Equal(FirewallRowStatus.Allowed, row.OverallStatus);
     }
 
     // [Theory] parameters can't reference the internal enum directly because
@@ -51,9 +54,10 @@ public class FirewallRuleRowTests {
     [InlineData((int)FirewallActionState.Block, (int)FirewallActionState.Allow)]
     [InlineData((int)FirewallActionState.Block, (int)FirewallActionState.Default)]
     [InlineData((int)FirewallActionState.Default, (int)FirewallActionState.Block)]
-    [InlineData((int)FirewallActionState.Allow, (int)FirewallActionState.Default)]
-    [InlineData((int)FirewallActionState.Default, (int)FirewallActionState.Allow)]
-    public void OverallStatus_MixedDirections_ReturnsPartial(int inActionInt, int outActionInt) {
+    public void OverallStatus_OneDirectionBlocked_ReturnsPartial(int inActionInt, int outActionInt) {
+        // Only mixed states where exactly one direction is Block remain
+        // Partial. Allow+Default and Default+Allow now fold into Allowed
+        // (no Block anywhere = effective full-allow).
         var row = new FirewallRuleRow(@"C:\app.exe") {
             InAction = (FirewallActionState)inActionInt,
             OutAction = (FirewallActionState)outActionInt,
@@ -63,10 +67,28 @@ public class FirewallRuleRowTests {
     }
 
     [Theory]
+    [InlineData((int)FirewallActionState.Allow, (int)FirewallActionState.Default)]
+    [InlineData((int)FirewallActionState.Default, (int)FirewallActionState.Allow)]
+    public void OverallStatus_NoBlock_ReturnsAllowed(int inActionInt, int outActionInt) {
+        // Default+Allow combinations have no Block anywhere; the app can
+        // connect freely, so the status indicator reads Allowed.
+        var row = new FirewallRuleRow(@"C:\app.exe") {
+            InAction = (FirewallActionState)inActionInt,
+            OutAction = (FirewallActionState)outActionInt,
+        };
+
+        Assert.Equal(FirewallRowStatus.Allowed, row.OverallStatus);
+    }
+
+    [Theory]
+    [InlineData((int)FirewallActionState.Default, (int)FirewallActionState.Block)]
     [InlineData((int)FirewallActionState.Allow, (int)FirewallActionState.Block)]
     [InlineData((int)FirewallActionState.Block, (int)FirewallActionState.Default)]
-    [InlineData((int)FirewallActionState.Default, (int)FirewallActionState.Allow)]
-    public void NextState_FollowsAllowBlockDefaultCycle(int currentInt, int expectedInt) {
+    public void NextState_BinaryToggle_NonBlockGoesToBlock_BlockGoesToDefault(int currentInt, int expectedInt) {
+        // Binary toggle: any non-Block state advances to Block; Block goes
+        // back to Default (rule removed). The previous three-state cycle
+        // (Allow → Block → Default → Allow) was deprecated when the pill
+        // became a status indicator rather than a rule editor.
         Assert.Equal(
             (FirewallActionState)expectedInt,
             FirewallRuleRow.NextState((FirewallActionState)currentInt));

@@ -418,13 +418,17 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     private async Task DispatchPillRpcAsync(
         string processPath, Direction direction, FirewallActionState target, CancellationToken cancellationToken
     ) {
+        // The pill is a binary toggle: target is always either Block (apply
+        // a block rule) or Default (remove the existing rule). Allow targets
+        // are not reachable from clicks under the status-indicator model —
+        // an explicit-allow rule is a future power-user surface, not a
+        // by-product of the toggle.
         switch (target) {
-            case FirewallActionState.Allow:
             case FirewallActionState.Block:
                 await _daemonClient.ApplyFirewallRuleAsync(new ApplyFirewallRuleRequest {
                     ProcessPath = processPath,
                     Direction = direction,
-                    Action = target == FirewallActionState.Block ? FirewallAction.Block : FirewallAction.Allow,
+                    Action = FirewallAction.Block,
                     Source = RuleSource.Manual,
                 }, cancellationToken);
                 break;
@@ -434,6 +438,10 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
                     Direction = direction,
                 }, cancellationToken);
                 break;
+            // FirewallActionState.Allow is intentionally unreachable here —
+            // NextState never produces it. If a future caller wires a path
+            // that does, it should call ApplyFirewallRuleAsync(Allow) explicitly
+            // rather than going through this toggle helper.
         }
     }
 

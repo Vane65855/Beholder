@@ -127,7 +127,10 @@ public class FirewallTabViewModelTests {
     }
 
     [Fact]
-    public async Task CycleOutPill_FromDefault_CallsApplyWithAllow() {
+    public async Task CycleOutPill_FromDefault_CallsApplyWithBlock() {
+        // Status-indicator semantics: Default → click → Block. Default reads
+        // as ALLOW visually (no rule = OS default allows), so a click is the
+        // user saying "block this app's outbound traffic."
         var (vm, client, _) = CreateVm();
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
 
@@ -137,12 +140,15 @@ public class FirewallTabViewModelTests {
         var call = Assert.Single(client.ApplyFirewallRuleCalls);
         Assert.Equal(@"C:\bin\curl.exe", call.ProcessPath);
         Assert.Equal(Direction.Outbound, call.Direction);
-        Assert.Equal(FirewallAction.Allow, call.Action);
-        Assert.Equal(FirewallActionState.Allow, row.OutAction);
+        Assert.Equal(FirewallAction.Block, call.Action);
+        Assert.Equal(FirewallActionState.Block, row.OutAction);
     }
 
     [Fact]
     public async Task CycleOutPill_FromAllow_CallsApplyWithBlock() {
+        // Allow is unusual to start from in v1 (UI clicks never produce it),
+        // but if a daemon-side or remote path created an explicit Allow rule,
+        // a UI click should still flip it to Block — defensive coverage.
         var (vm, client, _) = CreateVm();
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
 
@@ -178,13 +184,14 @@ public class FirewallTabViewModelTests {
         var row = new FirewallRuleRow(@"C:\bin\curl.exe");
         await vm.CycleOutPillCommand.ExecuteAsync(row);
 
-        // Optimistic state was Allow; revert puts it back to Default.
+        // Optimistic state was Block (binary toggle from Default); revert
+        // puts it back to Default.
         Assert.Equal(FirewallActionState.Default, row.OutAction);
         Assert.True(vm.HasError);
     }
 
     [Fact]
-    public async Task CycleInPill_FromDefault_CallsApplyInbound() {
+    public async Task CycleInPill_FromDefault_CallsApplyInboundWithBlock() {
         var (vm, client, _) = CreateVm();
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
 
@@ -193,7 +200,7 @@ public class FirewallTabViewModelTests {
 
         var call = Assert.Single(client.ApplyFirewallRuleCalls);
         Assert.Equal(Direction.Inbound, call.Direction);
-        Assert.Equal(FirewallAction.Allow, call.Action);
+        Assert.Equal(FirewallAction.Block, call.Action);
     }
 
     [Fact]
