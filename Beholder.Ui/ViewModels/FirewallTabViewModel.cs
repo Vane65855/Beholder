@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -30,6 +31,7 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     private readonly IDaemonClient _daemonClient;
     private readonly ProcessStateService _processStateService;
     private readonly DaemonStreamSubscriber _streamSubscriber;
+    private readonly Func<string, bool> _fileExistsCheck;
     private readonly Dictionary<string, FirewallRuleRow> _rowsByPath = new(StringComparer.Ordinal);
 
     private CancellationTokenSource? _activationCts;
@@ -121,7 +123,8 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     public FirewallTabViewModel(
         IDaemonClient daemonClient,
         ProcessStateService processStateService,
-        DaemonStreamSubscriber streamSubscriber
+        DaemonStreamSubscriber streamSubscriber,
+        Func<string, bool>? fileExistsCheck = null
     ) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
@@ -129,6 +132,9 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         _daemonClient = daemonClient;
         _processStateService = processStateService;
         _streamSubscriber = streamSubscriber;
+        // Optional injection so tests can simulate uninstalled apps deterministically
+        // without touching the real filesystem.
+        _fileExistsCheck = fileExistsCheck ?? File.Exists;
         ActivityVm = new FirewallActivityViewModel(daemonClient, streamSubscriber);
 
         _processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
@@ -225,7 +231,26 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
             row.RecentBytesTotal = summary.TotalBytesIn + summary.TotalBytesOut;
         }
 
+        // One-shot file-existence check across every row. ~80 paths * single
+        // stat call is sub-millisecond on warm caches; running on the UI thread
+        // here is fine because ActivateAsync is already async-bound to the RPC
+        // round-trips that just completed.
+        foreach (var row in _rowsByPath.Values) {
+            row.ExecutableExists = SafeFileExists(row.ProcessPath);
+        }
+
         Reclassify();
+    }
+
+    /// <summary>
+    /// Wraps the injected <see cref="_fileExistsCheck"/> in a try/catch so
+    /// permission errors or malformed paths can't kill the join. We default to
+    /// "exists" on exception — better to over-show a row than to drop one
+    /// the user might want to act on.
+    /// </summary>
+    private bool SafeFileExists(string path) {
+        try { return _fileExistsCheck(path); }
+        catch { return true; }
     }
 
     private FirewallRuleRow GetOrCreateRow(string processPath) {
@@ -269,6 +294,10 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
                 if (IsExcludedProcess(path)) continue;
                 var row = GetOrCreateRow(path);
                 row.IsActive = true;
+                // A process that's currently reporting traffic must have its
+                // executable on disk — flip the orphan flag back if a previously-
+                // missing app got reinstalled and re-launched mid-session.
+                row.ExecutableExists = true;
                 row.ActiveConnectionCount = state.ActiveConnectionCount;
                 // RecentBytesTotal: prefer live deltas over the historical
                 // summary value because the live values reflect very-recent
@@ -286,8 +315,15 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
             switch (change.Change) {
                 case FirewallRuleChange.Types.ChangeKind.Created:
                 case FirewallRuleChange.Types.ChangeKind.Changed:
+                    var existed = _rowsByPath.ContainsKey(change.Rule.ProcessPath);
                     var row = GetOrCreateRow(change.Rule.ProcessPath);
                     ApplyRuleToRow(row, change.Rule);
+                    if (!existed) {
+                        // First time we're seeing this path — run the existence
+                        // check so a freshly-broadcast rule against a deleted
+                        // app shows up correctly as orphaned.
+                        row.ExecutableExists = SafeFileExists(change.Rule.ProcessPath);
+                    }
                     EnsureMembership(row);
                     break;
                 case FirewallRuleChange.Types.ChangeKind.Removed:
@@ -302,6 +338,12 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
                         if (existing.InAction == FirewallActionState.Default
                             && existing.OutAction == FirewallActionState.Default) {
                             existing.HasRule = false;
+                            // If the executable is also gone, the row no longer
+                            // qualifies for visibility (orphaned -> noise). Run
+                            // Reclassify to drop it from InactiveRows.
+                            if (!existing.ExecutableExists) {
+                                Reclassify();
+                            }
                         }
                     }
                     break;
@@ -329,10 +371,30 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     private void Reclassify() {
         ActiveRows.Clear();
         InactiveRows.Clear();
-        foreach (var row in _rowsByPath.Values.OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)) {
-            if (row.IsActive) ActiveRows.Add(row);
-            else InactiveRows.Add(row);
+
+        // Active group: every running process, alphabetical. IsActive implies
+        // ExecutableExists so no filtering needed here.
+        foreach (var row in _rowsByPath.Values
+            .Where(r => r.IsActive)
+            .OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)) {
+            ActiveRows.Add(row);
         }
+
+        // Inactive group: existing apps first, then orphaned-rule apps. Rows
+        // where the executable is gone *and* no rule references them are
+        // dropped — they're noise (uninstalled apps with no actionable state).
+        var inactive = _rowsByPath.Values.Where(r => !r.IsActive).ToList();
+        foreach (var row in inactive
+            .Where(r => r.ExecutableExists)
+            .OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)) {
+            InactiveRows.Add(row);
+        }
+        foreach (var row in inactive
+            .Where(r => r.IsOrphanedRule)
+            .OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)) {
+            InactiveRows.Add(row);
+        }
+
         OnPropertyChanged(nameof(FilteredActiveRows));
         OnPropertyChanged(nameof(FilteredInactiveRows));
         OnPropertyChanged(nameof(HasFilteredActiveRows));

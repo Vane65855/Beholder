@@ -379,9 +379,26 @@
                                 <Grid ColumnDefinitions="*,56,56,140,90,80">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal"
                                                 Spacing="10" VerticalAlignment="Center">
-                                        <Ellipse Width="8" Height="8"
-                                                 VerticalAlignment="Center"
-                                                 Fill="{DynamicResource TextMuted}" />
+                                        <!-- Indicator: muted dot for normal inactive rows;
+                                             ⚠ glyph (SeverityWarn amber) for orphaned-rule
+                                             rows where the .exe is gone but a manual rule
+                                             still references it. Tooltip on the warning
+                                             glyph explains the state and the remedy. -->
+                                        <Panel Width="14" Height="14" VerticalAlignment="Center">
+                                            <Ellipse Width="8" Height="8"
+                                                     HorizontalAlignment="Center"
+                                                     VerticalAlignment="Center"
+                                                     Fill="{DynamicResource TextMuted}"
+                                                     IsVisible="{Binding !IsOrphanedRule}" />
+                                            <TextBlock Text="⚠"
+                                                       FontSize="13"
+                                                       FontWeight="SemiBold"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource SeverityWarn}"
+                                                       IsVisible="{Binding IsOrphanedRule}"
+                                                       ToolTip.Tip="App no longer installed. The firewall rule still exists — click the BLOCK pill to remove it." />
+                                        </Panel>
                                         <StackPanel Orientation="Vertical" Spacing="2">
                                             <TextBlock Text="{Binding DisplayName}"
                                                        Foreground="{DynamicResource TextSecondary}"
