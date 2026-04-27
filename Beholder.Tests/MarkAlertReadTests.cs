@@ -46,7 +46,8 @@ public sealed class MarkAlertReadTests : IDisposable {
 
         _service = new BeholderLocalService(
             _broadcaster, pipeline, firewallStore, _alertStore,
-            new FakeFirewallController(), eventStore, new FakeTrafficStore(),
+            new FakeFirewallController(), new FakeFirewallEnforcementState(),
+            eventStore, new FakeTrafficStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
