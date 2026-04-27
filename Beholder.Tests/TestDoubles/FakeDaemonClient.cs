@@ -29,6 +29,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? RemoveFirewallRuleException { get; set; }
     public Exception? ListFirewallRulesException { get; set; }
     public Exception? SetFirewallEnabledException { get; set; }
+    public Exception? FirewallActivityException { get; set; }
 
     // Optional canned snapshot/response bodies so tests can drive real data
     // through the seeding path. Existing callers that don't set these get the
@@ -44,6 +45,8 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Func<RemoveFirewallRuleRequest, RemoveFirewallRuleResponse>? RemoveFirewallRuleResponder { get; set; }
     public ListFirewallRulesResponse? ListFirewallRulesResponse { get; set; }
     public Func<SetFirewallEnabledRequest, SetFirewallEnabledResponse>? SetFirewallEnabledResponder { get; set; }
+    public Func<GetFirewallActivityRequest, GetFirewallActivityResponse>? FirewallActivityResponder { get; set; }
+    public GetFirewallActivityResponse? FirewallActivityResponse { get; set; }
 
     // Captured invocations for assertions.
     public List<ApplyFirewallRuleRequest> ApplyFirewallRuleCalls { get; } = new();
@@ -159,6 +162,13 @@ internal sealed class FakeDaemonClient : IDaemonClient {
         GetProcessSummariesRequest request, CancellationToken cancellationToken) {
         if (ProcessSummariesException is not null) throw ProcessSummariesException;
         return Task.FromResult(ProcessSummariesResponse ?? new GetProcessSummariesResponse());
+    }
+
+    public Task<GetFirewallActivityResponse> GetFirewallActivityAsync(
+        GetFirewallActivityRequest request, CancellationToken cancellationToken) {
+        if (FirewallActivityException is not null) throw FirewallActivityException;
+        return Task.FromResult(FirewallActivityResponder?.Invoke(request)
+            ?? FirewallActivityResponse ?? new GetFirewallActivityResponse());
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

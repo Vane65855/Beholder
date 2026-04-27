@@ -412,6 +412,76 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         return response;
     }, context);
 
+    public override Task<Local.GetFirewallActivityResponse> GetFirewallActivity(
+        Local.GetFirewallActivityRequest request, ServerCallContext context
+    ) => ExecuteQueryAsync(nameof(GetFirewallActivity), async cancellationToken => {
+        // 0 → server default. Negative → invalid (caught by ExecuteQueryAsync's
+        // ArgumentOutOfRangeException → InvalidArgument mapping). Above the
+        // hard cap → silently clamped: clients shouldn't be able to ask the
+        // daemon for an unbounded slice of the chain through this RPC.
+        const int defaultLimit = 100;
+        const int hardCap = 500;
+        var limit = request.Limit == 0 ? defaultLimit : request.Limit;
+        if (limit < 0) throw new ArgumentOutOfRangeException(nameof(request.Limit), "limit must be non-negative");
+        if (limit > hardCap) limit = hardCap;
+
+        var firewallKinds = new[] {
+            EventKind.FirewallRuleCreated,
+            EventKind.FirewallRuleChanged,
+            EventKind.FirewallRuleRemoved,
+            EventKind.FirewallEnforcementToggled,
+        };
+        var entries = await _eventStore.ListByKindsAsync(firewallKinds, limit, cancellationToken)
+            .ConfigureAwait(false);
+
+        var response = new Local.GetFirewallActivityResponse();
+        foreach (var entry in entries) {
+            response.Events.Add(BuildActivityEvent(entry));
+        }
+        return response;
+    }, context);
+
+    /// <summary>
+    /// Decodes the chain payload for one firewall activity entry and packs it
+    /// into the wire message. Bad payloads (decoder returns null) round-trip
+    /// as best-effort: the kind + timestamp + seq still surface, but the
+    /// rule-level fields default to empty so the UI can still render the row.
+    /// </summary>
+    private static Local.FirewallActivityEvent BuildActivityEvent(EventLogEntry entry) {
+        var ev = new Local.FirewallActivityEvent {
+            Seq = entry.Seq,
+            TimestampUnixNs = entry.Timestamp.ToUnixTimeNanoseconds(),
+            Kind = entry.Kind switch {
+                EventKind.FirewallRuleCreated => Local.FirewallActivityKind.RuleCreated,
+                EventKind.FirewallRuleChanged => Local.FirewallActivityKind.RuleChanged,
+                EventKind.FirewallRuleRemoved => Local.FirewallActivityKind.RuleRemoved,
+                EventKind.FirewallEnforcementToggled => Local.FirewallActivityKind.EnforcementToggled,
+                _ => Local.FirewallActivityKind.FirewallActivityUnknown,
+            },
+        };
+
+        switch (entry.Kind) {
+            case EventKind.FirewallRuleCreated:
+            case EventKind.FirewallRuleChanged:
+            case EventKind.FirewallRuleRemoved:
+                var rule = FirewallRulePayloadEncoder.TryDecode(entry.Payload);
+                if (rule is not null) {
+                    ev.ProcessPath = rule.ProcessPath;
+                    ev.Direction = rule.Direction.ToProto();
+                    ev.Action = rule.Action.ToProto();
+                    ev.Source = rule.Source.ToProto();
+                }
+                break;
+            case EventKind.FirewallEnforcementToggled:
+                var toggle = FirewallEnforcementTogglePayloadEncoder.TryDecode(entry.Payload);
+                if (toggle is not null) {
+                    ev.EnforcementEnabled = toggle.Value.Enabled;
+                }
+                break;
+        }
+        return ev;
+    }
+
     public override Task<Local.GetProcessSummariesResponse> GetProcessSummaries(
         Local.GetProcessSummariesRequest request, ServerCallContext context
     ) => ExecuteQueryAsync(nameof(GetProcessSummaries), async cancellationToken => {

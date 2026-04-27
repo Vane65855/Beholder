@@ -207,6 +207,13 @@ internal sealed class DaemonClient : IDaemonClient {
         return await client.GetProcessSummariesAsync(request, cancellationToken: cancellationToken);
     }
 
+    public async Task<GetFirewallActivityResponse> GetFirewallActivityAsync(
+        GetFirewallActivityRequest request, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(request);
+        var client = GetConnectedClient();
+        return await client.GetFirewallActivityAsync(request, cancellationToken: cancellationToken);
+    }
+
     public AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken cancellationToken) {
         var client = GetConnectedClient();
         return client.Subscribe(new SubscribeRequest(), cancellationToken: cancellationToken);

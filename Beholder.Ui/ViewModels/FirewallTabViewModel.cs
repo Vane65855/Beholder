@@ -35,6 +35,13 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     private CancellationTokenSource? _activationCts;
     private bool _activated;
 
+    /// <summary>
+    /// Activity strip child VM. Owned by the Firewall tab so its lifecycle
+    /// matches the parent (single dispose, single activation), but exposed
+    /// to the view via a public property so the strip can bind directly.
+    /// </summary>
+    public FirewallActivityViewModel ActivityVm { get; }
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasRows))]
     private bool _isLoading;
@@ -105,6 +112,7 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         _daemonClient = daemonClient;
         _processStateService = processStateService;
         _streamSubscriber = streamSubscriber;
+        ActivityVm = new FirewallActivityViewModel(daemonClient, streamSubscriber);
 
         _processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
         _streamSubscriber.RuleChangeReceived += OnRuleChange;
@@ -115,6 +123,7 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         _processStateService.ProcessStatesUpdated -= OnProcessStatesUpdated;
         _streamSubscriber.RuleChangeReceived -= OnRuleChange;
         _daemonClient.StateChanged -= OnDaemonStateChanged;
+        ActivityVm.Dispose();
         _activationCts?.Cancel();
         _activationCts?.Dispose();
     }
@@ -128,7 +137,12 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         if (_activated) return;
         _activated = true;
         _activationCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        await ReloadAsync(_activationCts.Token);
+        // Activity strip and rule list fetch in parallel — both are cheap
+        // queries against SQLite and they share no failure mode, so a stuck
+        // strip wouldn't gate the table.
+        var ruleLoad = ReloadAsync(_activationCts.Token);
+        var activityLoad = ActivityVm.ActivateAsync(_activationCts.Token);
+        await Task.WhenAll(ruleLoad, activityLoad);
     }
 
     private async Task ReloadAsync(CancellationToken cancellationToken) {
