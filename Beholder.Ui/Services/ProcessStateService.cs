@@ -78,6 +78,7 @@ internal sealed class ProcessStateService : IDisposable {
                 state.TotalBytesOut = snap.TotalBytesOut;
                 state.DeltaBytesIn = snap.DeltaBytesIn;
                 state.DeltaBytesOut = snap.DeltaBytesOut;
+                state.ActiveConnectionCount = snap.ActiveConnectionCount;
                 state.LastSeen = now;
                 _states[snap.ProcessPath] = state;
 
@@ -141,16 +142,20 @@ internal sealed class ProcessStateService : IDisposable {
             state.TotalBytesOut = snapshot.TotalBytesOut;
             state.DeltaBytesIn = snapshot.DeltaBytesIn;
             state.DeltaBytesOut = snapshot.DeltaBytesOut;
+            state.ActiveConnectionCount = snapshot.ActiveConnectionCount;
             state.LastSeen = _timeProvider.GetUtcNow();
             state.RecentDeltaIn.Add(snapshot.DeltaBytesIn);
             state.RecentDeltaOut.Add(snapshot.DeltaBytesOut);
         }
 
-        // Push zero deltas for processes not in this batch (they're idle this tick)
+        // Push zero deltas for processes not in this batch (they're idle this tick).
+        // ActiveConnectionCount also drops to zero — a process that didn't report
+        // this tick has no live snapshot of its connections to us.
         foreach (var kvp in _states) {
             if (!seenPaths.Contains(kvp.Key)) {
                 kvp.Value.DeltaBytesIn = 0;
                 kvp.Value.DeltaBytesOut = 0;
+                kvp.Value.ActiveConnectionCount = 0;
                 kvp.Value.RecentDeltaIn.Add(0);
                 kvp.Value.RecentDeltaOut.Add(0);
             }

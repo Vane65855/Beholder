@@ -84,7 +84,9 @@ public partial class FirewallActionPill : UserControl {
                 break;
             default:
                 PillButton.Classes.Add("default");
-                PillButton.Content = "—";
+                // "+" reads as "click to add a rule" — meaningfully more
+                // affordant than the prior "—" which looked like "no value".
+                PillButton.Content = "+";
                 break;
         }
     }

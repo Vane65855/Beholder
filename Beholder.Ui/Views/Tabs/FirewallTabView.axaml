@@ -33,12 +33,24 @@
             <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
         </Style>
 
-        <!-- Group header style — collapsible Active/Inactive section dividers. -->
+        <!-- Group header style — collapsible Active/Inactive section dividers.
+             Wrapped in a borderless Button so the whole strip is a click target. -->
         <Style Selector="Border.groupHeader">
             <Setter Property="Background" Value="{DynamicResource BackgroundPanel}" />
             <Setter Property="BorderBrush" Value="{DynamicResource DividerHorizontal}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="Padding" Value="16,8" />
+        </Style>
+        <Style Selector="Button.groupHeaderButton">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.groupHeaderButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
         </Style>
 
         <Style Selector="TextBlock.colHeader">
@@ -90,13 +102,18 @@
                     <TextBlock VerticalAlignment="Center"
                                FontSize="{DynamicResource FontSizeBody}">
                         <Run Text="·" Foreground="{DynamicResource TextMuted}" />
-                        <Run Text="{Binding BlockedProcessCount}" Foreground="{DynamicResource SeverityDanger}" />
+                        <!-- Foreground via CountToSeverityBrushConverter: muted when zero,
+                             SeverityDanger when > 0. Avoids the alarming look when zero
+                             rules are blocked (the most common state on tab open). -->
+                        <Run Text="{Binding BlockedProcessCount}"
+                             Foreground="{Binding BlockedProcessCount, Converter={StaticResource CountToSeverityBrushConverter}, ConverterParameter=SeverityDanger}" />
                         <Run Text=" BLOCKED" Foreground="{DynamicResource TextMuted}" />
                     </TextBlock>
                     <TextBlock VerticalAlignment="Center"
                                FontSize="{DynamicResource FontSizeBody}">
                         <Run Text="·" Foreground="{DynamicResource TextMuted}" />
-                        <Run Text="{Binding PartialProcessCount}" Foreground="{DynamicResource SeverityWarn}" />
+                        <Run Text="{Binding PartialProcessCount}"
+                             Foreground="{Binding PartialProcessCount, Converter={StaticResource CountToSeverityBrushConverter}, ConverterParameter=SeverityWarn}" />
                         <Run Text=" PARTIAL" Foreground="{DynamicResource TextMuted}" />
                     </TextBlock>
                 </StackPanel>
@@ -135,7 +152,7 @@
                         Classes.active="{Binding IsFirewallEnabled}"
                         Classes.danger="{Binding !IsFirewallEnabled}"
                         Command="{Binding ToggleEnforcementCommand}"
-                        ToolTip.Tip="Toggle Beholder firewall enforcement"
+                        ToolTip.Tip="Click to disable. Rules stay saved in Beholder, but stop applying to Windows Firewall — apps regain network access until re-enabled."
                         VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="4">
                         <TextBlock Text="FIREWALL:" />
@@ -203,42 +220,55 @@
                       VerticalScrollBarVisibility="Auto">
             <StackPanel>
 
-                <!-- Column header row -->
+                <!-- Column header row. Pill columns are fixed-width (56) to match
+                     FirewallActionPill's MinWidth, so headers align dead-centre
+                     above the pills below. PROCESS takes the remaining space; the
+                     three trailing columns are fixed for legibility. -->
                 <Border Background="{DynamicResource BackgroundPanel}"
                         BorderBrush="{DynamicResource DividerHorizontal}"
                         BorderThickness="0,0,0,1"
                         Padding="16,8">
-                    <Grid ColumnDefinitions="*,Auto,Auto,140,90,80">
+                    <Grid ColumnDefinitions="*,56,56,140,90,80">
                         <TextBlock Grid.Column="0" Classes="colHeader" Text="PROCESS" />
-                        <TextBlock Grid.Column="1" Classes="colHeader" Text="IN" Margin="0,0,8,0" />
-                        <TextBlock Grid.Column="2" Classes="colHeader" Text="OUT" Margin="0,0,12,0" />
+                        <TextBlock Grid.Column="1" Classes="colHeader" Text="IN"
+                                   HorizontalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBlock Grid.Column="2" Classes="colHeader" Text="OUT"
+                                   HorizontalAlignment="Center" Margin="0,0,12,0" />
                         <TextBlock Grid.Column="3" Classes="colHeader" Text="HOSTS" />
                         <TextBlock Grid.Column="4" Classes="colHeader" Text="RECENT" />
                         <TextBlock Grid.Column="5" Classes="colHeader" Text="SOURCE" />
                     </Grid>
                 </Border>
 
-                <!-- ACTIVE APPS group -->
-                <Border Classes="groupHeader" IsVisible="{Binding HasFilteredActiveRows}">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <TextBlock Text="▾"
-                                   Foreground="{DynamicResource TextSecondary}"
-                                   VerticalAlignment="Center" />
-                        <TextBlock Text="ACTIVE APPS"
-                                   Foreground="{DynamicResource TextSecondary}"
-                                   FontSize="{DynamicResource FontSizeCaption}"
-                                   LetterSpacing="2"
-                                   VerticalAlignment="Center" />
-                        <TextBlock VerticalAlignment="Center"
-                                   FontSize="{DynamicResource FontSizeCaption}"
-                                   Foreground="{DynamicResource TextMuted}">
-                            <Run Text="·" />
-                            <Run Text="{Binding ActiveRows.Count}" Foreground="{DynamicResource TextPrimary}" />
-                        </TextBlock>
-                    </StackPanel>
-                </Border>
+                <!-- ACTIVE APPS group — clickable header toggles expansion. -->
+                <Button Classes="groupHeaderButton"
+                        IsVisible="{Binding HasFilteredActiveRows}"
+                        Command="{Binding ToggleActiveExpandedCommand}">
+                    <Border Classes="groupHeader">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="▾" IsVisible="{Binding IsActiveExpanded}"
+                                       Foreground="{DynamicResource TextSecondary}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="▸" IsVisible="{Binding !IsActiveExpanded}"
+                                       Foreground="{DynamicResource TextSecondary}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="ACTIVE APPS"
+                                       Foreground="{DynamicResource TextSecondary}"
+                                       FontSize="{DynamicResource FontSizeCaption}"
+                                       LetterSpacing="2"
+                                       VerticalAlignment="Center" />
+                            <TextBlock VerticalAlignment="Center"
+                                       FontSize="{DynamicResource FontSizeCaption}"
+                                       Foreground="{DynamicResource TextMuted}">
+                                <Run Text="·" />
+                                <Run Text="{Binding ActiveRows.Count}" Foreground="{DynamicResource TextPrimary}" />
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+                </Button>
 
-                <ItemsControl ItemsSource="{Binding FilteredActiveRows}">
+                <ItemsControl ItemsSource="{Binding FilteredActiveRows}"
+                              IsVisible="{Binding IsActiveExpanded}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
                             <VirtualizingStackPanel />
@@ -247,7 +277,7 @@
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:FirewallRuleRow">
                             <Border Classes="ruleRow">
-                                <Grid ColumnDefinitions="*,Auto,Auto,140,90,80">
+                                <Grid ColumnDefinitions="*,56,56,140,90,80">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal"
                                                 Spacing="10" VerticalAlignment="Center">
                                         <Ellipse Width="8" Height="8"
@@ -261,7 +291,8 @@
                                                        Foreground="{DynamicResource TextMuted}"
                                                        FontSize="{DynamicResource FontSizeSmall}"
                                                        TextTrimming="CharacterEllipsis"
-                                                       MaxWidth="420" />
+                                                       MaxWidth="420"
+                                                       ToolTip.Tip="{Binding ProcessPath}" />
                                         </StackPanel>
                                     </StackPanel>
 
@@ -271,6 +302,7 @@
                                         Command="{Binding $parent[ItemsControl].((vm:FirewallTabViewModel)DataContext).CycleInPillCommand}"
                                         CommandParameter="{Binding}"
                                         Margin="0,0,8,0"
+                                        HorizontalAlignment="Center"
                                         VerticalAlignment="Center" />
 
                                     <controls:FirewallActionPill
@@ -279,10 +311,12 @@
                                         Command="{Binding $parent[ItemsControl].((vm:FirewallTabViewModel)DataContext).CycleOutPillCommand}"
                                         CommandParameter="{Binding}"
                                         Margin="0,0,12,0"
+                                        HorizontalAlignment="Center"
                                         VerticalAlignment="Center" />
 
-                                    <TextBlock Grid.Column="3" Text="—"
-                                               Foreground="{DynamicResource TextMuted}"
+                                    <TextBlock Grid.Column="3"
+                                               Text="{Binding HostsLabel}"
+                                               Foreground="{DynamicResource TextSecondary}"
                                                FontSize="{DynamicResource FontSizeBody}"
                                                VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="4"
@@ -301,27 +335,35 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <!-- INACTIVE APPS group -->
-                <Border Classes="groupHeader" IsVisible="{Binding HasFilteredInactiveRows}">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <TextBlock Text="▾"
-                                   Foreground="{DynamicResource TextSecondary}"
-                                   VerticalAlignment="Center" />
-                        <TextBlock Text="INACTIVE APPS"
-                                   Foreground="{DynamicResource TextSecondary}"
-                                   FontSize="{DynamicResource FontSizeCaption}"
-                                   LetterSpacing="2"
-                                   VerticalAlignment="Center" />
-                        <TextBlock VerticalAlignment="Center"
-                                   FontSize="{DynamicResource FontSizeCaption}"
-                                   Foreground="{DynamicResource TextMuted}">
-                            <Run Text="·" />
-                            <Run Text="{Binding InactiveRows.Count}" Foreground="{DynamicResource TextPrimary}" />
-                        </TextBlock>
-                    </StackPanel>
-                </Border>
+                <!-- INACTIVE APPS group — collapsed by default per Phase 6.4 plan. -->
+                <Button Classes="groupHeaderButton"
+                        IsVisible="{Binding HasFilteredInactiveRows}"
+                        Command="{Binding ToggleInactiveExpandedCommand}">
+                    <Border Classes="groupHeader">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="▾" IsVisible="{Binding IsInactiveExpanded}"
+                                       Foreground="{DynamicResource TextSecondary}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="▸" IsVisible="{Binding !IsInactiveExpanded}"
+                                       Foreground="{DynamicResource TextSecondary}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="INACTIVE APPS"
+                                       Foreground="{DynamicResource TextSecondary}"
+                                       FontSize="{DynamicResource FontSizeCaption}"
+                                       LetterSpacing="2"
+                                       VerticalAlignment="Center" />
+                            <TextBlock VerticalAlignment="Center"
+                                       FontSize="{DynamicResource FontSizeCaption}"
+                                       Foreground="{DynamicResource TextMuted}">
+                                <Run Text="·" />
+                                <Run Text="{Binding InactiveRows.Count}" Foreground="{DynamicResource TextPrimary}" />
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+                </Button>
 
-                <ItemsControl ItemsSource="{Binding FilteredInactiveRows}">
+                <ItemsControl ItemsSource="{Binding FilteredInactiveRows}"
+                              IsVisible="{Binding IsInactiveExpanded}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
                             <VirtualizingStackPanel />
@@ -329,8 +371,12 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:FirewallRuleRow">
-                            <Border Classes="ruleRow" Opacity="0.78">
-                                <Grid ColumnDefinitions="*,Auto,Auto,140,90,80">
+                            <!-- No row-level Opacity here: the muted dot + TextSecondary
+                                 / TextMuted hierarchy already differentiates inactive
+                                 rows visually, and stacking Opacity on top of muted
+                                 tokens makes paths hard to read. -->
+                            <Border Classes="ruleRow">
+                                <Grid ColumnDefinitions="*,56,56,140,90,80">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal"
                                                 Spacing="10" VerticalAlignment="Center">
                                         <Ellipse Width="8" Height="8"
@@ -344,7 +390,8 @@
                                                        Foreground="{DynamicResource TextMuted}"
                                                        FontSize="{DynamicResource FontSizeSmall}"
                                                        TextTrimming="CharacterEllipsis"
-                                                       MaxWidth="420" />
+                                                       MaxWidth="420"
+                                                       ToolTip.Tip="{Binding ProcessPath}" />
                                         </StackPanel>
                                     </StackPanel>
 
@@ -354,6 +401,7 @@
                                         Command="{Binding $parent[ItemsControl].((vm:FirewallTabViewModel)DataContext).CycleInPillCommand}"
                                         CommandParameter="{Binding}"
                                         Margin="0,0,8,0"
+                                        HorizontalAlignment="Center"
                                         VerticalAlignment="Center" />
 
                                     <controls:FirewallActionPill
@@ -362,9 +410,11 @@
                                         Command="{Binding $parent[ItemsControl].((vm:FirewallTabViewModel)DataContext).CycleOutPillCommand}"
                                         CommandParameter="{Binding}"
                                         Margin="0,0,12,0"
+                                        HorizontalAlignment="Center"
                                         VerticalAlignment="Center" />
 
-                                    <TextBlock Grid.Column="3" Text="—"
+                                    <TextBlock Grid.Column="3"
+                                               Text="{Binding HostsLabel}"
                                                Foreground="{DynamicResource TextMuted}"
                                                FontSize="{DynamicResource FontSizeBody}"
                                                VerticalAlignment="Center" />

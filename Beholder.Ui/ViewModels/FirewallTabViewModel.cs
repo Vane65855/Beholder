@@ -67,6 +67,23 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     private bool _isFirewallEnabled = true;
 
     /// <summary>
+    /// Whether the ACTIVE APPS group renders its rows. Default true: this is
+    /// the user's primary working set so they see it immediately on tab open.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isActiveExpanded = true;
+
+    /// <summary>
+    /// Whether the INACTIVE APPS group renders its rows. Default false: with
+    /// 78+ inactive processes on a long-running daemon, expanding by default
+    /// dumps the user into a long scroll. Click the group header to expand.
+    /// Per the original Phase 6.4 plan: "Active expanded by default; Inactive
+    /// collapsed by default; click to expand."
+    /// </summary>
+    [ObservableProperty]
+    private bool _isInactiveExpanded;
+
+    /// <summary>
     /// Active processes — those currently visible to <see cref="ProcessStateService"/>.
     /// Sorted by display name for stable ordering across snapshots.
     /// </summary>
@@ -198,10 +215,12 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         // don't want to block the initial load on it.
         _rowsByPath.Clear();
         foreach (var rule in rules) {
+            if (IsExcludedProcess(rule.ProcessPath)) continue;
             var row = GetOrCreateRow(rule.ProcessPath);
             ApplyRuleToRow(row, rule);
         }
         foreach (var summary in summaries) {
+            if (IsExcludedProcess(summary.ProcessPath)) continue;
             var row = GetOrCreateRow(summary.ProcessPath);
             row.RecentBytesTotal = summary.TotalBytesIn + summary.TotalBytesOut;
         }
@@ -216,6 +235,17 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         return row;
     }
 
+    /// <summary>
+    /// Filters non-controllable pseudo-processes out of the rule table. The
+    /// Firewall tab is a *rule* surface; processes that <c>INetFwPolicy2</c>
+    /// rejects rules against don't belong here. Currently just <c>"System"</c>
+    /// (the kernel pseudo-process surfaced by ETW counters); future entries
+    /// might include <c>"Idle"</c> and unknown-PID rows if we ever encounter
+    /// them.
+    /// </summary>
+    private static bool IsExcludedProcess(string processPath) =>
+        string.Equals(processPath, "System", StringComparison.Ordinal);
+
     private static void ApplyRuleToRow(FirewallRuleRow row, FirewallRule rule) {
         var actionState = rule.Action == FirewallAction.Block
             ? FirewallActionState.Block
@@ -223,6 +253,7 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         if (rule.Direction == Direction.Inbound) row.InAction = actionState;
         else row.OutAction = actionState;
         row.Source = rule.Source;
+        row.HasRule = true;
     }
 
     private void OnProcessStatesUpdated(IReadOnlyDictionary<string, ProcessState> states) {
@@ -232,10 +263,13 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
             // (process exited) as well as new ones appearing.
             foreach (var row in _rowsByPath.Values) {
                 row.IsActive = false;
+                row.ActiveConnectionCount = 0;
             }
             foreach (var (path, state) in states) {
+                if (IsExcludedProcess(path)) continue;
                 var row = GetOrCreateRow(path);
                 row.IsActive = true;
+                row.ActiveConnectionCount = state.ActiveConnectionCount;
                 // RecentBytesTotal: prefer live deltas over the historical
                 // summary value because the live values reflect very-recent
                 // activity.
@@ -248,6 +282,7 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
 
     private void OnRuleChange(FirewallRuleChange change) {
         Dispatcher.UIThread.Post(() => {
+            if (IsExcludedProcess(change.Rule.ProcessPath)) return;
             switch (change.Change) {
                 case FirewallRuleChange.Types.ChangeKind.Created:
                 case FirewallRuleChange.Types.ChangeKind.Changed:
@@ -261,6 +296,13 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
                             existing.InAction = FirewallActionState.Default;
                         else
                             existing.OutAction = FirewallActionState.Default;
+                        // If both directions are now Default, the row no longer
+                        // has any persisted rule — flip HasRule off so SourceLabel
+                        // returns to "—" rather than the stale "manual" stamp.
+                        if (existing.InAction == FirewallActionState.Default
+                            && existing.OutAction == FirewallActionState.Default) {
+                            existing.HasRule = false;
+                        }
                     }
                     break;
             }
@@ -394,6 +436,21 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
                 break;
         }
     }
+
+    /// <summary>
+    /// Toggles the ACTIVE APPS group's expanded state. Bound to a borderless
+    /// button wrapping the group header in the view.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleActiveExpanded() => IsActiveExpanded = !IsActiveExpanded;
+
+    /// <summary>
+    /// Toggles the INACTIVE APPS group's expanded state. Default-collapsed
+    /// per the original Phase 6.4 plan to avoid dumping the user into a
+    /// long scroll of inactive processes on tab open.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleInactiveExpanded() => IsInactiveExpanded = !IsInactiveExpanded;
 
     [RelayCommand]
     private async Task ToggleEnforcement() {
