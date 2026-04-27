@@ -25,6 +25,10 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? ProcessDestinationsException { get; set; }
     public Exception? CountryBreakdownException { get; set; }
     public Exception? ProtocolBreakdownException { get; set; }
+    public Exception? ApplyFirewallRuleException { get; set; }
+    public Exception? RemoveFirewallRuleException { get; set; }
+    public Exception? ListFirewallRulesException { get; set; }
+    public Exception? SetFirewallEnabledException { get; set; }
 
     // Optional canned snapshot/response bodies so tests can drive real data
     // through the seeding path. Existing callers that don't set these get the
@@ -36,6 +40,15 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Func<GetProcessDestinationsRequest, GetProcessDestinationsResponse>? ProcessDestinationsResponder { get; set; }
     public Func<GetCountryBreakdownRequest, GetCountryBreakdownResponse>? CountryBreakdownResponder { get; set; }
     public Func<GetProtocolBreakdownRequest, GetProtocolBreakdownResponse>? ProtocolBreakdownResponder { get; set; }
+    public Func<ApplyFirewallRuleRequest, ApplyFirewallRuleResponse>? ApplyFirewallRuleResponder { get; set; }
+    public Func<RemoveFirewallRuleRequest, RemoveFirewallRuleResponse>? RemoveFirewallRuleResponder { get; set; }
+    public ListFirewallRulesResponse? ListFirewallRulesResponse { get; set; }
+    public Func<SetFirewallEnabledRequest, SetFirewallEnabledResponse>? SetFirewallEnabledResponder { get; set; }
+
+    // Captured invocations for assertions.
+    public List<ApplyFirewallRuleRequest> ApplyFirewallRuleCalls { get; } = new();
+    public List<RemoveFirewallRuleRequest> RemoveFirewallRuleCalls { get; } = new();
+    public List<SetFirewallEnabledRequest> SetFirewallEnabledCalls { get; } = new();
     // Responder variant for tests that need the CancellationToken the VM
     // passed (e.g., cancellation-plumbing tests). Takes precedence over
     // AggregateTimelineResponse when set.
@@ -75,8 +88,32 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     }
 
     public Task<ApplyFirewallRuleResponse> ApplyFirewallRuleAsync(
-        ApplyFirewallRuleRequest request, CancellationToken cancellationToken) =>
-        Task.FromResult(new ApplyFirewallRuleResponse());
+        ApplyFirewallRuleRequest request, CancellationToken cancellationToken) {
+        ApplyFirewallRuleCalls.Add(request);
+        if (ApplyFirewallRuleException is not null) throw ApplyFirewallRuleException;
+        return Task.FromResult(ApplyFirewallRuleResponder?.Invoke(request) ?? new ApplyFirewallRuleResponse());
+    }
+
+    public Task<RemoveFirewallRuleResponse> RemoveFirewallRuleAsync(
+        RemoveFirewallRuleRequest request, CancellationToken cancellationToken) {
+        RemoveFirewallRuleCalls.Add(request);
+        if (RemoveFirewallRuleException is not null) throw RemoveFirewallRuleException;
+        return Task.FromResult(RemoveFirewallRuleResponder?.Invoke(request) ?? new RemoveFirewallRuleResponse());
+    }
+
+    public Task<ListFirewallRulesResponse> ListFirewallRulesAsync(
+        ListFirewallRulesRequest request, CancellationToken cancellationToken) {
+        if (ListFirewallRulesException is not null) throw ListFirewallRulesException;
+        return Task.FromResult(ListFirewallRulesResponse ?? new ListFirewallRulesResponse());
+    }
+
+    public Task<SetFirewallEnabledResponse> SetFirewallEnabledAsync(
+        SetFirewallEnabledRequest request, CancellationToken cancellationToken) {
+        SetFirewallEnabledCalls.Add(request);
+        if (SetFirewallEnabledException is not null) throw SetFirewallEnabledException;
+        return Task.FromResult(SetFirewallEnabledResponder?.Invoke(request)
+            ?? new SetFirewallEnabledResponse { Enabled = request.Enabled });
+    }
 
     public Task<MarkAlertReadResponse> MarkAlertReadAsync(
         MarkAlertReadRequest request, CancellationToken cancellationToken) =>

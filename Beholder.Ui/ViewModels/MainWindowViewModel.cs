@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using Avalonia.Threading;
 using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -9,7 +10,7 @@ namespace Beholder.Ui.ViewModels;
 internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
     private readonly IDaemonClient _daemonClient;
     private readonly TrafficTabViewModel _trafficTab;
-    private readonly FirewallTabViewModel _firewallTab = new();
+    private readonly FirewallTabViewModel _firewallTab;
     private readonly AlertsTabViewModel _alertsTab = new();
     private readonly ScannerTabViewModel _scannerTab = new();
     private readonly SettingsTabViewModel _settingsTab = new();
@@ -59,14 +60,17 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
     public MainWindowViewModel(
         IDaemonClient daemonClient,
         ProcessStateService processStateService,
+        DaemonStreamSubscriber streamSubscriber,
         StatusStripViewModel statusStripVm,
         HistoricalChartLoader historicalChartLoader) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
+        ArgumentNullException.ThrowIfNull(streamSubscriber);
         ArgumentNullException.ThrowIfNull(statusStripVm);
         ArgumentNullException.ThrowIfNull(historicalChartLoader);
         _daemonClient = daemonClient;
         _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader);
+        _firewallTab = new FirewallTabViewModel(daemonClient, processStateService, streamSubscriber);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         _daemonClient.StateChanged += OnDaemonStateChanged;
@@ -102,6 +106,13 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
             TabKind.Settings => _settingsTab,
             _ => _trafficTab,
         };
+        // Lazy load: the Firewall tab's initial fetch (rules + summaries +
+        // snapshot) only fires the first time the tab is shown, then
+        // ActivateAsync short-circuits on subsequent switches. Fire-and-
+        // forget — failures surface in the tab's own banner.
+        if (value == TabKind.Firewall) {
+            _ = _firewallTab.ActivateAsync(CancellationToken.None);
+        }
     }
 
     [RelayCommand]

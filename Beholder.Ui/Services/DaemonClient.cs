@@ -130,6 +130,27 @@ internal sealed class DaemonClient : IDaemonClient {
         return await client.ApplyFirewallRuleAsync(request, cancellationToken: cancellationToken);
     }
 
+    public async Task<RemoveFirewallRuleResponse> RemoveFirewallRuleAsync(
+        RemoveFirewallRuleRequest request, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(request);
+        var client = GetConnectedClient();
+        return await client.RemoveFirewallRuleAsync(request, cancellationToken: cancellationToken);
+    }
+
+    public async Task<ListFirewallRulesResponse> ListFirewallRulesAsync(
+        ListFirewallRulesRequest request, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(request);
+        var client = GetConnectedClient();
+        return await client.ListFirewallRulesAsync(request, cancellationToken: cancellationToken);
+    }
+
+    public async Task<SetFirewallEnabledResponse> SetFirewallEnabledAsync(
+        SetFirewallEnabledRequest request, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(request);
+        var client = GetConnectedClient();
+        return await client.SetFirewallEnabledAsync(request, cancellationToken: cancellationToken);
+    }
+
     public async Task<MarkAlertReadResponse> MarkAlertReadAsync(
         MarkAlertReadRequest request, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(request);
