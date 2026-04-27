@@ -22,4 +22,27 @@ public interface IEventStore {
     /// — running it twice produces identical results.
     /// </summary>
     Task<ChainVerificationResult> VerifyAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns the most recent <paramref name="limit"/> events whose kind appears in
+    /// <paramref name="kinds"/>, ordered newest-first by sequence number. Used by
+    /// the Firewall tab's activity strip and any future audit views that need a
+    /// kind-filtered slice of the chain. Negative or zero limits return an empty
+    /// result; an empty kinds list does the same. Callers receive raw payload bytes —
+    /// decoding is the caller's responsibility.
+    /// </summary>
+    Task<IReadOnlyList<EventLogEntry>> ListByKindsAsync(
+        IReadOnlyCollection<EventKind> kinds, int limit, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// One row from <see cref="IEventStore.ListByKindsAsync"/>. Mirrors the schema
+/// fields the activity strip needs: chain sequence, kind, timestamp, raw payload.
+/// The chain hash columns are intentionally omitted — chain integrity is queried
+/// via <see cref="IEventStore.VerifyAsync"/> separately.
+/// </summary>
+public sealed record EventLogEntry(
+    long Seq,
+    EventKind Kind,
+    DateTimeOffset Timestamp,
+    byte[] Payload);

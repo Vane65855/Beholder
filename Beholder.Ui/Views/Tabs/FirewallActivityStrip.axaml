@@ -1,0 +1,137 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Beholder.Ui.ViewModels"
+             x:Class="Beholder.Ui.Views.Tabs.FirewallActivityStrip"
+             x:DataType="vm:FirewallActivityViewModel"
+             Background="{DynamicResource BackgroundPanel}">
+
+    <UserControl.Styles>
+        <Style Selector="Border.activityHeader">
+            <Setter Property="BorderBrush" Value="{DynamicResource DividerHorizontal}" />
+            <Setter Property="BorderThickness" Value="0,1,0,1" />
+            <Setter Property="Padding" Value="16,8" />
+            <Setter Property="Background" Value="{DynamicResource BackgroundPanel}" />
+        </Style>
+        <Style Selector="Border.activityRow">
+            <Setter Property="Padding" Value="16,4" />
+        </Style>
+        <Style Selector="Border.activityRow:pointerover">
+            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+        </Style>
+
+        <!-- Kind badge: small monospace label with state-tinted foreground.
+             Three colour variants drive the BLOCKED / RULE / NEW look-and-
+             feel from the mockup. -->
+        <Style Selector="Border.kindBadge">
+            <Setter Property="Padding" Value="6,1" />
+            <Setter Property="CornerRadius" Value="2" />
+            <Setter Property="MinWidth" Value="64" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Border.kindBadge.info > TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource AccentPrimary}" />
+        </Style>
+        <Style Selector="Border.kindBadge.danger > TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource SeverityDanger}" />
+        </Style>
+        <Style Selector="Border.kindBadge.muted > TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Classes="activityHeader">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="RECENT FIREWALL ACTIVITY"
+                           FontSize="{DynamicResource FontSizeCaption}"
+                           LetterSpacing="2"
+                           Foreground="{DynamicResource TextMuted}"
+                           VerticalAlignment="Center" />
+                <TextBlock VerticalAlignment="Center"
+                           FontSize="{DynamicResource FontSizeCaption}"
+                           Foreground="{DynamicResource TextMuted}">
+                    <Run Text="·" />
+                    <Run Text="{Binding Events.Count}" Foreground="{DynamicResource TextSecondary}" />
+                </TextBlock>
+            </StackPanel>
+        </Border>
+
+        <!-- Loading -->
+        <TextBlock IsVisible="{Binding IsLoading}"
+                   Text="Loading activity..."
+                   Foreground="{DynamicResource TextMuted}"
+                   FontSize="{DynamicResource FontSizeBody}"
+                   HorizontalAlignment="Center"
+                   Margin="0,16" />
+
+        <!-- Empty -->
+        <StackPanel IsVisible="{Binding ShowEmptyState}"
+                    Margin="16"
+                    Spacing="4"
+                    HorizontalAlignment="Center">
+            <TextBlock Text="No firewall activity yet"
+                       Foreground="{DynamicResource TextSecondary}"
+                       FontSize="{DynamicResource FontSizeBody}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="Cycling a pill above will log events here."
+                       Foreground="{DynamicResource TextMuted}"
+                       FontSize="{DynamicResource FontSizeCaption}"
+                       HorizontalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Error -->
+        <Border IsVisible="{Binding HasError}"
+                Background="{DynamicResource BackgroundElevated}"
+                BorderBrush="{DynamicResource SeverityDanger}"
+                BorderThickness="0,0,0,1"
+                Padding="16,6">
+            <TextBlock Text="{Binding ErrorMessage}"
+                       Foreground="{DynamicResource SeverityDanger}"
+                       FontSize="{DynamicResource FontSizeCaption}" />
+        </Border>
+
+        <!-- Event list -->
+        <ScrollViewer IsVisible="{Binding HasEvents}"
+                      VerticalScrollBarVisibility="Auto"
+                      MaxHeight="240">
+            <ItemsControl ItemsSource="{Binding Events}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:FirewallActivityRow">
+                        <Border Classes="activityRow">
+                            <Grid ColumnDefinitions="80,80,*">
+                                <TextBlock Grid.Column="0"
+                                           Text="{Binding TimestampLabel}"
+                                           FontSize="{DynamicResource FontSizeCaption}"
+                                           Foreground="{DynamicResource TextMuted}"
+                                           VerticalAlignment="Center" />
+                                <Border Grid.Column="1"
+                                        Classes="kindBadge"
+                                        Classes.info="{Binding KindBadgeClass, Converter={StaticResource StringEqualsConverter}, ConverterParameter=info}"
+                                        Classes.danger="{Binding KindBadgeClass, Converter={StaticResource StringEqualsConverter}, ConverterParameter=danger}"
+                                        Classes.muted="{Binding KindBadgeClass, Converter={StaticResource StringEqualsConverter}, ConverterParameter=muted}"
+                                        VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding KindLabel}"
+                                               FontSize="{DynamicResource FontSizeCaption}"
+                                               LetterSpacing="1"
+                                               HorizontalAlignment="Center" />
+                                </Border>
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding Description}"
+                                           FontSize="{DynamicResource FontSizeBody}"
+                                           Foreground="{DynamicResource TextSecondary}"
+                                           VerticalAlignment="Center"
+                                           Margin="12,0,0,0"
+                                           TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

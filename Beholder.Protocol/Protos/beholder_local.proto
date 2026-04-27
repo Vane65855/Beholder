@@ -285,6 +285,45 @@ message GetProcessSummariesResponse {
   repeated ProcessTrafficSummaryProto summaries = 1;
 }
 
+// ---- Firewall activity (Phase 6.5) ----
+
+enum FirewallActivityKind {
+  FIREWALL_ACTIVITY_UNKNOWN = 0;
+  RULE_CREATED = 1;
+  RULE_CHANGED = 2;
+  RULE_REMOVED = 3;
+  ENFORCEMENT_TOGGLED = 4;
+}
+
+message FirewallActivityEvent {
+  // Chain sequence number — uniquely identifies the row in the event log
+  // and lets the UI dedupe live-appended events against the initial fetch.
+  int64 seq = 1;
+  FirewallActivityKind kind = 2;
+  int64 timestamp_unix_ns = 3;
+  // For rule-* kinds: the affected rule. For enforcement-toggled: empty.
+  // The wire format keeps this on the message rather than splitting into
+  // a oneof so the UI can read fields with a single null check.
+  string process_path = 4;
+  Direction direction = 5;
+  FirewallAction action = 6;
+  RuleSource source = 7;
+  // Only meaningful for ENFORCEMENT_TOGGLED — true means the toggle flipped
+  // enforcement on, false means off.
+  bool enforcement_enabled = 8;
+}
+
+message GetFirewallActivityRequest {
+  // Maximum number of rows to return. Server clamps to a sane upper bound
+  // (currently 500). 0 means "use the server default" (currently 100).
+  int32 limit = 1;
+}
+
+message GetFirewallActivityResponse {
+  // Newest-first.
+  repeated FirewallActivityEvent events = 1;
+}
+
 // ---- Service ----
 
 service BeholderLocal {
@@ -302,4 +341,5 @@ service BeholderLocal {
   rpc GetCountryBreakdown(GetCountryBreakdownRequest) returns (GetCountryBreakdownResponse);
   rpc GetProtocolBreakdown(GetProtocolBreakdownRequest) returns (GetProtocolBreakdownResponse);
   rpc GetProcessSummaries(GetProcessSummariesRequest) returns (GetProcessSummariesResponse);
+  rpc GetFirewallActivity(GetFirewallActivityRequest) returns (GetFirewallActivityResponse);
 }

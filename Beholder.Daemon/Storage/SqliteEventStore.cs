@@ -110,6 +110,57 @@ internal sealed class SqliteEventStore : IEventStore {
         return (lastSeq, rowHash);
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<EventLogEntry>> ListByKindsAsync(
+        IReadOnlyCollection<EventKind> kinds, int limit, CancellationToken cancellationToken
+    ) {
+        ArgumentNullException.ThrowIfNull(kinds);
+        if (limit <= 0 || kinds.Count == 0) return Array.Empty<EventLogEntry>();
+
+        // SQLite has no native list parameter; build a comma-separated set of
+        // named parameters. Kind names come from the EventKind enum and are
+        // therefore safe to include literally — but we still bind via
+        // parameters to keep the schema-injection surface zero.
+        var paramNames = new string[kinds.Count];
+        var i = 0;
+        foreach (var _ in kinds) {
+            paramNames[i] = $"$k{i}";
+            i++;
+        }
+        var inClause = string.Join(",", paramNames);
+
+        using var connection = _connectionFactory.CreateConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT seq, ts_unix_ns, kind, payload
+            FROM event_log
+            WHERE kind IN ({inClause})
+            ORDER BY seq DESC
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$limit", limit);
+        i = 0;
+        foreach (var kind in kinds) {
+            command.Parameters.AddWithValue(paramNames[i], kind.ToString());
+            i++;
+        }
+
+        var results = new List<EventLogEntry>(Math.Min(limit, 64));
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
+            var seq = reader.GetInt64(0);
+            var timestampUnixNs = reader.GetInt64(1);
+            var kind = Enum.Parse<EventKind>(reader.GetString(2));
+            var payload = (byte[])reader.GetValue(3);
+            results.Add(new EventLogEntry(
+                seq,
+                kind,
+                DateTimeOffset.FromUnixTimeMilliseconds(timestampUnixNs / 1_000_000L),
+                payload));
+        }
+        return results;
+    }
+
     private static async Task InsertRowAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,

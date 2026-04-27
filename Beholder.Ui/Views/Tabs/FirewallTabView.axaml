@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Beholder.Ui.ViewModels"
              xmlns:controls="using:Beholder.Ui.Controls"
+             xmlns:tabs="using:Beholder.Ui.Views.Tabs"
              x:Class="Beholder.Ui.Views.Tabs.FirewallTabView"
              x:DataType="vm:FirewallTabViewModel"
              Background="{DynamicResource BackgroundRoot}">
@@ -58,6 +59,11 @@
     </UserControl.Styles>
 
     <DockPanel>
+
+        <!-- ── Activity strip (Phase 6.5) — docked at the bottom so it
+             survives resize without overlapping the rule table.        -->
+        <tabs:FirewallActivityStrip DockPanel.Dock="Bottom"
+                                    DataContext="{Binding ActivityVm}" />
 
         <!-- ── Header bar ────────────────────────────────────────────── -->
         <Border DockPanel.Dock="Top"

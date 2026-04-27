@@ -8,7 +8,7 @@
 
 ## 1. Status Summary
 
-As of 2026-04-26, the daemon captures per-process network telemetry via ETW on Windows, enriches flows with DB-IP country codes, and persists per-destination traffic to SQLite through a five-tier rollup cascade (`traffic_raw` → `_10s` → `_1m` → `_10m` → `_1h`). Historical timeline RPCs use a stitched multi-tier query that serves each time slice from the finest-retention tier that covers it — recent data at 1-second fidelity, older data smoothly coarser. The UI shell ships a Traffic tab with a time-range dropdown (5 Minutes live + 1 Hour / 24 Hours / 7 Days / 30 Days / All Time / Custom historical) and a chart that guarantees "same data → same shape" regardless of which range preset is selected. Five `Get*` RPCs serve aggregated traffic data from SQLite. The hostname-resolution ladder now has four layers: (1) Windows DNS resolver-cache preload at startup via the verified `DnsGetCacheDataTableEx` export (ADR 004), (2) live `Microsoft-Windows-DNS-Client` ETW capture (`EtwDnsCache`), (3) reverse-DNS PTR fallback for direct-IP destinations gated by `DnsOptions.EnableReverseDnsFallback` (ADR 005), and (4) SNI extraction from TCP/443 ClientHello packets via `Microsoft-Windows-PktMon` ETW gated by `SniOptions.EnableSniCapture` (ADR 006). DNS hostname mappings are persisted to a `dns_cache` table; SQLite-side hostname backfill retroactively names historical buckets when a late resolution arrives. The gRPC IPC surface has ten RPCs. 611 tests pass deterministically. Next up: Phase 6.4 (Firewall tab) is the active queue head. Settings is repositioned as **Phase 13** — the dedicated final UI phase — so its information architecture can encompass every option that accumulates across Phases 6–12 rather than being retrofitted. Scanner sits at **Phase 9** as a placeholder slot whose feature set is scoped by ADR before implementation begins.
+As of 2026-04-26, the daemon captures per-process network telemetry via ETW on Windows, enriches flows with DB-IP country codes, and persists per-destination traffic to SQLite through a five-tier rollup cascade (`traffic_raw` → `_10s` → `_1m` → `_10m` → `_1h`). Historical timeline RPCs use a stitched multi-tier query that serves each time slice from the finest-retention tier that covers it — recent data at 1-second fidelity, older data smoothly coarser. The UI shell ships a Traffic tab with a time-range dropdown (5 Minutes live + 1 Hour / 24 Hours / 7 Days / 30 Days / All Time / Custom historical) and a chart that guarantees "same data → same shape" regardless of which range preset is selected. The Firewall tab is now a working surface: a rule table with three-state ALLOW/BLOCK/DEFAULT pills per direction, GlassWire-style Active/Inactive grouping, master ON/OFF toggle that disables every Beholder-managed rule without losing the configuration, and a recent-activity strip backed by the chain-hashed event log. Five `Get*` RPCs serve aggregated traffic data from SQLite, plus the firewall surface adds `RemoveFirewallRule`, `ListFirewallRules`, `SetFirewallEnabled`, and `GetFirewallActivity`. The hostname-resolution ladder has four layers: (1) Windows DNS resolver-cache preload at startup via the verified `DnsGetCacheDataTableEx` export (ADR 004), (2) live `Microsoft-Windows-DNS-Client` ETW capture (`EtwDnsCache`), (3) reverse-DNS PTR fallback for direct-IP destinations gated by `DnsOptions.EnableReverseDnsFallback` (ADR 005), and (4) SNI extraction from TCP/443 ClientHello packets via `Microsoft-Windows-PktMon` ETW gated by `SniOptions.EnableSniCapture` (ADR 006). DNS hostname mappings are persisted to a `dns_cache` table; SQLite-side hostname backfill retroactively names historical buckets when a late resolution arrives. The gRPC IPC surface has fourteen RPCs. 689 tests pass deterministically. Next up: Phase 6.6 (Alerts tab). Settings is repositioned as **Phase 13** — the dedicated final UI phase — so its information architecture can encompass every option that accumulates across Phases 6–12 rather than being retrofitted. Scanner sits at **Phase 9** as a placeholder slot whose feature set is scoped by ADR before implementation begins.
 
 ---
 
@@ -371,6 +371,89 @@ Existing tests updated: `SqliteTrafficStoreTests` (rename pass + `CreateBucket` 
 
 ---
 
+### Phase 6.4 — Firewall tab (rule table + three-state pills + master toggle) ✅
+
+**Purpose:** Make the Firewall tab the working active-queue head: a rule table that surfaces every persisted Beholder firewall rule alongside every process Beholder has ever observed, with per-direction ALLOW/BLOCK/DEFAULT pills that mutate the OS firewall state on click and a master ON/OFF toggle that disables every Beholder-managed rule without losing the configuration. GlassWire-inspired layout (Active apps on top, Inactive collapsed below) but with Beholder's terminal aesthetic and the project's strict UI quality bar.
+
+**Daemon prerequisites (committed first):**
+- **`RemoveFirewallRule` RPC** (`BeholderLocalService.cs`, proto). Mirror of `ApplyFirewallRule`'s OS-then-persist-then-chain shape, but inverted on rollback semantics: if SQLite delete fails after the OS removal succeeded, the daemon logs a warning rather than re-applying — the user's intent was "remove" and the OS state already matches that intent.
+- **`ListFirewallRules` RPC.** Thin pass-through over `IFirewallRuleStore.ListAllAsync`, routed through `ExecuteQueryAsync` for unified error classification.
+- **`SetFirewallEnabled` RPC + `IFirewallEnforcementState` mutable wrapper.** Runtime-toggleable singleton holding the master flag plus an `Action<bool>` event. Separated from `FirewallOptions.EnableEnforcement` (which is now only the *startup default* read at daemon launch) because mutating `IConfiguration` from inside an RPC would require rewriting `appsettings.json` on every toggle. Only chain-audits real transitions to keep the activity strip clean — re-asserting the current state is a no-op.
+- **`FirewallEnforcementService`** (`Beholder.Daemon/Pipeline/`). `IHostedService` that subscribes to `IFirewallEnforcementState.StateChanged` and replays every persisted Beholder rule through `IFirewallController` on every transition: toggle off calls `RemoveRuleAsync` for each rule (SQLite copies preserved), toggle on calls `AddRuleAsync`. Per-rule failures are logged and swallowed so one broken rule can't abort enforcement for the rest. The state-changed callback fire-and-forgets the replay so the RPC returns promptly.
+- **`FirewallEnforcementTogglePayloadEncoder`.** Deterministic JSON encoder for the new `EventKind.FirewallEnforcementToggled = 8` chain entry, same byte-stable contract as `FirewallRulePayloadEncoder`.
+- **`firewall_enforcement_enabled` field on `GetSnapshotResponse`.** UI reads the master state on activation without a second round-trip.
+
+**UI components:**
+- **`FirewallTabViewModel`** (`Beholder.Ui/ViewModels/`). On activation fans out three RPCs in parallel (`ListFirewallRules` + `GetSnapshot` + `GetProcessSummaries(from=epoch, to=now)`) and joins the results into a single row dictionary keyed by `processPath`. Subscribes to `ProcessStateService.ProcessStatesUpdated` for the IsActive flag + recent-bytes column, and to `DaemonStreamSubscriber.RuleChangeReceived` for live upserts/removes from broadcast events. Search filters by name OR path case-insensitive. Filter dropdown: ALL / ACTIVE / INACTIVE / BLOCKED / PARTIAL. Three commands — `CycleInPill`, `CycleOutPill`, `ToggleEnforcement` — each with optimistic UI and revert-on-error.
+- **`FirewallRuleRow`** (`Beholder.Ui/ViewModels/`). Observable row VM. Derives `OverallStatus` from the (InAction, OutAction) pair — `Allowed` / `Blocked` / `Partial` / `Default` — and notifies on changes so header counts update without manual refresh. `NextState` helper encapsulates the `Allow → Block → Default → Allow` cycle.
+- **`FirewallActionPill`** (`Beholder.Ui/Controls/`). Three-state pill UserControl. `State` styled property accepts a boxed enum or int; class-based styling switches on that state (`allow` = green, `block` = red, `default` = muted). Click invokes `Command` with `CommandParameter`. Public surface uses `object` to keep the control independent of the internal enum.
+- **`FirewallTabView.axaml`.** Header bar (counts + search + filter dropdown + master ON/OFF toggle replacing the new-rule slot), enforcement-disabled banner, error banner, collapsible group headers, virtualized rule rows. The master toggle uses class-based styling (`active` = teal accent, `danger` = red); pill rows render with reduced opacity in the Inactive group to communicate the soft-disabled state.
+
+**Click semantics for the three-state pill:**
+- Current state `Default` → click → `ApplyFirewallRule(action=Allow)` → state becomes `Allow`.
+- Current state `Allow` → click → `ApplyFirewallRule(action=Block)` → state becomes `Block`.
+- Current state `Block` → click → `RemoveFirewallRule` → state becomes `Default`.
+
+Optimistic UI: visual state flips on click, daemon dispatch happens in the background, RPC failure reverts the local state and surfaces a transient banner.
+
+**Master toggle behaviour:** Toggling OFF removes every persisted Beholder rule from the OS firewall via the enforcement service; SQLite copies are preserved. Toggling ON re-applies them. A banner appears below the header when enforcement is OFF: *"Firewall enforcement is disabled. Rule changes are saved but not applied to Windows Firewall."*
+
+**Tests added:**
+- `RemoveFirewallRuleRpcTests.cs` (7 tests) — happy path, idempotent re-remove, validation error, OS-failure abort, double-remove second-call returns `removed=false`, broadcast emits Removed event.
+- `ListFirewallRulesRpcTests.cs` (4 tests) — empty/populated/preserves direction+source, ID ordering.
+- `SetFirewallEnabledRpcTests.cs` (9 tests) — toggle off/on, no-op same-state, chain-audit on real transitions, no chain-audit on no-op, two toggles append two rows, StateChanged fires correctly, snapshot reflects state both ways.
+- `FirewallEnforcementServiceTests.cs` (7 tests) — toggle off removes all rules, toggle on adds all, empty store, preserves SQLite on toggle off, swallows per-rule failures, Start subscribes/Stop unsubscribes.
+- `FirewallTabViewModelTests.cs` (16 tests) — empty/populated activation, IN+OUT block → Blocked status, partial block → Partial, snapshot drives master toggle state, idempotent activation, all three pill cycles call correct RPC, RPC failure reverts state, search filters by name, Blocked filter excludes Partial, RPC-error sets error state.
+- `FirewallRuleRowTests.cs` (12 tests) — name extraction, null-path guard, all four OverallStatus permutations, mixed-direction theory cases, NextState cycle, RecentBytesLabel formatting, property-change notifications.
+- Net test count: 611 → 689 (+78 across both Phase 6.4 and 6.5; ~62 of those landed with 6.4).
+
+**Design decisions:**
+- **`IFirewallEnforcementState` separate from `FirewallOptions`.** The first sketch tried to mutate `IOptionsMonitor<FirewallOptions>` from inside the RPC handler; that requires either rewriting `appsettings.json` on every click (unacceptable), wrapping `IOptionsMonitor` with a custom `OnChange`-firing adapter (invasive), or maintaining a parallel mutable bool. Picked the parallel mutable bool — `FirewallOptions.EnableEnforcement` becomes the *startup default* read once at daemon launch, and `IFirewallEnforcementState` is the runtime source of truth from that point forward. The two never need to disagree because no other code mutates the options.
+- **Fire-and-forget enforcement replay.** `IFirewallEnforcementState.StateChanged` fires synchronously inside the RPC handler, but `FirewallEnforcementService.OnStateChanged` spawns a `Task.Run` rather than awaiting the replay. Reasoning: a 50-rule replay against `INetFwPolicy2` takes seconds; the user's master-toggle click should not block on it. The controller's own `SemaphoreSlim` serializes against any concurrent `ApplyFirewallRule` so the replay can't corrupt OS state.
+- **`object`-typed `State` property on `FirewallActionPill`.** The internal enum stays internal; the public UserControl accepts a boxed value. Avalonia binding doesn't auto-coerce `int` to a specific enum without an explicit converter, but it *does* round-trip a boxed enum through `object` — so the binding from `row.InAction` to `pill.State` works without a converter file. The `UpdateVisuals` method handles the unboxing with a switch expression that defaults to `Default` for any unrecognized value.
+- **Three-state pill cycle, not two-state plus right-click.** Earlier draft of the UI had a binary ALLOW/BLOCK pill plus a right-click menu for "Remove rule." Stripped on user feedback: the discoverability cost of a hidden right-click action outweighs the small extra cognitive load of a third state. The cycle direction (ALLOW → BLOCK → DEFAULT) was chosen so the most-likely-next state for an existing rule is one click away.
+
+**Files NOT touched:** No changes to `IFirewallController` or `IFirewallRuleStore` — both interfaces already had the CRUD shape needed. No changes to the rollup cascade, the GeoIP layer, or the chain-hash primitives.
+
+---
+
+### Phase 6.5 — Recent firewall activity strip ✅
+
+**Purpose:** Surface a chronological audit log of firewall-related chain entries below the rule table, so the user can see exactly when each rule was created/changed/removed and when the master toggle flipped — without leaving the Firewall tab.
+
+**Daemon side:**
+- **`GetFirewallActivity` RPC + `IEventStore.ListByKindsAsync`.** New chain-query method on `IEventStore` with the shape `(IReadOnlyCollection<EventKind> kinds, int limit, CancellationToken) → IReadOnlyList<EventLogEntry>`. SQLite implementation builds a parameterized `IN (…)` clause sized to the kinds list, orders newest-first by `seq`, clamps the limit at a server-side cap of 500. The handler pulls firewall-related kinds (`FirewallRuleCreated`, `FirewallRuleChanged`, `FirewallRuleRemoved`, `FirewallEnforcementToggled`), decodes each payload via the existing encoders, and packs into the new `FirewallActivityEvent` proto message. Bad payloads degrade gracefully — the kind + timestamp + seq still surface so the UI can render the row.
+- **`EventLogEntry` record** in `Beholder.Core`. Mirrors only the columns the activity strip needs (seq, kind, timestamp, payload bytes); chain hashes are intentionally omitted because chain integrity has its own RPC (`VerifyChain`).
+
+**UI side:**
+- **`FirewallActivityViewModel`** (`Beholder.Ui/ViewModels/`). Owned by `FirewallTabViewModel` so its lifecycle matches the parent. Initial fetch limit is 100; live-cap at 500 retained events with oldest-first eviction. Lifecycle: on activation, fetches the most-recent 100 firewall events from the daemon; subscribes to `RuleChangeReceived` and prepends new events with synthetic negative seq numbers (the broadcast carries the rule, not the chain entry — the next tab re-activation reloads from the daemon and replaces synthetic rows with their real chain entries). Uses a `HashSet<long>` of seen seqs for deduplication.
+- **`FirewallActivityRow`** record-style VM. Pre-formats every column at construction so the view template stays shallow: timestamp label (`HH:mm:ss`), kind label (`RULE` / `ENFORCE`), kind badge class (`info` / `danger` / `muted`), and a one-line description.
+- **`FirewallActivityStrip.axaml`** (`Beholder.Ui/Views/Tabs/`). UserControl docked at the bottom of `FirewallTabView`. Sticky `RECENT FIREWALL ACTIVITY` header with live count, scrollable virtualized event list (max 240px so it never dominates the table), color-coded kind badges. Empty/loading/error states all wired.
+- **`StringEqualsConverter`** (`Beholder.Ui/Converters/`). Tiny one-way value converter for the badge-class binding — applies a CSS-style class only when the row's `KindBadgeClass` matches the bound class name.
+
+**Activity row formats (matching the mockup):**
+
+| Time | Kind | Description |
+|---|---|---|
+| `18:27:44` | `RULE` (info) | `created · firefox.exe · out block` |
+| `18:25:00` | `RULE` (muted) | `removed · curl.exe · out` |
+| `18:24:50` | `ENFORCE` (danger) | `firewall enforcement: OFF` |
+
+Out-of-scope for v1 (per the plan): per-packet enforcement events (a packet was actually dropped — needs WFP callout or `Microsoft-Windows-Security-Auditing` ETW), and `NEW process` events (Phase 7's `NewProcessDetector` will populate them automatically once that phase lands).
+
+**Tests added:**
+- `GetFirewallActivityRpcTests.cs` (9 tests) — empty chain, apply+remove returns both newest-first, decodes process_path/direction/action, decodes EnforcementToggled bool, limit clamped at server cap, zero limit uses default, negative limit returns InvalidArgument, only firewall kinds returned (counter events filtered), limit trims correctly.
+- `FirewallActivityViewModelTests.cs` (8 tests) — empty response shows empty state, populated adds rows, RPC failure sets error, idempotent activation, FromProto decodes RuleCreated/RuleRemoved/EnforcementToggled correctly with right badge classes.
+
+**Design decisions:**
+- **Synthetic negative seq for live-broadcast rows.** The daemon's `Subscribe` stream emits `FirewallRuleChange` (the rule) but not the chain seq — we'd need to widen the broadcast contract to carry the seq, or do a follow-up `GetFirewallActivity(limit=1)` on every broadcast. Both are heavier than this pragmatic solution: stamp the broadcast row with `-DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()` so it's guaranteed not to collide with any positive chain seq, then let the next tab re-activation reload from the daemon and replace synthetic rows with the real ones. The window of synthetic-only rows is bounded by tab-switch cadence.
+- **500-event in-memory cap.** Activity-strip data is *display-only*; the chain itself is the durable audit log and is uncapped. 500 events is enough to cover several days of an actively-managed rule set without exhausting either memory or scrolling patience.
+- **Column shapes pre-formatted in the row VM, not in the template.** Per `UI_QUALITY_STANDARDS`: data-binding to a long expression chain in a `DataTemplate` is hard to test and harder to debug. `FirewallActivityRow.FromProto` is a pure function with eight unit tests covering the shape of each event kind.
+
+**Files NOT touched:** No changes to `IFirewallController`, no changes to the broadcast contract, no changes to the rollup or GeoIP paths.
+
+---
+
 ## 3. Phase-by-Phase Lessons Learned
 
 ### Phase 0
@@ -462,7 +545,6 @@ Existing tests updated: `SqliteTrafficStoreTests` (rename pass + `CreateBucket` 
 
 ## 5. Known Gaps and Forward-Looking Notes
 
-- **RemoveFirewallRule RPC** — needed before Phase 6.4 (firewall tab pill toggle). Currently only `ApplyFirewallRule` exists; removing a rule requires a new RPC or extending the existing one with a `Remove` action.
 - **O(n) chain verification** — `VerifyAsync` reads all rows sequentially. Fine for weeks of uptime, but months of data will need checkpoint-based verification (verify from last checkpoint instead of seq 1). Address in Phase 11.
 - **Startup OS/SQLite firewall reconciliation** — on daemon restart, OS firewall rules and SQLite `firewall_rules` table may diverge (crash during apply, manual OS changes). A reconciliation pass at startup is deferred to Phase 12.
 - **Linux platform (Beholder.Daemon.Linux)** — project stub exists. `NetlinkFlowSource` and `NftablesFirewallController` implementations are deferred. No timeline; Windows is the primary platform.
@@ -505,8 +587,8 @@ Not a code deliverable. A project milestone marking the point at which the Traff
 - 6.1 — Traffic tab, process list panel (sortable, color-coded, selectable)
 - 6.2 — Traffic tab, graph panel (custom `Canvas`-based streaming area chart, not a charting library)
 - 6.3 — Traffic tab, sub-view toggles (GRAPH / COLS / MAP within traffic panel)
-- 6.4 — Firewall tab (full rule table, ALLOW/BLOCK pill toggle via `ApplyFirewallRule` RPC, undo banner). **Prerequisite:** `RemoveFirewallRule` RPC or equivalent.
-- 6.5 — Firewall tab, recent activity strip
+- ~~6.4 — Firewall tab (rule table, three-state ALLOW/BLOCK/DEFAULT pill, Active/Inactive grouping, master ON/OFF toggle).~~ ✅ See §2.
+- ~~6.5 — Firewall tab, recent activity strip.~~ ✅ See §2.
 - 6.6 — Alerts tab, master-detail layout (read/unread state via `MarkAlertRead` RPC)
 - 6.7 — Alerts tab, action buttons (BLOCK HOST, BLOCK PROCESS OUT, ADD RULE)
 - Checkpoint: all core tabs functional end-to-end.
