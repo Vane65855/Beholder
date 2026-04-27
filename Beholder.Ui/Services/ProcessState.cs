@@ -16,6 +16,15 @@ internal sealed class ProcessState {
     public long DeltaBytesOut { get; set; }
     public DateTimeOffset LastSeen { get; set; }
 
+    /// <summary>
+    /// Number of currently-open TCP connections for this process at the
+    /// most recent counter snapshot. Sourced from
+    /// <see cref="Beholder.Protocol.Local.CounterSnapshot.ActiveConnectionCount"/>,
+    /// already on the wire — no extra RPC needed. The Firewall tab's HOSTS
+    /// column reads this for active rows.
+    /// </summary>
+    public int ActiveConnectionCount { get; set; }
+
     /// <summary>300 samples = 5 minutes at 1 sample/sec.</summary>
     public CircularBuffer<long> RecentDeltaIn { get; } = new(300);
 

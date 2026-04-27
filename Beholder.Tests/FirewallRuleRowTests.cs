@@ -107,4 +107,82 @@ public class FirewallRuleRowTests {
 
         Assert.Contains(nameof(FirewallRuleRow.OverallStatus), seen);
     }
+
+    // ─── Polish-pass tests (B1, B2 from luminous-wishing-map.md) ───
+
+    [Fact]
+    public void SourceLabel_DefaultRow_NoRule_ReturnsDash() {
+        // The proto default for RuleSource is Manual (zero value), so without
+        // the HasRule guard the SourceLabel would erroneously read "manual"
+        // for every row in the table, even ones with no actual rule.
+        var row = new FirewallRuleRow(@"C:\app.exe");
+
+        Assert.False(row.HasRule);
+        Assert.Equal("—", row.SourceLabel);
+    }
+
+    [Fact]
+    public void SourceLabel_HasRuleTrue_ReturnsSourceText() {
+        var row = new FirewallRuleRow(@"C:\app.exe") {
+            HasRule = true,
+            Source = Beholder.Protocol.Local.RuleSource.Manual,
+        };
+
+        Assert.Equal("manual", row.SourceLabel);
+    }
+
+    [Fact]
+    public void SourceLabel_NotifiesWhenHasRuleChanges() {
+        var row = new FirewallRuleRow(@"C:\app.exe");
+        var seen = new List<string>();
+        row.PropertyChanged += (_, e) => seen.Add(e.PropertyName ?? "");
+
+        row.HasRule = true;
+
+        Assert.Contains(nameof(FirewallRuleRow.SourceLabel), seen);
+    }
+
+    [Fact]
+    public void HostsLabel_InactiveRow_ReturnsDash() {
+        var row = new FirewallRuleRow(@"C:\app.exe") {
+            IsActive = false,
+            ActiveConnectionCount = 5,  // ignored when inactive
+        };
+
+        Assert.Equal("—", row.HostsLabel);
+    }
+
+    [Fact]
+    public void HostsLabel_ActiveRowZeroCount_ReturnsDash() {
+        var row = new FirewallRuleRow(@"C:\app.exe") {
+            IsActive = true,
+            ActiveConnectionCount = 0,
+        };
+
+        Assert.Equal("—", row.HostsLabel);
+    }
+
+    [Fact]
+    public void HostsLabel_ActiveRowWithCount_ReturnsCountString() {
+        var row = new FirewallRuleRow(@"C:\app.exe") {
+            IsActive = true,
+            ActiveConnectionCount = 12,
+        };
+
+        Assert.Equal("12", row.HostsLabel);
+    }
+
+    [Fact]
+    public void HostsLabel_NotifiesWhenIsActiveOrCountChanges() {
+        var row = new FirewallRuleRow(@"C:\app.exe");
+        var seen = new List<string>();
+        row.PropertyChanged += (_, e) => seen.Add(e.PropertyName ?? "");
+
+        row.IsActive = true;
+        row.ActiveConnectionCount = 3;
+
+        Assert.Contains(nameof(FirewallRuleRow.HostsLabel), seen);
+        // Both transitions should fire — count this distinctly.
+        Assert.True(seen.FindAll(n => n == nameof(FirewallRuleRow.HostsLabel)).Count >= 2);
+    }
 }

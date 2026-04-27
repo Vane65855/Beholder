@@ -258,4 +258,29 @@ public class ProcessStateServiceTests {
 
         Assert.Equal(2, service.TrackedProcessCount);
     }
+
+    // ─── Polish-pass test (B1 from luminous-wishing-map.md) ───
+
+    [Fact]
+    public void OnCounterBatch_PopulatesActiveConnectionCount() {
+        // The Firewall tab's HOSTS column reads ActiveConnectionCount as a
+        // proxy for "live destinations" — the value must round-trip from
+        // CounterSnapshot through ProcessState faithfully.
+        var (service, _) = CreateService();
+        var batch = new CounterBatch();
+        batch.Snapshots.Add(new CounterSnapshot {
+            ProcessPath = "test.exe",
+            ProcessName = "test.exe",
+            TotalBytesIn = 1000,
+            TotalBytesOut = 2000,
+            ActiveConnectionCount = 7,
+        });
+
+        IReadOnlyDictionary<string, ProcessState>? received = null;
+        service.ProcessStatesUpdated += states => received = states;
+        service.OnCounterBatch(batch);
+
+        Assert.NotNull(received);
+        Assert.Equal(7, received["test.exe"].ActiveConnectionCount);
+    }
 }

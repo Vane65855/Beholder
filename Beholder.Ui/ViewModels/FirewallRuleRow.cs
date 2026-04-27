@@ -40,6 +40,25 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
     [ObservableProperty]
     private RuleSource _source = RuleSource.Manual;
 
+    /// <summary>
+    /// True iff the daemon's rule store has a row for this process in either
+    /// direction. Distinct from <see cref="InAction"/> / <see cref="OutAction"/>
+    /// being non-Default because a row can briefly hold a transient state
+    /// during optimistic UI updates. Drives <see cref="SourceLabel"/>'s
+    /// blank-when-no-rule behavior so 84 ruleless rows don't all read as
+    /// "manual" because of <see cref="RuleSource"/>'s zero default.
+    /// </summary>
+    [ObservableProperty]
+    private bool _hasRule;
+
+    /// <summary>
+    /// Number of live TCP connections the daemon observed for this process
+    /// at the last counter tick. Zero for inactive processes (no snapshot
+    /// reports them). Sourced from <see cref="Services.ProcessState.ActiveConnectionCount"/>.
+    /// </summary>
+    [ObservableProperty]
+    private int _activeConnectionCount;
+
     public FirewallRuleRow(string processPath) {
         ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
         ProcessPath = processPath;
@@ -72,12 +91,24 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
 
     public string RecentBytesLabel => RecentBytesTotal == 0 ? "—" : ByteFormatter.FormatBytes(RecentBytesTotal);
 
-    public string SourceLabel => Source switch {
-        RuleSource.Manual => "manual",
-        RuleSource.Default => "default",
-        RuleSource.Remote => "remote",
-        _ => "—",
-    };
+    /// <summary>
+    /// HOSTS column label. For active rows we surface the live TCP connection
+    /// count; inactive rows render blank because we have no live snapshot
+    /// (and the historical per-process destinations breakdown isn't on the
+    /// wire today — adding it is a separate piece of work).
+    /// </summary>
+    public string HostsLabel => IsActive && ActiveConnectionCount > 0
+        ? ActiveConnectionCount.ToString()
+        : "—";
+
+    public string SourceLabel => HasRule
+        ? Source switch {
+            RuleSource.Manual => "manual",
+            RuleSource.Default => "default",
+            RuleSource.Remote => "remote",
+            _ => "—",
+        }
+        : "—";
 
     /// <summary>
     /// Cycle the action one step: <c>Allow → Block → Default → Allow</c>.
@@ -108,6 +139,9 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
     partial void OnOutActionChanged(FirewallActionState value) => OnPropertyChanged(nameof(OverallStatus));
     partial void OnRecentBytesTotalChanged(long value) => OnPropertyChanged(nameof(RecentBytesLabel));
     partial void OnSourceChanged(RuleSource value) => OnPropertyChanged(nameof(SourceLabel));
+    partial void OnHasRuleChanged(bool value) => OnPropertyChanged(nameof(SourceLabel));
+    partial void OnIsActiveChanged(bool value) => OnPropertyChanged(nameof(HostsLabel));
+    partial void OnActiveConnectionCountChanged(int value) => OnPropertyChanged(nameof(HostsLabel));
 }
 
 /// <summary>
