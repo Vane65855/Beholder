@@ -91,13 +91,19 @@ public sealed class WfpFirewallController : IFirewallController, IDisposable {
             try {
                 dynamic rules = _firewallPolicy.Value.Rules;
 
-                // Item(name) is the idiomatic existence check: it throws COMException with
-                // HRESULT 0x80070002 (ERROR_FILE_NOT_FOUND) when the rule does not exist.
-                // Any other HRESULT is a real failure and propagates through the outer catch.
+                // Item(name) is the idiomatic existence check: it returns
+                // HRESULT 0x80070002 (ERROR_FILE_NOT_FOUND) when no rule with
+                // that name exists. .NET COM interop *translates* this HRESULT
+                // to System.IO.FileNotFoundException — NOT COMException — for
+                // INetFwRules.Item, empirically confirmed via probe. We match
+                // by HResult rather than by exception type so the catch survives
+                // however the runtime chooses to surface the same underlying
+                // error code. Any other HResult is a real failure and propagates
+                // through the outer catch.
                 dynamic? existing = null;
                 try {
                     existing = rules.Item(name);
-                } catch (COMException ex) when (ex.HResult == ErrorFileNotFound) {
+                } catch (Exception ex) when (ex.HResult == ErrorFileNotFound) {
                     existing = null;
                 }
 
@@ -149,8 +155,11 @@ public sealed class WfpFirewallController : IFirewallController, IDisposable {
                 _firewallPolicy.Value.Rules.Remove(name);
                 _logger.LogInformation(
                     "Removed firewall rule {Direction} for {ProcessPath}", direction, processPath);
-            } catch (COMException ex) when (ex.HResult == ErrorFileNotFound) {
+            } catch (Exception ex) when (ex.HResult == ErrorFileNotFound) {
                 // Idempotent: removing a rule that does not exist is a success.
+                // Match by HResult — Rules.Remove may surface the same 0x80070002
+                // as either FileNotFoundException or COMException depending on
+                // .NET COM interop's translation layer (same as Rules.Item above).
                 _logger.LogInformation(
                     "RemoveRuleAsync: no existing rule to remove for {Direction} {ProcessPath}",
                     direction, processPath);
