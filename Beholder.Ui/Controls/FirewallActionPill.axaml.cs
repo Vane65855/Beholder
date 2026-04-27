@@ -8,11 +8,16 @@ using Beholder.Ui.ViewModels;
 namespace Beholder.Ui.Controls;
 
 /// <summary>
-/// Three-state action pill used in the Firewall tab's rule table. Visual
-/// state is driven by <see cref="State"/>; click invokes <see cref="Command"/>
-/// with <see cref="CommandParameter"/>. The view-model is responsible for
-/// computing the next state and dispatching the corresponding RPC — this
-/// control is purely presentational.
+/// Status-indicator pill used in the Firewall tab's rule table. Renders
+/// the effective connectivity state of one direction for one process:
+/// <list type="bullet">
+/// <item><c>Block</c> rule exists → BLOCK (red).</item>
+/// <item>everything else (no rule, or an explicit Allow rule) → ALLOW (green).</item>
+/// </list>
+/// Click invokes <see cref="Command"/> with <see cref="CommandParameter"/>;
+/// the view-model translates the click into either
+/// <c>ApplyFirewallRule(Block)</c> or <c>RemoveFirewallRule</c> as
+/// appropriate. This control is purely presentational.
 /// </summary>
 public partial class FirewallActionPill : UserControl {
     public static readonly StyledProperty<object?> StateProperty =
@@ -62,11 +67,12 @@ public partial class FirewallActionPill : UserControl {
         // toggle membership rather than reassigning the entire collection.
         PillButton.Classes.Remove("allow");
         PillButton.Classes.Remove("block");
-        PillButton.Classes.Remove("default");
 
         // The bound value can come in as a boxed enum (live binding),
-        // an int (literal in xaml), or null (unset). Coerce to the enum
-        // and fall through to "default" for any unrecognized value.
+        // an int (literal in xaml), or null (unset). Coerce to the enum;
+        // any unrecognized value collapses into the Default→Allow visual
+        // because "we don't know" is safest rendered as "allowed" (the
+        // pill is a status indicator and the OS default is allow).
         var state = State switch {
             FirewallActionState s => s,
             int i when Enum.IsDefined(typeof(FirewallActionState), i) => (FirewallActionState)i,
@@ -74,19 +80,18 @@ public partial class FirewallActionPill : UserControl {
         };
 
         switch (state) {
-            case FirewallActionState.Allow:
-                PillButton.Classes.Add("allow");
-                PillButton.Content = "ALLOW";
-                break;
             case FirewallActionState.Block:
                 PillButton.Classes.Add("block");
                 PillButton.Content = "BLOCK";
                 break;
+            // Default and Allow share the visual: both mean "this app can
+            // connect right now." Default = no rule, OS default allows.
+            // Allow = an explicit allow rule exists. The user sees the same
+            // outcome, so we render the same pill.
+            case FirewallActionState.Allow:
             default:
-                PillButton.Classes.Add("default");
-                // "+" reads as "click to add a rule" — meaningfully more
-                // affordant than the prior "—" which looked like "no value".
-                PillButton.Content = "+";
+                PillButton.Classes.Add("allow");
+                PillButton.Content = "ALLOW";
                 break;
         }
     }

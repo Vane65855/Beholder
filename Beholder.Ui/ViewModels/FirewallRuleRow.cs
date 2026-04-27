@@ -67,25 +67,29 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
 
     /// <summary>
     /// Coarse status across both directions, used for header counts and
-    /// row-level visual cues. Definitions match the plan:
+    /// row-level visual cues. The pill UI is a status indicator for
+    /// effective connectivity (not the underlying rule state), so
+    /// <c>Default</c> and <c>Allow</c> both contribute to the "allowed"
+    /// bucket — there's no observable difference between "no rule" and
+    /// "explicit allow rule" at this surface.
     /// <list type="bullet">
-    /// <item><c>Allowed</c> — both directions = Allow.</item>
-    /// <item><c>Blocked</c> — both directions = Block.</item>
-    /// <item><c>Partial</c> — directions differ AND at least one is Block.</item>
-    /// <item><c>Default</c> — both directions = Default (no Beholder rule).</item>
+    /// <item><c>Blocked</c> — both directions are <c>Block</c>.</item>
+    /// <item><c>Partial</c> — exactly one direction is <c>Block</c>.</item>
+    /// <item><c>Allowed</c> — neither direction is <c>Block</c>
+    ///   (covers Default+Default, Allow+Allow, and any Default/Allow mix).</item>
     /// </list>
+    /// <see cref="FirewallRowStatus.Default"/> remains in the enum as the
+    /// initial-pre-data sentinel but is no longer returned here.
     /// </summary>
     public FirewallRowStatus OverallStatus {
         get {
-            if (InAction == FirewallActionState.Allow && OutAction == FirewallActionState.Allow)
-                return FirewallRowStatus.Allowed;
-            if (InAction == FirewallActionState.Block && OutAction == FirewallActionState.Block)
-                return FirewallRowStatus.Blocked;
-            if (InAction == FirewallActionState.Default && OutAction == FirewallActionState.Default)
-                return FirewallRowStatus.Default;
-            // Differ AND at least one is Block — anything else lands here too,
-            // e.g., Allow+Default which is genuinely partial coverage.
-            return FirewallRowStatus.Partial;
+            var inIsBlock = InAction == FirewallActionState.Block;
+            var outIsBlock = OutAction == FirewallActionState.Block;
+            return (inIsBlock, outIsBlock) switch {
+                (true, true) => FirewallRowStatus.Blocked,
+                (false, false) => FirewallRowStatus.Allowed,
+                _ => FirewallRowStatus.Partial,
+            };
         }
     }
 
@@ -111,13 +115,17 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
         : "—";
 
     /// <summary>
-    /// Cycle the action one step: <c>Allow → Block → Default → Allow</c>.
+    /// Binary toggle: any non-<c>Block</c> state goes to <c>Block</c>;
+    /// <c>Block</c> goes to <c>Default</c> (rule removed). The pill UI
+    /// only ever shows two effective states (ALLOW / BLOCK), so the data
+    /// transitions follow suit.
     /// </summary>
     public static FirewallActionState NextState(FirewallActionState current) => current switch {
-        FirewallActionState.Allow => FirewallActionState.Block,
         FirewallActionState.Block => FirewallActionState.Default,
-        FirewallActionState.Default => FirewallActionState.Allow,
-        _ => FirewallActionState.Default,
+        // Default and Allow both transition to Block. The previous three-state
+        // cycle (Allow → Block → Default → Allow) was deprecated when the pill
+        // became a status indicator rather than a rule editor.
+        _ => FirewallActionState.Block,
     };
 
     /// <summary>
@@ -162,6 +170,11 @@ internal enum FirewallActionState {
 /// and any future row-level visual cue.
 /// </summary>
 internal enum FirewallRowStatus {
+    /// <summary>
+    /// Initial pre-data sentinel. <see cref="FirewallRuleRow.OverallStatus"/>
+    /// never returns this once the row has been populated — Default and Allow
+    /// data states both fold into <see cref="Allowed"/>.
+    /// </summary>
     Default = 0,
     Allowed = 1,
     Blocked = 2,
