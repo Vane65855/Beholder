@@ -28,4 +28,7 @@ public enum EventKind {
 
     /// <summary>An existing firewall rule was removed from the active rule set.</summary>
     FirewallRuleRemoved = 7,
+
+    /// <summary>The Beholder firewall enforcement master toggle was flipped on or off.</summary>
+    FirewallEnforcementToggled = 8,
 }

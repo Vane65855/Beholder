@@ -116,6 +116,12 @@ message GetSnapshotResponse {
   repeated CounterSnapshot snapshots = 1;
   repeated FirewallRule firewall_rules = 2;
   repeated Alert recent_alerts = 3;
+  // Reflects IFirewallEnforcementState.Enabled at snapshot time. The UI's
+  // Firewall tab reads this on activation to render the master ON/OFF toggle
+  // without a second round-trip; subsequent toggles are pushed via the
+  // SetFirewallEnabled RPC's response and the FirewallRuleChange broadcast
+  // stream.
+  bool firewall_enforcement_enabled = 4;
 }
 
 message ApplyFirewallRuleRequest {
@@ -127,6 +133,36 @@ message ApplyFirewallRuleRequest {
 
 message ApplyFirewallRuleResponse {
   FirewallRule rule = 1;
+}
+
+message RemoveFirewallRuleRequest {
+  string process_path = 1;
+  Direction direction = 2;
+}
+
+// Idempotent: removing a non-existent rule succeeds with `removed = false`
+// and an empty `rule`. Removing an existing rule returns `removed = true`
+// with the rule that was deleted (useful for the UI to render an undo).
+message RemoveFirewallRuleResponse {
+  bool removed = 1;
+  FirewallRule rule = 2;
+}
+
+message ListFirewallRulesRequest {}
+
+message ListFirewallRulesResponse {
+  repeated FirewallRule rules = 1;
+}
+
+message SetFirewallEnabledRequest {
+  bool enabled = 1;
+}
+
+// `enabled` echoes the resulting state after the toggle (idempotent — re-
+// setting the current value is a no-op and returns the same state without
+// re-running the apply/remove enumeration).
+message SetFirewallEnabledResponse {
+  bool enabled = 1;
 }
 
 message MarkAlertReadRequest {
@@ -255,6 +291,9 @@ service BeholderLocal {
   rpc Subscribe(SubscribeRequest) returns (stream DaemonEvent);
   rpc GetSnapshot(GetSnapshotRequest) returns (GetSnapshotResponse);
   rpc ApplyFirewallRule(ApplyFirewallRuleRequest) returns (ApplyFirewallRuleResponse);
+  rpc RemoveFirewallRule(RemoveFirewallRuleRequest) returns (RemoveFirewallRuleResponse);
+  rpc ListFirewallRules(ListFirewallRulesRequest) returns (ListFirewallRulesResponse);
+  rpc SetFirewallEnabled(SetFirewallEnabledRequest) returns (SetFirewallEnabledResponse);
   rpc MarkAlertRead(MarkAlertReadRequest) returns (MarkAlertReadResponse);
   rpc VerifyChain(VerifyChainRequest) returns (VerifyChainResponse);
   rpc GetProcessTimeline(GetProcessTimelineRequest) returns (GetProcessTimelineResponse);

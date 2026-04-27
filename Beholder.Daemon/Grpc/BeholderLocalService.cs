@@ -9,11 +9,14 @@ namespace Beholder.Daemon.Grpc;
 
 /// <summary>
 /// Server-side implementation of the <c>beholder.local.BeholderLocal</c> gRPC
-/// service. Exposes five RPCs: <see cref="Subscribe"/> streams live events,
-/// <see cref="GetSnapshot"/> returns the current daemon state,
-/// <see cref="ApplyFirewallRule"/> coordinates OS enforcement with persistence
-/// and chain logging, <see cref="MarkAlertRead"/> stamps an alert's viewed-at
-/// time, and <see cref="VerifyChain"/> validates the chain-hashed event log.
+/// service. Exposes the daemon's full local IPC surface: <see cref="Subscribe"/>
+/// streams live events, <see cref="GetSnapshot"/> returns current state,
+/// <see cref="ApplyFirewallRule"/> / <see cref="RemoveFirewallRule"/> /
+/// <see cref="ListFirewallRules"/> / <see cref="SetFirewallEnabled"/>
+/// coordinate firewall enforcement with persistence and chain logging,
+/// <see cref="MarkAlertRead"/> stamps an alert's viewed-at time, and
+/// <see cref="VerifyChain"/> validates the chain-hashed event log. Historical
+/// query RPCs round out the surface for the UI's traffic views.
 /// </summary>
 internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBase {
     private const int RecentAlertLimit = 100;
@@ -23,6 +26,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     private readonly IFirewallRuleStore _firewallStore;
     private readonly IAlertStore _alertStore;
     private readonly IFirewallController _firewallController;
+    private readonly IFirewallEnforcementState _enforcementState;
     private readonly IEventStore _eventStore;
     private readonly ITrafficStore _trafficStore;
     private readonly TimeProvider _timeProvider;
@@ -34,6 +38,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         IFirewallRuleStore firewallStore,
         IAlertStore alertStore,
         IFirewallController firewallController,
+        IFirewallEnforcementState enforcementState,
         IEventStore eventStore,
         ITrafficStore trafficStore,
         TimeProvider timeProvider,
@@ -44,6 +49,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         ArgumentNullException.ThrowIfNull(firewallStore);
         ArgumentNullException.ThrowIfNull(alertStore);
         ArgumentNullException.ThrowIfNull(firewallController);
+        ArgumentNullException.ThrowIfNull(enforcementState);
         ArgumentNullException.ThrowIfNull(eventStore);
         ArgumentNullException.ThrowIfNull(trafficStore);
         ArgumentNullException.ThrowIfNull(timeProvider);
@@ -53,6 +59,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         _firewallStore = firewallStore;
         _alertStore = alertStore;
         _firewallController = firewallController;
+        _enforcementState = enforcementState;
         _eventStore = eventStore;
         _trafficStore = trafficStore;
         _timeProvider = timeProvider;
@@ -89,7 +96,9 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
             var rules = await _firewallStore.ListAllAsync(ct).ConfigureAwait(false);
             var alerts = await _alertStore.GetAlertsAsync(RecentAlertLimit, ct).ConfigureAwait(false);
 
-            var response = new Local.GetSnapshotResponse();
+            var response = new Local.GetSnapshotResponse {
+                FirewallEnforcementEnabled = _enforcementState.Enabled,
+            };
             foreach (var snapshot in snapshots) response.Snapshots.Add(snapshot.ToProto());
             foreach (var rule in rules) response.FirewallRules.Add(rule.ToProto());
             foreach (var alert in alerts) response.RecentAlerts.Add(alert.ToProto());
@@ -171,6 +180,108 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         }
 
         return new Local.ApplyFirewallRuleResponse { Rule = persistedRule.ToProto() };
+    }
+
+    public override async Task<Local.RemoveFirewallRuleResponse> RemoveFirewallRule(
+        Local.RemoveFirewallRuleRequest request, ServerCallContext context
+    ) {
+        var ct = context.CancellationToken;
+
+        if (string.IsNullOrWhiteSpace(request.ProcessPath))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "process_path is required"));
+
+        var direction = request.Direction.FromProto();
+
+        var existing = await _firewallStore.GetByProcessAndDirectionAsync(
+            request.ProcessPath, direction, ct).ConfigureAwait(false);
+        if (existing is null) {
+            // Idempotent: nothing to remove. Still call the OS controller in
+            // case the persisted view is behind the OS state — RemoveRuleAsync
+            // is documented as idempotent itself.
+            try {
+                await _firewallController.RemoveRuleAsync(
+                    request.ProcessPath, direction, ct).ConfigureAwait(false);
+            } catch (Exception ex) {
+                _logger.LogWarning(ex,
+                    "Idempotent OS-side remove for unpersisted rule {ProcessPath} ({Direction}) failed",
+                    request.ProcessPath, direction);
+            }
+            return new Local.RemoveFirewallRuleResponse { Removed = false };
+        }
+
+        try {
+            await _firewallController.RemoveRuleAsync(
+                request.ProcessPath, direction, ct).ConfigureAwait(false);
+        } catch (Exception ex) {
+            _logger.LogError(ex,
+                "Failed to remove firewall rule from OS for {ProcessPath}", request.ProcessPath);
+            throw new RpcException(new Status(StatusCode.Internal,
+                $"Failed to remove firewall rule: {ex.Message}"));
+        }
+
+        // Per plan: if OS removal succeeded but SQLite delete fails we do NOT
+        // roll back the OS state — the user's intent was "remove" and the OS
+        // already matches that intent. Log Warning and continue.
+        try {
+            await _firewallStore.RemoveAsync(request.ProcessPath, direction, ct).ConfigureAwait(false);
+        } catch (Exception ex) {
+            _logger.LogWarning(ex,
+                "Failed to delete persisted firewall rule for {ProcessPath} after OS remove succeeded",
+                request.ProcessPath);
+        }
+
+        try {
+            var payload = FirewallRulePayloadEncoder.Encode(existing);
+            await _eventStore.AppendAsync(EventKind.FirewallRuleRemoved, payload, ct).ConfigureAwait(false);
+        } catch (Exception ex) {
+            _logger.LogError(ex,
+                "Failed to append firewall rule removal to chain — rule is removed but unaudited");
+        }
+
+        try {
+            _broadcaster.BroadcastRuleChange(
+                existing, Local.FirewallRuleChange.Types.ChangeKind.Removed);
+        } catch (Exception ex) {
+            _logger.LogError(ex, "Failed to broadcast firewall rule removal");
+        }
+
+        return new Local.RemoveFirewallRuleResponse {
+            Removed = true,
+            Rule = existing.ToProto(),
+        };
+    }
+
+    public override Task<Local.ListFirewallRulesResponse> ListFirewallRules(
+        Local.ListFirewallRulesRequest request, ServerCallContext context
+    ) => ExecuteQueryAsync(nameof(ListFirewallRules), async cancellationToken => {
+        var rules = await _firewallStore.ListAllAsync(cancellationToken).ConfigureAwait(false);
+        var response = new Local.ListFirewallRulesResponse();
+        foreach (var rule in rules) response.Rules.Add(rule.ToProto());
+        return response;
+    }, context);
+
+    public override async Task<Local.SetFirewallEnabledResponse> SetFirewallEnabled(
+        Local.SetFirewallEnabledRequest request, ServerCallContext context
+    ) {
+        var ct = context.CancellationToken;
+        var changed = _enforcementState.SetEnabled(request.Enabled);
+
+        // Only chain-audit real transitions — re-asserting the current state
+        // is a no-op and would otherwise spam the activity strip.
+        if (changed) {
+            try {
+                var payload = FirewallEnforcementTogglePayloadEncoder.Encode(
+                    request.Enabled, _timeProvider.GetUtcNow());
+                await _eventStore.AppendAsync(
+                    EventKind.FirewallEnforcementToggled, payload, ct).ConfigureAwait(false);
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to append enforcement toggle ({Enabled}) to chain", request.Enabled);
+            }
+            _logger.LogInformation("Firewall enforcement set to {Enabled}", request.Enabled);
+        }
+
+        return new Local.SetFirewallEnabledResponse { Enabled = _enforcementState.Enabled };
     }
 
     public override async Task<Local.MarkAlertReadResponse> MarkAlertRead(

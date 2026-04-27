@@ -95,6 +95,11 @@ if (OperatingSystem.IsWindows()) {
         builder.Configuration.GetSection("Dns"));
     builder.Services.Configure<SniOptions>(
         builder.Configuration.GetSection("Sni"));
+    builder.Services.Configure<FirewallOptions>(
+        builder.Configuration.GetSection("Firewall"));
+
+    builder.Services.AddSingleton<IFirewallEnforcementState, FirewallEnforcementState>();
+    builder.Services.AddHostedService<Beholder.Daemon.Pipeline.FirewallEnforcementService>();
 
     // Broadcast service must be registered BEFORE the pipeline so its StartAsync
     // runs first and subscribes to ISnapshotBatchSource.OnSnapshotBatch before

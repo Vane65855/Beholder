@@ -43,7 +43,8 @@ public sealed class GetProtocolBreakdownRpcTests : IDisposable {
 
         _service = new BeholderLocalService(
             _broadcaster, pipeline, firewallStore, alertStore,
-            new FakeFirewallController(), eventStore, trafficStore,
+            new FakeFirewallController(), new FakeFirewallEnforcementState(),
+            eventStore, trafficStore,
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
