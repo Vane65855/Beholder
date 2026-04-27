@@ -59,6 +59,26 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
     [ObservableProperty]
     private int _activeConnectionCount;
 
+    /// <summary>
+    /// Whether the executable at <see cref="ProcessPath"/> currently exists
+    /// on disk. Defaults to <c>true</c> (optimistic) and is set authoritatively
+    /// during the tab's initial join via a one-shot <c>File.Exists</c> check.
+    /// Live processes (i.e., <see cref="IsActive"/> = true) are forced back
+    /// to <c>true</c> on every counter snapshot — a process that's currently
+    /// reporting traffic must have its executable on disk.
+    /// </summary>
+    [ObservableProperty]
+    private bool _executableExists = true;
+
+    /// <summary>
+    /// True when this row points at a process whose executable is gone but a
+    /// manual firewall rule still references it. Drives the warning icon
+    /// in the table, the bottom-of-Inactive sort position, and the row's
+    /// retention in the visible list (rows where the executable is gone *and*
+    /// no rule remains are filtered out entirely — they're noise).
+    /// </summary>
+    public bool IsOrphanedRule => HasRule && !ExecutableExists;
+
     public FirewallRuleRow(string processPath) {
         ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
         ProcessPath = processPath;
@@ -147,9 +167,13 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
     partial void OnOutActionChanged(FirewallActionState value) => OnPropertyChanged(nameof(OverallStatus));
     partial void OnRecentBytesTotalChanged(long value) => OnPropertyChanged(nameof(RecentBytesLabel));
     partial void OnSourceChanged(RuleSource value) => OnPropertyChanged(nameof(SourceLabel));
-    partial void OnHasRuleChanged(bool value) => OnPropertyChanged(nameof(SourceLabel));
+    partial void OnHasRuleChanged(bool value) {
+        OnPropertyChanged(nameof(SourceLabel));
+        OnPropertyChanged(nameof(IsOrphanedRule));
+    }
     partial void OnIsActiveChanged(bool value) => OnPropertyChanged(nameof(HostsLabel));
     partial void OnActiveConnectionCountChanged(int value) => OnPropertyChanged(nameof(HostsLabel));
+    partial void OnExecutableExistsChanged(bool value) => OnPropertyChanged(nameof(IsOrphanedRule));
 }
 
 /// <summary>
