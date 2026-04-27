@@ -1,0 +1,42 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Beholder.Ui.Controls.FirewallActionPill">
+
+    <UserControl.Styles>
+        <!-- Base pill style: monospace caps, narrow padding, subtle border. The
+             three state-specific classes (.allow / .block / .default) flip the
+             foreground + border tokens; background stays transparent so the
+             pill blends with rows in either Active or Inactive groups. -->
+        <Style Selector="Button.firewallPill">
+            <Setter Property="MinWidth" Value="64" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+        </Style>
+        <Style Selector="Button.firewallPill.allow">
+            <Setter Property="Foreground" Value="{DynamicResource SeveritySuccess}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SeveritySuccess}" />
+        </Style>
+        <Style Selector="Button.firewallPill.block">
+            <Setter Property="Foreground" Value="{DynamicResource SeverityDanger}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SeverityDanger}" />
+        </Style>
+        <Style Selector="Button.firewallPill.default">
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+        </Style>
+        <Style Selector="Button.firewallPill:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+        </Style>
+    </UserControl.Styles>
+
+    <Button x:Name="PillButton"
+            Classes="firewallPill"
+            Click="OnClick" />
+</UserControl>

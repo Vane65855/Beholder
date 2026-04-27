@@ -43,7 +43,8 @@ public partial class App : Application {
             var historicalChartLoader = new HistoricalChartLoader(_daemonClient);
 
             _mainWindowVm = new MainWindowViewModel(
-                _daemonClient, _processStateService, statusStripVm, historicalChartLoader);
+                _daemonClient, _processStateService, _streamSubscriber,
+                statusStripVm, historicalChartLoader);
             desktop.MainWindow = new MainWindow { DataContext = _mainWindowVm };
 
             // Fire-and-forget — both loops run indefinitely until shutdown
