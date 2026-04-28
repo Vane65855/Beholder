@@ -133,14 +133,15 @@ public class FirewallRuleRowTests {
     // ─── Polish-pass tests (B1, B2 from luminous-wishing-map.md) ───
 
     [Fact]
-    public void SourceLabel_DefaultRow_NoRule_ReturnsDash() {
-        // The proto default for RuleSource is Manual (zero value), so without
-        // the HasRule guard the SourceLabel would erroneously read "manual"
-        // for every row in the table, even ones with no actual rule.
+    public void SourceLabel_DefaultRow_NoRule_ReturnsDefault() {
+        // No Beholder rule means the system default applies (Windows allows
+        // by default). SOURCE shows "default" to convey that effective state.
+        // The em-dash is reserved for the defensive fallback below (genuinely
+        // unrecognized RuleSource enum values).
         var row = new FirewallRuleRow(@"C:\app.exe");
 
         Assert.False(row.HasRule);
-        Assert.Equal("—", row.SourceLabel);
+        Assert.Equal("default", row.SourceLabel);
     }
 
     [Fact]
@@ -151,6 +152,20 @@ public class FirewallRuleRowTests {
         };
 
         Assert.Equal("manual", row.SourceLabel);
+    }
+
+    [Fact]
+    public void SourceLabel_HasRuleWithDefaultSource_ReturnsDefault() {
+        // Future-feature coverage: if/when the daemon produces an explicit
+        // RuleSource.Default rule (reserved today), the UI should treat it
+        // semantically the same as "no rule" — both mean "system default
+        // applies." Pin the contract now so a future change doesn't regress.
+        var row = new FirewallRuleRow(@"C:\app.exe") {
+            HasRule = true,
+            Source = Beholder.Protocol.Local.RuleSource.Default,
+        };
+
+        Assert.Equal("default", row.SourceLabel);
     }
 
     [Fact]
