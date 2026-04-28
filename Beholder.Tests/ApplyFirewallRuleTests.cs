@@ -22,6 +22,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
     private readonly SqliteFirewallRuleStore _firewallStore;
     private readonly SqliteEventStore _eventStore;
     private readonly FakeFirewallController _firewallController;
+    private readonly FakeFirewallEnforcementState _enforcementState;
     private readonly FakeTimeProvider _timeProvider;
     private readonly FakeSnapshotBatchSource _snapshotSource;
     private readonly BroadcastService _broadcaster;
@@ -37,6 +38,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
         _timeProvider = new FakeTimeProvider(FixedTimestamp);
         _eventStore = new SqliteEventStore(connectionFactory, _timeProvider);
         _firewallController = new FakeFirewallController();
+        _enforcementState = new FakeFirewallEnforcementState();
         _snapshotSource = new FakeSnapshotBatchSource();
         _broadcaster = new BroadcastService(
             _snapshotSource, _timeProvider, NullLogger<BroadcastService>.Instance);
@@ -55,7 +57,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             _firewallStore,
             alertStore,
             _firewallController,
-            new FakeFirewallEnforcementState(),
+            _enforcementState,
             _eventStore,
             new FakeTrafficStore(),
             _timeProvider,
@@ -254,6 +256,47 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
         var removed = Assert.Single(firewallController.RemovedRules);
         Assert.Equal(@"C:\bin\curl.exe", removed.ProcessPath);
         Assert.Equal(Direction.Outbound, removed.Direction);
+    }
+
+    // ─── Master enforcement-toggle gating ────────────────────────────────
+
+    [Fact]
+    public async Task ApplyFirewallRule_EnforcementOff_SkipsController() {
+        // With master toggle OFF the daemon must not push the rule to the
+        // OS firewall, even though SQLite + chain still record it. Reproduces
+        // the bug where cycling a pill (BLOCK -> ALLOW -> BLOCK) while
+        // FIREWALL: OFF still wrote to Windows Firewall.
+        _enforcementState.SetEnabled(false);
+        var request = MakeRequest();
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.ApplyFirewallRule(request, context);
+
+        Assert.NotNull(response.Rule);
+        Assert.Empty(_firewallController.AddedRules);
+        Assert.Empty(_firewallController.RemovedRules);
+    }
+
+    [Fact]
+    public async Task ApplyFirewallRule_EnforcementOff_StillPersistsAndChainAudits() {
+        // The whole point of the enforcement-OFF mode: the user can configure
+        // rules ahead of time and have them land in the OS when they flip
+        // the master toggle back on. SQLite is the source of truth for that
+        // replay (FirewallEnforcementService enumerates ListAllAsync), so
+        // persistence + chain audit must run unconditionally.
+        _enforcementState.SetEnabled(false);
+        var request = MakeRequest();
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        await _service.ApplyFirewallRule(request, context);
+
+        var persisted = await _firewallStore.ListAllAsync(CancellationToken.None);
+        Assert.Single(persisted);
+        Assert.Equal(@"C:\bin\curl.exe", persisted[0].ProcessPath);
+
+        var chain = await _eventStore.VerifyAsync(CancellationToken.None);
+        Assert.True(chain.IsValid);
+        Assert.Equal(1, chain.RowsVerified);
     }
 
     private sealed class FailingEventStore : IEventStore {

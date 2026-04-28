@@ -136,12 +136,18 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
             createdAt: existing?.CreatedAt ?? now,
             updatedAt: now);
 
-        try {
-            await _firewallController.AddRuleAsync(candidateRule, ct).ConfigureAwait(false);
-        } catch (Exception ex) {
-            _logger.LogError(ex, "Failed to apply firewall rule for {ProcessPath}", request.ProcessPath);
-            throw new RpcException(new Status(StatusCode.Internal,
-                $"Failed to apply firewall rule: {ex.Message}"));
+        // Honour the master enforcement toggle: when disabled, persist + chain
+        // + broadcast still run (so the rule is configured) but the OS firewall
+        // is untouched. FirewallEnforcementService replays every persisted rule
+        // through the controller when the master toggle flips back on.
+        if (_enforcementState.Enabled) {
+            try {
+                await _firewallController.AddRuleAsync(candidateRule, ct).ConfigureAwait(false);
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Failed to apply firewall rule for {ProcessPath}", request.ProcessPath);
+                throw new RpcException(new Status(StatusCode.Internal,
+                    $"Failed to apply firewall rule: {ex.Message}"));
+            }
         }
 
         FirewallRule persistedRule;
@@ -149,13 +155,17 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
             persistedRule = await _firewallStore.UpsertAsync(candidateRule, ct).ConfigureAwait(false);
         } catch (Exception ex) {
             _logger.LogError(ex, "Failed to persist firewall rule after OS apply, attempting rollback");
-            try {
-                await _firewallController.RemoveRuleAsync(
-                    request.ProcessPath, direction, CancellationToken.None).ConfigureAwait(false);
-            } catch (Exception rollbackEx) {
-                _logger.LogCritical(rollbackEx,
-                    "OS rollback failed — daemon view is inconsistent with OS firewall state for {ProcessPath}",
-                    request.ProcessPath);
+            // Only roll back the OS rule if we actually wrote one — when the
+            // master toggle is OFF the AddRuleAsync above was skipped.
+            if (_enforcementState.Enabled) {
+                try {
+                    await _firewallController.RemoveRuleAsync(
+                        request.ProcessPath, direction, CancellationToken.None).ConfigureAwait(false);
+                } catch (Exception rollbackEx) {
+                    _logger.LogCritical(rollbackEx,
+                        "OS rollback failed — daemon view is inconsistent with OS firewall state for {ProcessPath}",
+                        request.ProcessPath);
+                }
             }
             throw new RpcException(new Status(StatusCode.Internal,
                 $"Failed to persist firewall rule: {ex.Message}"));
@@ -195,28 +205,35 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         var existing = await _firewallStore.GetByProcessAndDirectionAsync(
             request.ProcessPath, direction, ct).ConfigureAwait(false);
         if (existing is null) {
-            // Idempotent: nothing to remove. Still call the OS controller in
-            // case the persisted view is behind the OS state — RemoveRuleAsync
-            // is documented as idempotent itself.
-            try {
-                await _firewallController.RemoveRuleAsync(
-                    request.ProcessPath, direction, ct).ConfigureAwait(false);
-            } catch (Exception ex) {
-                _logger.LogWarning(ex,
-                    "Idempotent OS-side remove for unpersisted rule {ProcessPath} ({Direction}) failed",
-                    request.ProcessPath, direction);
+            // Idempotent: nothing to remove from SQLite. The pass-through to
+            // the OS controller (in case the persisted view drifted behind the
+            // OS state) only fires when the master enforcement toggle is on —
+            // off-mode means SQLite is the only thing we touch.
+            if (_enforcementState.Enabled) {
+                try {
+                    await _firewallController.RemoveRuleAsync(
+                        request.ProcessPath, direction, ct).ConfigureAwait(false);
+                } catch (Exception ex) {
+                    _logger.LogWarning(ex,
+                        "Idempotent OS-side remove for unpersisted rule {ProcessPath} ({Direction}) failed",
+                        request.ProcessPath, direction);
+                }
             }
             return new Local.RemoveFirewallRuleResponse { Removed = false };
         }
 
-        try {
-            await _firewallController.RemoveRuleAsync(
-                request.ProcessPath, direction, ct).ConfigureAwait(false);
-        } catch (Exception ex) {
-            _logger.LogError(ex,
-                "Failed to remove firewall rule from OS for {ProcessPath}", request.ProcessPath);
-            throw new RpcException(new Status(StatusCode.Internal,
-                $"Failed to remove firewall rule: {ex.Message}"));
+        // Same enforcement gate as the Apply handler — when off, SQLite +
+        // chain + broadcast still run below, but the OS firewall isn't touched.
+        if (_enforcementState.Enabled) {
+            try {
+                await _firewallController.RemoveRuleAsync(
+                    request.ProcessPath, direction, ct).ConfigureAwait(false);
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to remove firewall rule from OS for {ProcessPath}", request.ProcessPath);
+                throw new RpcException(new Status(StatusCode.Internal,
+                    $"Failed to remove firewall rule: {ex.Message}"));
+            }
         }
 
         // Per plan: if OS removal succeeded but SQLite delete fails we do NOT
