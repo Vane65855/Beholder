@@ -69,6 +69,21 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     private bool _isFirewallEnabled = true;
 
     /// <summary>
+    /// Transient feedback shown after the user double-clicks a row to copy
+    /// its parent directory to the clipboard. Auto-clears after 2 seconds
+    /// via <see cref="ClearTransientMessageAfterDelayAsync"/>; a second copy
+    /// within the window cancels the prior timer and starts a new one (last
+    /// copy wins, no premature clear).
+    /// </summary>
+    [ObservableProperty]
+    private string _transientMessage = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasTransientMessage;
+
+    private CancellationTokenSource? _transientMessageCts;
+
+    /// <summary>
     /// Whether the ACTIVE APPS group renders its rows. Default true: this is
     /// the user's primary working set so they see it immediately on tab open.
     /// </summary>
@@ -149,6 +164,8 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         ActivityVm.Dispose();
         _activationCts?.Cancel();
         _activationCts?.Dispose();
+        _transientMessageCts?.Cancel();
+        _transientMessageCts?.Dispose();
     }
 
     /// <summary>
@@ -554,6 +571,42 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         OnPropertyChanged(nameof(TotalProcessCount));
         OnPropertyChanged(nameof(BlockedProcessCount));
         OnPropertyChanged(nameof(PartialProcessCount));
+    }
+
+    /// <summary>
+    /// Called by the view code-behind after a row's parent directory is
+    /// copied to the clipboard via double-tap. Sets the transient banner's
+    /// state and starts a 2-second auto-clear timer; a second copy within
+    /// that window cancels the prior timer so the latest message survives.
+    /// Empty / whitespace input is silently ignored — the view should not
+    /// invoke this for paths that have no directory component.
+    /// </summary>
+    public void NotifyPathCopied(string directoryPath) {
+        if (string.IsNullOrWhiteSpace(directoryPath)) return;
+
+        TransientMessage = $"Copied: {directoryPath}";
+        HasTransientMessage = true;
+
+        // Cancel any prior pending auto-clear so a second copy within the
+        // 2-second window doesn't get prematurely dismissed by the first
+        // copy's timer.
+        _transientMessageCts?.Cancel();
+        _transientMessageCts?.Dispose();
+        _transientMessageCts = new CancellationTokenSource();
+        _ = ClearTransientMessageAfterDelayAsync(_transientMessageCts.Token);
+    }
+
+    private async Task ClearTransientMessageAfterDelayAsync(CancellationToken cancellationToken) {
+        try {
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(true);
+            if (!cancellationToken.IsCancellationRequested) {
+                HasTransientMessage = false;
+                TransientMessage = string.Empty;
+            }
+        } catch (OperationCanceledException) {
+            // Superseded by a later NotifyPathCopied — newer call owns the
+            // state, leave it intact.
+        }
     }
 }
 
