@@ -21,6 +21,7 @@ public sealed class RemoveFirewallRuleRpcTests : IDisposable {
     private readonly SqliteFirewallRuleStore _firewallStore;
     private readonly SqliteEventStore _eventStore;
     private readonly FakeFirewallController _firewallController;
+    private readonly FakeFirewallEnforcementState _enforcementState;
     private readonly FakeTimeProvider _timeProvider;
     private readonly BroadcastService _broadcaster;
     private readonly BeholderLocalService _service;
@@ -35,6 +36,7 @@ public sealed class RemoveFirewallRuleRpcTests : IDisposable {
         _timeProvider = new FakeTimeProvider(FixedTimestamp);
         _eventStore = new SqliteEventStore(connectionFactory, _timeProvider);
         _firewallController = new FakeFirewallController();
+        _enforcementState = new FakeFirewallEnforcementState();
         _broadcaster = new BroadcastService(
             new FakeSnapshotBatchSource(), _timeProvider, NullLogger<BroadcastService>.Instance);
 
@@ -48,7 +50,7 @@ public sealed class RemoveFirewallRuleRpcTests : IDisposable {
 
         _service = new BeholderLocalService(
             _broadcaster, pipeline, _firewallStore, alertStore,
-            _firewallController, new FakeFirewallEnforcementState(),
+            _firewallController, _enforcementState,
             _eventStore, new FakeTrafficStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
@@ -219,6 +221,59 @@ public sealed class RemoveFirewallRuleRpcTests : IDisposable {
 
         Assert.True(first.Removed);
         Assert.False(second.Removed);
+    }
+
+    // ─── Master enforcement-toggle gating ────────────────────────────────
+
+    [Fact]
+    public async Task RemoveFirewallRule_EnforcementOff_SkipsController() {
+        // Seed an existing rule so the handler hits the main remove path
+        // (not the idempotent early-return for "no persisted rule").
+        await _firewallStore.UpsertAsync(new FirewallRule(
+            id: 0, processPath: @"C:\bin\curl.exe",
+            direction: Direction.Outbound,
+            action: FirewallAction.Block,
+            source: RuleSource.Manual,
+            createdAt: FixedTimestamp, updatedAt: FixedTimestamp), CancellationToken.None);
+
+        _enforcementState.SetEnabled(false);
+        var request = new Local.RemoveFirewallRuleRequest {
+            ProcessPath = @"C:\bin\curl.exe",
+            Direction = Local.Direction.Outbound,
+        };
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.RemoveFirewallRule(request, context);
+
+        Assert.True(response.Removed);
+        // OS-firewall must stay untouched while enforcement is off.
+        Assert.Empty(_firewallController.RemovedRules);
+    }
+
+    [Fact]
+    public async Task RemoveFirewallRule_EnforcementOff_StillDeletesFromStore() {
+        // SQLite is the source of truth for the FirewallEnforcementService
+        // replay-on-toggle-on path. A rule removed while enforcement is off
+        // must still leave SQLite, otherwise toggling back on would resurrect
+        // the rule by re-applying the now-stale persisted copy.
+        await _firewallStore.UpsertAsync(new FirewallRule(
+            id: 0, processPath: @"C:\bin\curl.exe",
+            direction: Direction.Outbound,
+            action: FirewallAction.Block,
+            source: RuleSource.Manual,
+            createdAt: FixedTimestamp, updatedAt: FixedTimestamp), CancellationToken.None);
+
+        _enforcementState.SetEnabled(false);
+        var request = new Local.RemoveFirewallRuleRequest {
+            ProcessPath = @"C:\bin\curl.exe",
+            Direction = Local.Direction.Outbound,
+        };
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        await _service.RemoveFirewallRule(request, context);
+
+        var rules = await _firewallStore.ListAllAsync(CancellationToken.None);
+        Assert.Empty(rules);
     }
 
     private static async Task WaitForAsync(
