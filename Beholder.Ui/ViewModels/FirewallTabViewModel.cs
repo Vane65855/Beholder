@@ -304,31 +304,42 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     }
 
     private void OnProcessStatesUpdated(IReadOnlyDictionary<string, ProcessState> states) {
-        Dispatcher.UIThread.Post(() => {
-            // Mark every row inactive first, then flip the ones we see live.
-            // This handles processes disappearing from the live snapshot
-            // (process exited) as well as new ones appearing.
-            foreach (var row in _rowsByPath.Values) {
-                row.IsActive = false;
-                row.ActiveConnectionCount = 0;
-            }
-            foreach (var (path, state) in states) {
-                if (IsExcludedProcess(path)) continue;
-                var row = GetOrCreateRow(path);
-                row.IsActive = true;
-                // A process that's currently reporting traffic must have its
-                // executable on disk — flip the orphan flag back if a previously-
-                // missing app got reinstalled and re-launched mid-session.
-                row.ExecutableExists = true;
-                row.ActiveConnectionCount = state.ActiveConnectionCount;
-                // RecentBytesTotal: prefer live deltas over the historical
-                // summary value because the live values reflect very-recent
-                // activity.
-                row.RecentBytesTotal = state.TotalBytesIn + state.TotalBytesOut;
-            }
-            Reclassify();
-            NotifyHeaderCountsChanged();
-        });
+        // The event fires on the DaemonStreamSubscriber's background thread;
+        // hop to the UI thread before mutating any observable state. Test code
+        // calls ApplyProcessStates directly to bypass the dispatcher.
+        Dispatcher.UIThread.Post(() => ApplyProcessStates(states));
+    }
+
+    /// <summary>
+    /// Body of <see cref="OnProcessStatesUpdated"/>, extracted so tests can
+    /// drive it synchronously without an Avalonia headless dispatcher fixture.
+    /// Internal (not private) so the test project (granted via
+    /// <c>InternalsVisibleTo</c>) can call it directly. UI-thread expected.
+    /// </summary>
+    internal void ApplyProcessStates(IReadOnlyDictionary<string, ProcessState> states) {
+        // Mark every row inactive first, then flip the ones we see live.
+        // This handles processes disappearing from the live snapshot
+        // (process exited) as well as new ones appearing.
+        foreach (var row in _rowsByPath.Values) {
+            row.IsActive = false;
+            row.ActiveConnectionCount = 0;
+        }
+        foreach (var (path, state) in states) {
+            if (IsExcludedProcess(path)) continue;
+            var row = GetOrCreateRow(path);
+            row.IsActive = true;
+            // A process that's currently reporting traffic must have its
+            // executable on disk — flip the orphan flag back if a previously-
+            // missing app got reinstalled and re-launched mid-session.
+            row.ExecutableExists = true;
+            row.ActiveConnectionCount = state.ActiveConnectionCount;
+            // RecentBytesTotal: prefer live deltas over the historical
+            // summary value because the live values reflect very-recent
+            // activity.
+            row.RecentBytesTotal = state.TotalBytesIn + state.TotalBytesOut;
+        }
+        Reclassify();
+        NotifyHeaderCountsChanged();
     }
 
     private void OnRuleChange(FirewallRuleChange change) {
@@ -390,38 +401,115 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         });
     }
 
+    /// <summary>
+    /// Reconcile <see cref="ActiveRows"/> and <see cref="InactiveRows"/> with
+    /// the desired sorted membership derived from <see cref="_rowsByPath"/>.
+    /// Uses single-step Insert/Remove/Move calls (not Clear+Add) so Avalonia's
+    /// ItemsControl preserves stable rows' container instances across the
+    /// 1Hz daemon tick — without this, hovering over an ALLOW/BLOCK pill
+    /// during a tick caused the pill's Button to be unmaterialized between
+    /// PointerPressed and PointerReleased and the click was swallowed.
+    /// </summary>
+    /// <remarks>
+    /// Active sort: alphabetical by DisplayName.
+    /// Inactive sort: two tiers — rows whose executable still exists first
+    /// (alphabetical), then orphaned-rule rows (alphabetical). The two tiers
+    /// are disjoint by construction because <c>IsOrphanedRule = HasRule
+    /// &amp;&amp; !ExecutableExists</c>; rows that satisfy neither
+    /// (<c>!ExecutableExists &amp;&amp; !HasRule</c>) are filtered out as noise.
+    /// </remarks>
     private void Reclassify() {
-        ActiveRows.Clear();
-        InactiveRows.Clear();
-
-        // Active group: every running process, alphabetical. IsActive implies
-        // ExecutableExists so no filtering needed here.
-        foreach (var row in _rowsByPath.Values
+        var desiredActive = _rowsByPath.Values
             .Where(r => r.IsActive)
-            .OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)) {
-            ActiveRows.Add(row);
-        }
+            .OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        // Inactive group: existing apps first, then orphaned-rule apps. Rows
-        // where the executable is gone *and* no rule references them are
-        // dropped — they're noise (uninstalled apps with no actionable state).
         var inactive = _rowsByPath.Values.Where(r => !r.IsActive).ToList();
-        foreach (var row in inactive
+        var desiredInactive = inactive
             .Where(r => r.ExecutableExists)
-            .OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)) {
-            InactiveRows.Add(row);
+            .OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .Concat(inactive
+                .Where(r => r.IsOrphanedRule)
+                .OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        var activeChanged = ReconcileSorted(ActiveRows, desiredActive);
+        var inactiveChanged = ReconcileSorted(InactiveRows, desiredInactive);
+
+        // Guard the IEnumerable-replacement notifications behind "did anything
+        // change". The view binds ItemsSource to FilteredActiveRows / Filtered-
+        // InactiveRows (computed LINQ properties), so a PropertyChanged signal
+        // forces Avalonia to drop and re-evaluate the IEnumerable — same Reset-
+        // class container churn we're trying to avoid. A no-op tick (rows have
+        // property updates but membership is unchanged) must emit zero binding
+        // re-evaluations on these collections.
+        if (activeChanged || inactiveChanged) {
+            OnPropertyChanged(nameof(FilteredActiveRows));
+            OnPropertyChanged(nameof(FilteredInactiveRows));
+            OnPropertyChanged(nameof(HasFilteredActiveRows));
+            OnPropertyChanged(nameof(HasFilteredInactiveRows));
+            OnPropertyChanged(nameof(HasRows));
         }
-        foreach (var row in inactive
-            .Where(r => r.IsOrphanedRule)
-            .OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)) {
-            InactiveRows.Add(row);
+    }
+
+    /// <summary>
+    /// Mutate <paramref name="list"/> in place so it matches <paramref name="desired"/>
+    /// (ordered by reference identity), using the minimum sequence of
+    /// Insert / Remove / Move operations. Returns <c>true</c> iff at least
+    /// one mutation was made.
+    /// </summary>
+    /// <remarks>
+    /// Why this exists: <see cref="ObservableCollection{T}.Clear"/> + re-Add
+    /// raises a Reset event that causes Avalonia's ItemsControl to recycle
+    /// every container, dropping pointer state mid-click. Single-step
+    /// Insert / Remove / Move events let Avalonia keep stable rows'
+    /// container instances mounted across 1Hz daemon ticks. ObservableCollection
+    /// .Move raises a single Move event that Avalonia handles as a container
+    /// relocation (not Remove+Insert) — this is the critical primitive that
+    /// makes the hover-and-click-during-tick scenario survive.
+    ///
+    /// Reference equality is correct because rows are interned per path in
+    /// <see cref="_rowsByPath"/> (one instance per process path; see
+    /// <see cref="GetOrCreateRow"/>).
+    /// </remarks>
+    private static bool ReconcileSorted(
+        ObservableCollection<FirewallRuleRow> list,
+        IReadOnlyList<FirewallRuleRow> desired)
+    {
+        var changed = false;
+        var desiredSet = new HashSet<FirewallRuleRow>(desired, ReferenceEqualityComparer.Instance);
+
+        // Pass 1: drop rows that are no longer in the desired set. Walk
+        // backward so indices stay valid as we remove.
+        for (var i = list.Count - 1; i >= 0; i--) {
+            if (!desiredSet.Contains(list[i])) {
+                list.RemoveAt(i);
+                changed = true;
+            }
         }
 
-        OnPropertyChanged(nameof(FilteredActiveRows));
-        OnPropertyChanged(nameof(FilteredInactiveRows));
-        OnPropertyChanged(nameof(HasFilteredActiveRows));
-        OnPropertyChanged(nameof(HasFilteredInactiveRows));
-        OnPropertyChanged(nameof(HasRows));
+        // Pass 2: walk desired in order. At each index i, either the right
+        // row is already there (advance), the right row lives later in the
+        // list (Move it forward), or it's a brand-new row (Insert). Lists
+        // are tiny (typically <200 rows in the wild), so the inner linear
+        // search dominates by the same OrderBy already done in the caller.
+        for (var i = 0; i < desired.Count; i++) {
+            var target = desired[i];
+            if (i < list.Count && ReferenceEquals(list[i], target)) continue;
+
+            var existing = -1;
+            for (var j = i + 1; j < list.Count; j++) {
+                if (ReferenceEquals(list[j], target)) { existing = j; break; }
+            }
+            if (existing >= 0) {
+                list.Move(existing, i);   // single Move event — Avalonia preserves the container
+                changed = true;
+            } else {
+                list.Insert(i, target);   // single Insert event — only the new row materializes
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     /// <summary>
