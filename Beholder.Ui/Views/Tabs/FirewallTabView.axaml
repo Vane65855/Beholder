@@ -187,6 +187,21 @@
                        FontSize="{DynamicResource FontSizeBody}" />
         </Border>
 
+        <!-- ── Transient copy banner ────────────────────────────────────
+             Shown for ~2 seconds after a row's parent directory is copied
+             to the clipboard via double-tap. Auto-clears via
+             FirewallTabViewModel.NotifyPathCopied's CTS-based timer. -->
+        <Border DockPanel.Dock="Top"
+                IsVisible="{Binding HasTransientMessage}"
+                Background="{DynamicResource BackgroundElevated}"
+                BorderBrush="{DynamicResource AccentPrimary}"
+                BorderThickness="0,0,0,1"
+                Padding="16,8">
+            <TextBlock Text="{Binding TransientMessage}"
+                       Foreground="{DynamicResource AccentPrimary}"
+                       FontSize="{DynamicResource FontSizeBody}" />
+        </Border>
+
         <!-- ── Loading overlay ──────────────────────────────────────── -->
         <Panel IsVisible="{Binding IsLoading}">
             <TextBlock Text="Loading firewall rules..."
@@ -276,7 +291,13 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:FirewallRuleRow">
-                            <Border Classes="ruleRow">
+                            <!-- DoubleTapped handler copies the row's parent
+                                 directory (not the .exe path) to the clipboard.
+                                 Pills inside the row are separate clickable
+                                 controls; their click events are routed
+                                 independently and don't trigger this. -->
+                            <Border Classes="ruleRow"
+                                    DoubleTapped="OnRowDoubleTapped">
                                 <Grid ColumnDefinitions="*,56,56,140,90,80">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal"
                                                 Spacing="10" VerticalAlignment="Center">
@@ -375,7 +396,8 @@
                                  / TextMuted hierarchy already differentiates inactive
                                  rows visually, and stacking Opacity on top of muted
                                  tokens makes paths hard to read. -->
-                            <Border Classes="ruleRow">
+                            <Border Classes="ruleRow"
+                                    DoubleTapped="OnRowDoubleTapped">
                                 <Grid ColumnDefinitions="*,56,56,140,90,80">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal"
                                                 Spacing="10" VerticalAlignment="Center">
