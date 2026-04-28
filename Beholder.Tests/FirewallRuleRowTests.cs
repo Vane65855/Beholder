@@ -141,7 +141,7 @@ public class FirewallRuleRowTests {
         var row = new FirewallRuleRow(@"C:\app.exe");
 
         Assert.False(row.HasRule);
-        Assert.Equal("default", row.SourceLabel);
+        Assert.Equal("DEFAULT", row.SourceLabel);
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public class FirewallRuleRowTests {
             Source = Beholder.Protocol.Local.RuleSource.Manual,
         };
 
-        Assert.Equal("manual", row.SourceLabel);
+        Assert.Equal("MANUAL", row.SourceLabel);
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class FirewallRuleRowTests {
             Source = Beholder.Protocol.Local.RuleSource.Default,
         };
 
-        Assert.Equal("default", row.SourceLabel);
+        Assert.Equal("DEFAULT", row.SourceLabel);
     }
 
     [Fact]
@@ -177,6 +177,41 @@ public class FirewallRuleRowTests {
         row.HasRule = true;
 
         Assert.Contains(nameof(FirewallRuleRow.SourceLabel), seen);
+    }
+
+    [Fact]
+    public void IsSourceDefault_CoversAllStatePermutations() {
+        // Pins the matrix that drives the SOURCE column's foreground hierarchy:
+        // muted (TextMuted) when the source is effectively "default" — either
+        // no rule exists, or the rule's source is explicitly Default. Manual
+        // and Remote rules render in the brighter TextSecondary. The view
+        // binds Classes.muted="{Binding IsSourceDefault}" so the visual class
+        // tracks this bool 1:1.
+
+        // No rule → default applies regardless of Source enum value.
+        var noRule = new FirewallRuleRow(@"C:\app.exe") { HasRule = false };
+        Assert.True(noRule.IsSourceDefault);
+
+        // Explicit RuleSource.Default → also default.
+        var explicitDefault = new FirewallRuleRow(@"C:\app.exe") {
+            HasRule = true,
+            Source = Beholder.Protocol.Local.RuleSource.Default,
+        };
+        Assert.True(explicitDefault.IsSourceDefault);
+
+        // Manual rule → not default (lift to brighter foreground).
+        var manual = new FirewallRuleRow(@"C:\app.exe") {
+            HasRule = true,
+            Source = Beholder.Protocol.Local.RuleSource.Manual,
+        };
+        Assert.False(manual.IsSourceDefault);
+
+        // Remote rule → not default (lift to brighter foreground).
+        var remote = new FirewallRuleRow(@"C:\app.exe") {
+            HasRule = true,
+            Source = Beholder.Protocol.Local.RuleSource.Remote,
+        };
+        Assert.False(remote.IsSourceDefault);
     }
 
     [Fact]

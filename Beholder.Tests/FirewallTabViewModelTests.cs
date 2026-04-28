@@ -399,7 +399,7 @@ public class FirewallTabViewModelTests {
 
         var row = Assert.Single(vm.InactiveRows);
         Assert.True(row.HasRule);
-        Assert.Equal("manual", row.SourceLabel);
+        Assert.Equal("MANUAL", row.SourceLabel);
     }
 
     [Fact]
@@ -417,8 +417,8 @@ public class FirewallTabViewModelTests {
 
         var row = Assert.Single(vm.InactiveRows);
         Assert.False(row.HasRule);
-        // No Beholder rule = system default applies = SOURCE shows "default".
-        Assert.Equal("default", row.SourceLabel);
+        // No Beholder rule = system default applies = SOURCE shows "DEFAULT".
+        Assert.Equal("DEFAULT", row.SourceLabel);
     }
 
     // ─── Orphaned-rule / executable-existence tests ───

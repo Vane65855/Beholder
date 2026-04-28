@@ -126,18 +126,29 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
         : "—";
 
     // No Beholder rule means the system default applies (Windows allows by
-    // default), so the SOURCE column reads "default" — not "—". The em-dash
+    // default), so the SOURCE column reads "DEFAULT" — not "—". The em-dash
     // is reserved for the genuinely-unknown defensive fallback below
     // (unrecognized RuleSource enum values, which shouldn't occur in
-    // practice).
+    // practice). IsSourceDefault below drives the row's foreground color
+    // via Classes.muted in the view.
     public string SourceLabel => HasRule
         ? Source switch {
-            RuleSource.Manual => "manual",
-            RuleSource.Default => "default",
-            RuleSource.Remote => "remote",
+            RuleSource.Manual => "MANUAL",
+            RuleSource.Default => "DEFAULT",
+            RuleSource.Remote => "REMOTE",
             _ => "—",
         }
-        : "default";
+        : "DEFAULT";
+
+    /// <summary>
+    /// True when the SOURCE column should render in the muted foreground
+    /// (TextMuted): either no Beholder rule exists, or an explicit
+    /// <see cref="RuleSource.Default"/> rule applies — both cases mean
+    /// "system default applies" and recede into the baseline. Manual and
+    /// Remote rules lift one shade brighter to mark "this row has a real
+    /// rule." Drives <c>Classes.muted</c> on the SOURCE TextBlock.
+    /// </summary>
+    public bool IsSourceDefault => !HasRule || Source == RuleSource.Default;
 
     /// <summary>
     /// Binary toggle: any non-<c>Block</c> state goes to <c>Block</c>;
@@ -171,10 +182,14 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
     partial void OnInActionChanged(FirewallActionState value) => OnPropertyChanged(nameof(OverallStatus));
     partial void OnOutActionChanged(FirewallActionState value) => OnPropertyChanged(nameof(OverallStatus));
     partial void OnRecentBytesTotalChanged(long value) => OnPropertyChanged(nameof(RecentBytesLabel));
-    partial void OnSourceChanged(RuleSource value) => OnPropertyChanged(nameof(SourceLabel));
+    partial void OnSourceChanged(RuleSource value) {
+        OnPropertyChanged(nameof(SourceLabel));
+        OnPropertyChanged(nameof(IsSourceDefault));
+    }
     partial void OnHasRuleChanged(bool value) {
         OnPropertyChanged(nameof(SourceLabel));
         OnPropertyChanged(nameof(IsOrphanedRule));
+        OnPropertyChanged(nameof(IsSourceDefault));
     }
     partial void OnIsActiveChanged(bool value) => OnPropertyChanged(nameof(HostsLabel));
     partial void OnActiveConnectionCountChanged(int value) => OnPropertyChanged(nameof(HostsLabel));

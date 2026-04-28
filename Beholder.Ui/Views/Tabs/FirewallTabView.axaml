@@ -68,6 +68,16 @@
         <Style Selector="Border.ruleRow:pointerover">
             <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
         </Style>
+
+        <!-- SOURCE column foreground hierarchy. DEFAULT recedes into the
+             baseline noise floor (it's the majority of rows); MANUAL and
+             REMOTE lift one shade to mark "this row has a real rule." -->
+        <Style Selector="TextBlock.sourceLabel">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+        </Style>
+        <Style Selector="TextBlock.sourceLabel.muted">
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+        </Style>
     </UserControl.Styles>
 
     <DockPanel>
@@ -359,8 +369,9 @@
                                                FontSize="{DynamicResource FontSizeBody}"
                                                VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="5"
+                                               Classes="sourceLabel"
+                                               Classes.muted="{Binding IsSourceDefault}"
                                                Text="{Binding SourceLabel}"
-                                               Foreground="{DynamicResource TextMuted}"
                                                FontSize="{DynamicResource FontSizeCaption}"
                                                VerticalAlignment="Center" />
                                 </Grid>
@@ -476,8 +487,9 @@
                                                FontSize="{DynamicResource FontSizeBody}"
                                                VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="5"
+                                               Classes="sourceLabel"
+                                               Classes.muted="{Binding IsSourceDefault}"
                                                Text="{Binding SourceLabel}"
-                                               Foreground="{DynamicResource TextMuted}"
                                                FontSize="{DynamicResource FontSizeCaption}"
                                                VerticalAlignment="Center" />
                                 </Grid>
