@@ -280,13 +280,18 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     /// <summary>
     /// Filters non-controllable pseudo-processes out of the rule table. The
     /// Firewall tab is a *rule* surface; processes that <c>INetFwPolicy2</c>
-    /// rejects rules against don't belong here. Currently just <c>"System"</c>
-    /// (the kernel pseudo-process surfaced by ETW counters); future entries
-    /// might include <c>"Idle"</c> and unknown-PID rows if we ever encounter
-    /// them.
+    /// rejects rules against don't belong here.
+    /// <list type="bullet">
+    /// <item><c>"System"</c> — the kernel pseudo-process surfaced by ETW counters.</item>
+    /// <item><c>"unknown"</c> — emitted by <c>ProcessPathResolver</c> when a PID
+    ///   has already exited or its <c>MainModule</c> can't be read. Rules can't
+    ///   target an unknown absolute path, and the bytes total under this key is
+    ///   the meaningless aggregate of every unresolvable PID's traffic.</item>
+    /// </list>
     /// </summary>
     private static bool IsExcludedProcess(string processPath) =>
-        string.Equals(processPath, "System", StringComparison.Ordinal);
+        string.Equals(processPath, "System", StringComparison.Ordinal) ||
+        string.Equals(processPath, "unknown", StringComparison.Ordinal);
 
     private static void ApplyRuleToRow(FirewallRuleRow row, FirewallRule rule) {
         var actionState = rule.Action == FirewallAction.Block
