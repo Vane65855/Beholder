@@ -202,6 +202,39 @@
                        FontSize="{DynamicResource FontSizeBody}" />
         </Border>
 
+        <!-- ── Column header (sticky) ───────────────────────────────────
+             Docked Top so the legend stays visible while the rule list
+             scrolls. Column widths follow the pattern (PROCESS=*) +
+             (IN=84 = pill 76 + 8 right-margin) + (OUT=88 = pill 76 + 12
+             right-margin) + (HOSTS=140) + (RECENT=90) + (SOURCE=80).
+             Header text margins mirror the pill margins below so labels
+             centre cleanly above their column. The column-pill width
+             pairing is documented in FirewallActionPill.axaml — keep the
+             two in sync if either changes.
+
+             Trade-off: when the rule list overflows, the ScrollViewer
+             below shows its ~16px scrollbar, so rule rows shift left of
+             this header by 16px (only the rightmost SOURCE column drifts
+             visibly; the group-header strip absorbs the same shift, so
+             the eye reads it as alignment between strata, not within). -->
+        <Border DockPanel.Dock="Top"
+                IsVisible="{Binding HasRows}"
+                Background="{DynamicResource BackgroundPanel}"
+                BorderBrush="{DynamicResource DividerHorizontal}"
+                BorderThickness="0,0,0,1"
+                Padding="16,8">
+            <Grid ColumnDefinitions="*,84,88,140,90,80">
+                <TextBlock Grid.Column="0" Classes="colHeader" Text="PROCESS" />
+                <TextBlock Grid.Column="1" Classes="colHeader" Text="IN"
+                           HorizontalAlignment="Center" Margin="0,0,8,0" />
+                <TextBlock Grid.Column="2" Classes="colHeader" Text="OUT"
+                           HorizontalAlignment="Center" Margin="0,0,12,0" />
+                <TextBlock Grid.Column="3" Classes="colHeader" Text="HOSTS" />
+                <TextBlock Grid.Column="4" Classes="colHeader" Text="RECENT" />
+                <TextBlock Grid.Column="5" Classes="colHeader" Text="SOURCE" />
+            </Grid>
+        </Border>
+
         <!-- ── Loading overlay ──────────────────────────────────────── -->
         <Panel IsVisible="{Binding IsLoading}">
             <TextBlock Text="Loading firewall rules..."
@@ -234,26 +267,6 @@
                       HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto">
             <StackPanel>
-
-                <!-- Column header row. Pill columns are fixed-width (56) to match
-                     FirewallActionPill's MinWidth, so headers align dead-centre
-                     above the pills below. PROCESS takes the remaining space; the
-                     three trailing columns are fixed for legibility. -->
-                <Border Background="{DynamicResource BackgroundPanel}"
-                        BorderBrush="{DynamicResource DividerHorizontal}"
-                        BorderThickness="0,0,0,1"
-                        Padding="16,8">
-                    <Grid ColumnDefinitions="*,56,56,140,90,80">
-                        <TextBlock Grid.Column="0" Classes="colHeader" Text="PROCESS" />
-                        <TextBlock Grid.Column="1" Classes="colHeader" Text="IN"
-                                   HorizontalAlignment="Center" Margin="0,0,8,0" />
-                        <TextBlock Grid.Column="2" Classes="colHeader" Text="OUT"
-                                   HorizontalAlignment="Center" Margin="0,0,12,0" />
-                        <TextBlock Grid.Column="3" Classes="colHeader" Text="HOSTS" />
-                        <TextBlock Grid.Column="4" Classes="colHeader" Text="RECENT" />
-                        <TextBlock Grid.Column="5" Classes="colHeader" Text="SOURCE" />
-                    </Grid>
-                </Border>
 
                 <!-- ACTIVE APPS group — clickable header toggles expansion. -->
                 <Button Classes="groupHeaderButton"
@@ -298,7 +311,7 @@
                                  independently and don't trigger this. -->
                             <Border Classes="ruleRow"
                                     DoubleTapped="OnRowDoubleTapped">
-                                <Grid ColumnDefinitions="*,56,56,140,90,80">
+                                <Grid ColumnDefinitions="*,84,88,140,90,80">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal"
                                                 Spacing="10" VerticalAlignment="Center">
                                         <Ellipse Width="8" Height="8"
@@ -398,7 +411,7 @@
                                  tokens makes paths hard to read. -->
                             <Border Classes="ruleRow"
                                     DoubleTapped="OnRowDoubleTapped">
-                                <Grid ColumnDefinitions="*,56,56,140,90,80">
+                                <Grid ColumnDefinitions="*,84,88,140,90,80">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal"
                                                 Spacing="10" VerticalAlignment="Center">
                                         <!-- Indicator: muted dot for normal inactive rows;

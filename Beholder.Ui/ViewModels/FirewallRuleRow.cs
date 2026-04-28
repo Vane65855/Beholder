@@ -125,6 +125,11 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
         ? ActiveConnectionCount.ToString()
         : "—";
 
+    // No Beholder rule means the system default applies (Windows allows by
+    // default), so the SOURCE column reads "default" — not "—". The em-dash
+    // is reserved for the genuinely-unknown defensive fallback below
+    // (unrecognized RuleSource enum values, which shouldn't occur in
+    // practice).
     public string SourceLabel => HasRule
         ? Source switch {
             RuleSource.Manual => "manual",
@@ -132,7 +137,7 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
             RuleSource.Remote => "remote",
             _ => "—",
         }
-        : "—";
+        : "default";
 
     /// <summary>
     /// Binary toggle: any non-<c>Block</c> state goes to <c>Block</c>;
