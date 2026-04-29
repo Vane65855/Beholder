@@ -73,6 +73,19 @@ internal sealed class TrafficEngine {
     /// </summary>
     public event Action<IReadOnlyList<CounterSnapshot>>? OnSnapshotBatch;
 
+    /// <summary>
+    /// Fires the first time a given process path appears in the engine's
+    /// in-memory lifetime totals. Phase 7's <c>NewProcessDetector</c>
+    /// subscribes here rather than to the raw <c>IFlowSource</c> stream
+    /// because (a) the engine consumer thread is safe for detector work
+    /// while the ETW callback thread is not, and (b) firing on every event
+    /// would spam the detector — this is fire-once-per-key for the
+    /// engine's session-scoped view. Daemon-restart deduplication is the
+    /// detector's job: it consults <c>IProcessRegistry</c> to suppress
+    /// re-alerts for binaries already registered across restarts.
+    /// </summary>
+    public event Action<string>? OnProcessFirstNetworkFlow;
+
     /// <summary>Diagnostic. Test-only — installs a signal that fires once the loop has
     /// registered its delay timer with the TimeProvider.</summary>
     internal void SetWaitSignal(TaskCompletionSource signal)
@@ -174,6 +187,10 @@ internal sealed class TrafficEngine {
         if (!_processLifetimeTotals.TryGetValue(flowEvent.ProcessPath, out var totals)) {
             totals = new ProcessLifetimeTotals { ProcessName = flowEvent.ProcessName };
             _processLifetimeTotals[flowEvent.ProcessPath] = totals;
+            // Fire AFTER the dictionary insert so a subscriber that synchronously
+            // re-enters the engine sees the path as already known. The handler
+            // runs on the engine consumer thread; subscribers must not block.
+            OnProcessFirstNetworkFlow?.Invoke(flowEvent.ProcessPath);
         }
         totals.TotalBytesIn += flowEvent.BytesIn;
         totals.TotalBytesOut += flowEvent.BytesOut;

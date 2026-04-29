@@ -13,7 +13,7 @@ namespace Beholder.Daemon.Pipeline;
 /// Owns the channel, the engine instance, and the lifecycle of the underlying
 /// flow source; no other component sees the channel.
 /// </summary>
-internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISnapshotBatchSource {
+internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISnapshotBatchSource, IProcessFirstNetworkFlowSource {
     private const int ChannelCapacity = 10_000;
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5);
 
@@ -27,6 +27,7 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
     private Task? _engineTask;
     private bool _subscribedToFlowSource;
     private bool _subscribedToEngine;
+    private bool _subscribedToEngineFirstFlow;
     private bool _disposed;
 
     /// <summary>
@@ -34,6 +35,14 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
     /// on the engine loop thread and must not block.
     /// </summary>
     public event Action<IReadOnlyList<CounterSnapshot>>? OnSnapshotBatch;
+
+    /// <summary>
+    /// Forwards <see cref="TrafficEngine.OnProcessFirstNetworkFlow"/> to
+    /// external subscribers. Phase 7's <c>NewProcessDetector</c> consumes
+    /// this through the <see cref="IProcessFirstNetworkFlowSource"/>
+    /// interface so it never sees the engine directly.
+    /// </summary>
+    public event Action<string>? OnProcessFirstNetworkFlow;
 
     /// <summary>
     /// Returns a snapshot of every process the pipeline's engine currently
@@ -94,6 +103,9 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
         _engine.OnSnapshotBatch += OnSnapshotBatchReceived;
         _subscribedToEngine = true;
 
+        _engine.OnProcessFirstNetworkFlow += OnProcessFirstNetworkFlowReceived;
+        _subscribedToEngineFirstFlow = true;
+
         try {
             await _flowSource.StartAsync(cancellationToken).ConfigureAwait(false);
         } catch {
@@ -101,6 +113,8 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
             _subscribedToFlowSource = false;
             _engine.OnSnapshotBatch -= OnSnapshotBatchReceived;
             _subscribedToEngine = false;
+            _engine.OnProcessFirstNetworkFlow -= OnProcessFirstNetworkFlowReceived;
+            _subscribedToEngineFirstFlow = false;
             throw;
         }
 
@@ -137,6 +151,11 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
         if (_subscribedToEngine) {
             _engine.OnSnapshotBatch -= OnSnapshotBatchReceived;
             _subscribedToEngine = false;
+        }
+
+        if (_subscribedToEngineFirstFlow) {
+            _engine.OnProcessFirstNetworkFlow -= OnProcessFirstNetworkFlowReceived;
+            _subscribedToEngineFirstFlow = false;
         }
 
         await _flowSource.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -180,4 +199,7 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
         }
         OnSnapshotBatch?.Invoke(snapshots);
     }
+
+    private void OnProcessFirstNetworkFlowReceived(string processPath) =>
+        OnProcessFirstNetworkFlow?.Invoke(processPath);
 }

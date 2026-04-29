@@ -220,6 +220,36 @@ public class TrafficEngineTests {
     }
 
     [Fact]
+    public async Task OnProcessFirstNetworkFlow_FiresOncePerNewProcessPath() {
+        // The Phase 7 NewProcessDetector subscribes here. Two flows for the
+        // same path must produce one fire; two flows for distinct paths must
+        // produce two fires (one per path). The fire happens on the engine
+        // consumer thread, so the test fixture's RunAsync must observe the
+        // events through a synchronous handler.
+        var firedPaths = new List<string>();
+        await using var fixture = Fixture.Start();
+        fixture.Engine.OnProcessFirstNetworkFlow += path => {
+            lock (firedPaths) firedPaths.Add(path);
+        };
+
+        await fixture.DriveTickAsync(
+            BuildFlow(processName: "a.exe", processPath: @"C:\a.exe", bytesOut: 100),
+            BuildFlow(processName: "a.exe", processPath: @"C:\a.exe", bytesOut: 50),
+            BuildFlow(processName: "b.exe", processPath: @"C:\b.exe", bytesOut: 25));
+
+        // Second tick with the same paths must not re-fire — the engine has
+        // them in _processLifetimeTotals already.
+        await fixture.DriveTickAsync(
+            BuildFlow(processName: "a.exe", processPath: @"C:\a.exe", bytesOut: 10));
+
+        lock (firedPaths) {
+            Assert.Equal(2, firedPaths.Count);
+            Assert.Contains(@"C:\a.exe", firedPaths);
+            Assert.Contains(@"C:\b.exe", firedPaths);
+        }
+    }
+
+    [Fact]
     public async Task GetCurrentSnapshotsAsync_IncludesInactiveProcesses() {
         await using var fixture = Fixture.Start();
 

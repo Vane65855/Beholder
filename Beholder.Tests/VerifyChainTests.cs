@@ -178,7 +178,7 @@ public sealed class VerifyChainTests : IDisposable {
     }
 
     private sealed class ThrowingEventStore : IEventStore {
-        public Task AppendAsync(EventKind kind, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+        public Task<long> AppendAsync(EventKind kind, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
             => throw new InvalidOperationException("Simulated infrastructure failure");
 
         public Task<ChainVerificationResult> VerifyAsync(CancellationToken cancellationToken)
