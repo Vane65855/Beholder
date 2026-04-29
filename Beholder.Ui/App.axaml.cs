@@ -39,12 +39,19 @@ public partial class App : Application {
             _processStateService = new ProcessStateService(
                 _streamSubscriber, _daemonClient, TimeProvider.System);
             _streamSubscriber.OnConnected = ct => _processStateService.SeedAsync(ct);
-            var statusStripVm = new StatusStripViewModel(_processStateService);
+
+            // Single AvaloniaDispatcher instance shared by every VM that
+            // marshals event-handler callbacks from background threads to the
+            // UI thread. See IDispatcher / AvaloniaDispatcher / SyncDispatcher
+            // for the abstraction's rationale.
+            var dispatcher = new AvaloniaDispatcher();
+
+            var statusStripVm = new StatusStripViewModel(_processStateService, dispatcher);
             var historicalChartLoader = new HistoricalChartLoader(_daemonClient);
 
             _mainWindowVm = new MainWindowViewModel(
                 _daemonClient, _processStateService, _streamSubscriber,
-                statusStripVm, historicalChartLoader);
+                statusStripVm, historicalChartLoader, dispatcher);
             desktop.MainWindow = new MainWindow { DataContext = _mainWindowVm };
 
             // Fire-and-forget — both loops run indefinitely until shutdown

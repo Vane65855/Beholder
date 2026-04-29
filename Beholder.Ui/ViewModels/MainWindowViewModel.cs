@@ -1,6 +1,5 @@
 using System;
 using System.Threading;
-using Avalonia.Threading;
 using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -9,6 +8,7 @@ namespace Beholder.Ui.ViewModels;
 
 internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
     private readonly IDaemonClient _daemonClient;
+    private readonly IDispatcher _dispatcher;
     private readonly TrafficTabViewModel _trafficTab;
     private readonly FirewallTabViewModel _firewallTab;
     private readonly AlertsTabViewModel _alertsTab = new();
@@ -62,15 +62,18 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
         ProcessStateService processStateService,
         DaemonStreamSubscriber streamSubscriber,
         StatusStripViewModel statusStripVm,
-        HistoricalChartLoader historicalChartLoader) {
+        HistoricalChartLoader historicalChartLoader,
+        IDispatcher dispatcher) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
         ArgumentNullException.ThrowIfNull(statusStripVm);
         ArgumentNullException.ThrowIfNull(historicalChartLoader);
+        ArgumentNullException.ThrowIfNull(dispatcher);
         _daemonClient = daemonClient;
-        _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader);
-        _firewallTab = new FirewallTabViewModel(daemonClient, processStateService, streamSubscriber);
+        _dispatcher = dispatcher;
+        _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader, dispatcher);
+        _firewallTab = new FirewallTabViewModel(daemonClient, processStateService, streamSubscriber, dispatcher);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         _daemonClient.StateChanged += OnDaemonStateChanged;
@@ -87,7 +90,7 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
     }
 
     private void OnDaemonStateChanged(DaemonStatusInfo status) {
-        Dispatcher.UIThread.Post(() => {
+        _dispatcher.Post(() => {
             DaemonStatusLabel = status.Label;
             IsDaemonDisconnected = status.State is ConnectionState.Disconnected;
             IsDaemonConnecting = status.State is ConnectionState.Connecting or ConnectionState.Reconnecting;

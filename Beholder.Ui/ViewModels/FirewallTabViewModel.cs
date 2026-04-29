@@ -5,7 +5,6 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia.Threading;
 using Beholder.Protocol.Local;
 using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -31,6 +30,7 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     private readonly IDaemonClient _daemonClient;
     private readonly ProcessStateService _processStateService;
     private readonly DaemonStreamSubscriber _streamSubscriber;
+    private readonly IDispatcher _dispatcher;
     private readonly Func<string, bool> _fileExistsCheck;
     private readonly Dictionary<string, FirewallRuleRow> _rowsByPath = new(StringComparer.Ordinal);
 
@@ -139,18 +139,21 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         IDaemonClient daemonClient,
         ProcessStateService processStateService,
         DaemonStreamSubscriber streamSubscriber,
+        IDispatcher dispatcher,
         Func<string, bool>? fileExistsCheck = null
     ) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
+        ArgumentNullException.ThrowIfNull(dispatcher);
         _daemonClient = daemonClient;
         _processStateService = processStateService;
         _streamSubscriber = streamSubscriber;
+        _dispatcher = dispatcher;
         // Optional injection so tests can simulate uninstalled apps deterministically
         // without touching the real filesystem.
         _fileExistsCheck = fileExistsCheck ?? File.Exists;
-        ActivityVm = new FirewallActivityViewModel(daemonClient, streamSubscriber);
+        ActivityVm = new FirewallActivityViewModel(daemonClient, streamSubscriber, dispatcher);
 
         _processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
         _streamSubscriber.RuleChangeReceived += OnRuleChange;
@@ -305,26 +308,15 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
 
     private void OnProcessStatesUpdated(IReadOnlyDictionary<string, ProcessState> states) {
         // The event fires on the DaemonStreamSubscriber's background thread;
-        // hop to the UI thread before mutating any observable state. Test code
-        // calls ApplyProcessStates directly to bypass the dispatcher.
-        Dispatcher.UIThread.Post(() => ApplyProcessStates(states));
+        // marshal to the UI thread before mutating any observable state.
+        _dispatcher.Post(() => ApplyProcessStates(states));
     }
 
     /// <summary>
-    /// Body of <see cref="OnProcessStatesUpdated"/>, extracted so tests can
-    /// drive it synchronously without an Avalonia headless dispatcher fixture.
-    /// Internal (not private) so the test project (granted via
-    /// <c>InternalsVisibleTo</c>) can call it directly. UI-thread expected.
+    /// Body of <see cref="OnProcessStatesUpdated"/>, extracted so the
+    /// dispatcher hop is a one-liner. UI-thread expected.
     /// </summary>
-    /// <remarks>
-    /// Placed adjacent to the calling event handler for cohesion (per
-    /// <c>CODING_STANDARDS.md</c> §File Organization tie-breaker for
-    /// "logical cohesion within group"), rather than grouped with other
-    /// internal members at the top of the file. This is the only internal
-    /// method on the VM, so pulling it up there would create a one-method
-    /// island far from its caller.
-    /// </remarks>
-    internal void ApplyProcessStates(IReadOnlyDictionary<string, ProcessState> states) {
+    private void ApplyProcessStates(IReadOnlyDictionary<string, ProcessState> states) {
         // Mark every row inactive first, then flip the ones we see live.
         // This handles processes disappearing from the live snapshot
         // (process exited) as well as new ones appearing.
@@ -351,7 +343,7 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     }
 
     private void OnRuleChange(FirewallRuleChange change) {
-        Dispatcher.UIThread.Post(() => {
+        _dispatcher.Post(() => {
             if (IsExcludedProcess(change.Rule.ProcessPath)) return;
             switch (change.Change) {
                 case FirewallRuleChange.Types.ChangeKind.Created:
@@ -398,7 +390,7 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     }
 
     private void OnDaemonStateChanged(DaemonStatusInfo status) {
-        Dispatcher.UIThread.Post(() => {
+        _dispatcher.Post(() => {
             if (status.State is ConnectionState.Disconnected or ConnectionState.Reconnecting) {
                 HasError = true;
                 ErrorMessage = "Daemon disconnected — showing last known state.";

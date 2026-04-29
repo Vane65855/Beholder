@@ -1,4 +1,6 @@
+using System.Reflection;
 using Beholder.Protocol.Local;
+using Beholder.Tests.TestDoubles;
 using Beholder.Ui.Services;
 using Beholder.Ui.ViewModels;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -20,8 +22,28 @@ public class StatusStripViewModelTests {
             TimeProvider.System,
             NullLogger<DaemonStreamSubscriber>.Instance);
         var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
-        var vm = new StatusStripViewModel(service);
+        // SyncDispatcher runs IDispatcher.Post actions immediately on the
+        // calling thread — production handlers run synchronously under test.
+        var vm = new StatusStripViewModel(service, new SyncDispatcher());
         return (vm, service);
+    }
+
+    /// <summary>
+    /// Raises <c>ProcessStatesUpdated</c> on <paramref name="service"/> with
+    /// <paramref name="states"/> — drives the same event path the daemon's
+    /// live counter batch would, so the VM's
+    /// <c>OnProcessStatesUpdated → IDispatcher.Post → UpdateFromStates</c>
+    /// chain runs identically to production. With <see cref="SyncDispatcher"/>
+    /// injected, the chain runs synchronously on the calling thread.
+    /// Reflection because <c>ProcessStatesUpdated</c> is a <c>public event</c>
+    /// — only the owning class can <c>Invoke</c> the backing delegate.
+    /// </summary>
+    private static void RaiseProcessStatesUpdated(
+        ProcessStateService service, IReadOnlyDictionary<string, ProcessState> states) {
+        var eventField = typeof(ProcessStateService)
+            .GetField("ProcessStatesUpdated", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var del = (Action<IReadOnlyDictionary<string, ProcessState>>?)eventField.GetValue(service);
+        del?.Invoke(states);
     }
 
     private static Dictionary<string, ProcessState> MakeStates(
@@ -44,16 +66,16 @@ public class StatusStripViewModelTests {
     [Fact]
     public void Ctor_NullService_Throws() =>
         Assert.Throws<ArgumentNullException>("processStateService",
-            () => new StatusStripViewModel(null!));
+            () => new StatusStripViewModel(null!, new SyncDispatcher()));
 
     [Fact]
     public void UpdateFromStates_AggregatesAcrossProcesses_UpdatesTotals() {
-        var (vm, _) = CreateViewModelWithService();
+        var (vm, service) = CreateViewModelWithService();
         var states = MakeStates(
             ("fake/firefox.exe", "firefox.exe", 1000, 2000, 100, 200),
             ("fake/chrome.exe", "chrome.exe", 3000, 4000, 300, 400));
 
-        vm.UpdateFromStates(states);
+        RaiseProcessStatesUpdated(service,states);
 
         Assert.Equal("5.9 KB", vm.OutboundTotalLabel);
         Assert.Equal("3.9 KB", vm.InboundTotalLabel);
@@ -62,10 +84,10 @@ public class StatusStripViewModelTests {
 
     [Fact]
     public void UpdateFromStates_UpdatesRateLabels() {
-        var (vm, _) = CreateViewModelWithService();
+        var (vm, service) = CreateViewModelWithService();
         var states = MakeStates(("fake/test.exe", "test.exe", 0, 0, 2048, 1024));
 
-        vm.UpdateFromStates(states);
+        RaiseProcessStatesUpdated(service,states);
 
         Assert.Equal("1.0 KB/s", vm.OutboundRateLabel);
         Assert.Equal("2.0 KB/s", vm.InboundRateLabel);
@@ -73,20 +95,20 @@ public class StatusStripViewModelTests {
 
     [Fact]
     public void UpdateFromStates_IdleState_HasTrafficIsFalse() {
-        var (vm, _) = CreateViewModelWithService();
+        var (vm, service) = CreateViewModelWithService();
         var states = MakeStates(("fake/test.exe", "test.exe", 0, 0, 0, 0));
 
-        vm.UpdateFromStates(states);
+        RaiseProcessStatesUpdated(service,states);
 
         Assert.False(vm.HasTraffic);
     }
 
     [Fact]
     public void UpdateFromStates_OutboundHeavy_OutboundRatioHigher() {
-        var (vm, _) = CreateViewModelWithService();
+        var (vm, service) = CreateViewModelWithService();
         var states = MakeStates(("fake/test.exe", "test.exe", 0, 0, 100, 900));
 
-        vm.UpdateFromStates(states);
+        RaiseProcessStatesUpdated(service,states);
 
         Assert.True(vm.HasTraffic);
         Assert.True(vm.OutboundRatio > vm.InboundRatio);
@@ -94,10 +116,10 @@ public class StatusStripViewModelTests {
 
     [Fact]
     public void UpdateFromStates_InboundHeavy_InboundRatioHigher() {
-        var (vm, _) = CreateViewModelWithService();
+        var (vm, service) = CreateViewModelWithService();
         var states = MakeStates(("fake/test.exe", "test.exe", 0, 0, 900, 100));
 
-        vm.UpdateFromStates(states);
+        RaiseProcessStatesUpdated(service,states);
 
         Assert.True(vm.HasTraffic);
         Assert.True(vm.InboundRatio > vm.OutboundRatio);
@@ -105,10 +127,10 @@ public class StatusStripViewModelTests {
 
     [Fact]
     public void UpdateFromStates_Smoothing_DoesNotJumpInstantly() {
-        var (vm, _) = CreateViewModelWithService();
+        var (vm, service) = CreateViewModelWithService();
         var states = MakeStates(("fake/test.exe", "test.exe", 0, 0, 0, 1000));
 
-        vm.UpdateFromStates(states);
+        RaiseProcessStatesUpdated(service,states);
 
         // Smoothing starts from 0.5 and LERPs toward 1.0 with factor 0.3,
         // so after one tick: 0.5 * 0.7 + 1.0 * 0.3 = 0.65
@@ -117,19 +139,19 @@ public class StatusStripViewModelTests {
 
     [Fact]
     public void UpdateFromStates_SparseBatches_RetainsTotalsFromPriorProcesses() {
-        var (vm, _) = CreateViewModelWithService();
+        var (vm, service) = CreateViewModelWithService();
 
         // First update: both processes present
         var states1 = MakeStates(
             ("fake/chrome.exe", "chrome.exe", 1000, 500, 100, 50),
             ("fake/firefox.exe", "firefox.exe", 2000, 1000, 200, 100));
-        vm.UpdateFromStates(states1);
+        RaiseProcessStatesUpdated(service,states1);
 
         // Second update: only firefox reports, but chrome is still in state
         var states2 = MakeStates(
             ("fake/chrome.exe", "chrome.exe", 1000, 500, 0, 0),
             ("fake/firefox.exe", "firefox.exe", 2500, 1200, 500, 200));
-        vm.UpdateFromStates(states2);
+        RaiseProcessStatesUpdated(service,states2);
 
         Assert.Equal("3.4 KB", vm.InboundTotalLabel);
         Assert.Equal("1.7 KB", vm.OutboundTotalLabel);
@@ -137,13 +159,13 @@ public class StatusStripViewModelTests {
 
     [Fact]
     public void UpdateFromStates_ProcessUpdate_UpsertsNotAccumulates() {
-        var (vm, _) = CreateViewModelWithService();
+        var (vm, service) = CreateViewModelWithService();
 
         var states1 = MakeStates(("fake/chrome.exe", "chrome.exe", 1000, 500, 0, 0));
-        vm.UpdateFromStates(states1);
+        RaiseProcessStatesUpdated(service,states1);
 
         var states2 = MakeStates(("fake/chrome.exe", "chrome.exe", 2000, 1000, 0, 0));
-        vm.UpdateFromStates(states2);
+        RaiseProcessStatesUpdated(service,states2);
 
         Assert.Equal("2.0 KB", vm.InboundTotalLabel);
         Assert.Equal("1000 B", vm.OutboundTotalLabel);
@@ -151,14 +173,14 @@ public class StatusStripViewModelTests {
 
     [Fact]
     public void UpdateFromStates_DaemonReset_ShowsNewValues() {
-        var (vm, _) = CreateViewModelWithService();
+        var (vm, service) = CreateViewModelWithService();
 
         var states1 = MakeStates(("fake/chrome.exe", "chrome.exe", 50_000, 25_000, 0, 0));
-        vm.UpdateFromStates(states1);
+        RaiseProcessStatesUpdated(service,states1);
 
         // After daemon restart, totals drop
         var states2 = MakeStates(("fake/chrome.exe", "chrome.exe", 100, 50, 0, 0));
-        vm.UpdateFromStates(states2);
+        RaiseProcessStatesUpdated(service,states2);
 
         Assert.Equal("100 B", vm.InboundTotalLabel);
         Assert.Equal("50 B", vm.OutboundTotalLabel);
@@ -166,11 +188,11 @@ public class StatusStripViewModelTests {
 
     [Fact]
     public void UpdateFromStates_RatesReflectCurrentBatchOnly() {
-        var (vm, _) = CreateViewModelWithService();
+        var (vm, service) = CreateViewModelWithService();
 
         // Only one process with specific deltas
         var states = MakeStates(("fake/firefox.exe", "firefox.exe", 0, 0, 100, 50));
-        vm.UpdateFromStates(states);
+        RaiseProcessStatesUpdated(service,states);
 
         Assert.Equal("100 B/s", vm.InboundRateLabel);
         Assert.Equal("50 B/s", vm.OutboundRateLabel);
@@ -178,13 +200,13 @@ public class StatusStripViewModelTests {
 
     [Fact]
     public void UpdateFromStates_EmptyStates_RetainsZeros() {
-        var (vm, _) = CreateViewModelWithService();
+        var (vm, service) = CreateViewModelWithService();
 
         var states1 = MakeStates(("fake/chrome.exe", "chrome.exe", 1000, 500, 100, 50));
-        vm.UpdateFromStates(states1);
+        RaiseProcessStatesUpdated(service,states1);
 
         var emptyStates = new Dictionary<string, ProcessState>();
-        vm.UpdateFromStates(emptyStates);
+        RaiseProcessStatesUpdated(service,emptyStates);
 
         // Empty states = no processes = all zeros
         Assert.Equal("0 B", vm.InboundTotalLabel);
@@ -198,7 +220,7 @@ public class StatusStripViewModelTests {
         // Smoke: Dispose unsubscribes from the service's ProcessStatesUpdated
         // event. The symmetry is verified by code review; this test guards that
         // the Dispose path is at least reachable without throwing.
-        var (vm, _) = CreateViewModelWithService();
+        var (vm, service) = CreateViewModelWithService();
         var exception = Record.Exception(() => vm.Dispose());
         Assert.Null(exception);
     }

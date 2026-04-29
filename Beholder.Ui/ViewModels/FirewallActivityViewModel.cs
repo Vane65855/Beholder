@@ -4,7 +4,6 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia.Threading;
 using Beholder.Protocol.Local;
 using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -36,6 +35,7 @@ internal sealed partial class FirewallActivityViewModel : ViewModelBase, IDispos
 
     private readonly IDaemonClient _daemonClient;
     private readonly DaemonStreamSubscriber _streamSubscriber;
+    private readonly IDispatcher _dispatcher;
     private readonly HashSet<long> _seenSeqs = new();
 
     private CancellationTokenSource? _activationCts;
@@ -57,12 +57,15 @@ internal sealed partial class FirewallActivityViewModel : ViewModelBase, IDispos
 
     public FirewallActivityViewModel(
         IDaemonClient daemonClient,
-        DaemonStreamSubscriber streamSubscriber
+        DaemonStreamSubscriber streamSubscriber,
+        IDispatcher dispatcher
     ) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
+        ArgumentNullException.ThrowIfNull(dispatcher);
         _daemonClient = daemonClient;
         _streamSubscriber = streamSubscriber;
+        _dispatcher = dispatcher;
         _streamSubscriber.RuleChangeReceived += OnRuleChange;
         Events.CollectionChanged += (_, _) => {
             OnPropertyChanged(nameof(HasEvents));
@@ -114,7 +117,7 @@ internal sealed partial class FirewallActivityViewModel : ViewModelBase, IDispos
     /// the synthetic rows with their real chain entries.
     /// </summary>
     private void OnRuleChange(FirewallRuleChange change) {
-        Dispatcher.UIThread.Post(() => {
+        _dispatcher.Post(() => {
             var kind = change.Change switch {
                 FirewallRuleChange.Types.ChangeKind.Created => FirewallActivityKind.RuleCreated,
                 FirewallRuleChange.Types.ChangeKind.Changed => FirewallActivityKind.RuleChanged,
