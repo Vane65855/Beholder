@@ -316,6 +316,14 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     /// Internal (not private) so the test project (granted via
     /// <c>InternalsVisibleTo</c>) can call it directly. UI-thread expected.
     /// </summary>
+    /// <remarks>
+    /// Placed adjacent to the calling event handler for cohesion (per
+    /// <c>CODING_STANDARDS.md</c> §File Organization tie-breaker for
+    /// "logical cohesion within group"), rather than grouped with other
+    /// internal members at the top of the file. This is the only internal
+    /// method on the VM, so pulling it up there would create a one-method
+    /// island far from its caller.
+    /// </remarks>
     internal void ApplyProcessStates(IReadOnlyDictionary<string, ProcessState> states) {
         // Mark every row inactive first, then flip the ones we see live.
         // This handles processes disappearing from the live snapshot
@@ -333,9 +341,9 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
             // missing app got reinstalled and re-launched mid-session.
             row.ExecutableExists = true;
             row.ActiveConnectionCount = state.ActiveConnectionCount;
-            // RecentBytesTotal: prefer live deltas over the historical
-            // summary value because the live values reflect very-recent
-            // activity.
+            // Overwrite the historical summary value with the live snapshot's
+            // running totals — the historical row is by definition stale by
+            // the time we see this path active in a tick.
             row.RecentBytesTotal = state.TotalBytesIn + state.TotalBytesOut;
         }
         Reclassify();
