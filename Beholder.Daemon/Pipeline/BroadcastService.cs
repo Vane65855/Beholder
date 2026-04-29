@@ -129,6 +129,28 @@ internal sealed class BroadcastService : IHostedService, IDisposable {
         }
     }
 
+    /// <summary>
+    /// Broadcasts <paramref name="alert"/> as a <c>DaemonEvent.Alert</c>
+    /// (an <c>AlertEvent</c> wrapper) to every subscribed UI client. Phase
+    /// 7's detectors (<c>NewProcessDetector</c>, <c>BinaryHashMonitor</c>,
+    /// <c>ChainIntegrityMonitor</c>) call this after appending the alert's
+    /// chain row via <see cref="IEventStore.AppendAsync"/>. The chain row
+    /// is the durable record; the broadcast is best-effort live UI update.
+    /// </summary>
+    /// <remarks>
+    /// Method is wired but currently has no caller — Phase 7 supplies the
+    /// caller. Adding the API in Phase 6.6 lets that later phase focus on
+    /// detector logic without also touching broadcast wiring.
+    /// </remarks>
+    public void BroadcastAlert(Alert alert) {
+        ArgumentNullException.ThrowIfNull(alert);
+        var alertEvent = new Local.AlertEvent { Alert = alert.ToProto() };
+        var daemonEvent = new Local.DaemonEvent { Alert = alertEvent };
+        foreach (var (_, channel) in _subscribers) {
+            channel.Writer.TryWrite(daemonEvent);
+        }
+    }
+
     private void OnSnapshotBatch(IReadOnlyList<CounterSnapshot> snapshots) {
         var batch = new Local.CounterBatch {
             TickTimestampUnixNs = _timeProvider.GetUtcNow().ToUnixTimeNanoseconds(),

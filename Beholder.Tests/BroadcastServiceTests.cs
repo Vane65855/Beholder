@@ -177,6 +177,79 @@ public class BroadcastServiceTests {
         broadcaster.Dispose();
     }
 
+    [Fact]
+    public async Task BroadcastAlert_FansEventToAllSubscribers() {
+        // Phase 7's detectors (out of scope here) will call BroadcastAlert
+        // after appending an alert's chain row. This test pins the fan-out
+        // shape so Phase 7's wiring lands without surprises.
+        var ct = TestContext.Current.CancellationToken;
+        var source = new FakeSnapshotBatchSource();
+        var broadcaster = new BroadcastService(
+            source,
+            new FakeTimeProvider(FixedTimestamp),
+            NullLogger<BroadcastService>.Instance);
+        await broadcaster.StartAsync(ct);
+
+        await using var e1 = broadcaster.SubscribeAsync(TestContext.Current.CancellationToken).GetAsyncEnumerator(TestContext.Current.CancellationToken);
+        await using var e2 = broadcaster.SubscribeAsync(TestContext.Current.CancellationToken).GetAsyncEnumerator(TestContext.Current.CancellationToken);
+        var m1 = e1.MoveNextAsync().AsTask();
+        var m2 = e2.MoveNextAsync().AsTask();
+        await WaitForAsync(() => broadcaster.ActiveSubscriberCount == 2, "two subscribers registered", ct);
+
+        var alert = new Alert(
+            seq: 42,
+            kind: AlertKind.NewProcess,
+            processPath: @"C:\bin\firefox.exe",
+            summary: "firefox.exe first observed making a network connection",
+            timestamp: FixedTimestamp,
+            firstViewedAt: null);
+        broadcaster.BroadcastAlert(alert);
+
+        Assert.True(await m1.WaitAsync(WaitTimeout, ct));
+        Assert.True(await m2.WaitAsync(WaitTimeout, ct));
+        Assert.Equal(Local.DaemonEvent.PayloadOneofCase.Alert, e1.Current.PayloadCase);
+        Assert.Equal(Local.DaemonEvent.PayloadOneofCase.Alert, e2.Current.PayloadCase);
+        // AlertEvent wraps a single Local.Alert; both subscribers see the
+        // same seq, kind, and process path round-tripped through ToProto.
+        Assert.Equal(42, e1.Current.Alert.Alert.Seq);
+        Assert.Equal(Local.AlertKind.NewProcess, e1.Current.Alert.Alert.Kind);
+        Assert.Equal(@"C:\bin\firefox.exe", e1.Current.Alert.Alert.ProcessPath);
+        Assert.Equal(42, e2.Current.Alert.Alert.Seq);
+
+        await broadcaster.StopAsync(ct);
+        broadcaster.Dispose();
+    }
+
+    [Fact]
+    public async Task BroadcastAlert_NoSubscribers_DoesNotThrow() {
+        // Edge case mirroring BroadcastRuleChange semantics: calling the
+        // broadcast method before any UI client has subscribed (or after
+        // every subscriber has disconnected) must be a silent no-op.
+        var ct = TestContext.Current.CancellationToken;
+        var source = new FakeSnapshotBatchSource();
+        var broadcaster = new BroadcastService(
+            source,
+            new FakeTimeProvider(FixedTimestamp),
+            NullLogger<BroadcastService>.Instance);
+        await broadcaster.StartAsync(ct);
+
+        var alert = new Alert(
+            seq: 1,
+            kind: AlertKind.ChainError,
+            processPath: "",
+            summary: "Chain verification failed at row 47",
+            timestamp: FixedTimestamp,
+            firstViewedAt: null);
+
+        // Should not throw, should not block.
+        var exception = Record.Exception(() => broadcaster.BroadcastAlert(alert));
+        Assert.Null(exception);
+        Assert.Equal(0, broadcaster.ActiveSubscriberCount);
+
+        await broadcaster.StopAsync(ct);
+        broadcaster.Dispose();
+    }
+
     private static IReadOnlyList<CounterSnapshot> BuildBatch(string processName) {
         return new[] {
             new CounterSnapshot(
