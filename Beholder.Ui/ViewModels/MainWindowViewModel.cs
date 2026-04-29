@@ -6,12 +6,12 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Beholder.Ui.ViewModels;
 
-internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
+internal partial class MainWindowViewModel : ViewModelBase, INavigationService, IDisposable {
     private readonly IDaemonClient _daemonClient;
     private readonly IDispatcher _dispatcher;
     private readonly TrafficTabViewModel _trafficTab;
     private readonly FirewallTabViewModel _firewallTab;
-    private readonly AlertsTabViewModel _alertsTab = new();
+    private readonly AlertsTabViewModel _alertsTab;
     private readonly ScannerTabViewModel _scannerTab = new();
     private readonly SettingsTabViewModel _settingsTab = new();
 
@@ -74,9 +74,28 @@ internal partial class MainWindowViewModel : ViewModelBase, IDisposable {
         _dispatcher = dispatcher;
         _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader, dispatcher);
         _firewallTab = new FirewallTabViewModel(daemonClient, processStateService, streamSubscriber, dispatcher);
+        // Pass NavigateToFirewallRule as the AlertsTabViewModel's deep-link
+        // delegate so its ADD RULE button can switch tabs + highlight the
+        // matching rule row (Phase 6.7).
+        _alertsTab = new AlertsTabViewModel(daemonClient, streamSubscriber, dispatcher, NavigateToFirewallRule);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         _daemonClient.StateChanged += OnDaemonStateChanged;
+    }
+
+    /// <summary>
+    /// Switch the active tab to Firewall and surface the rule row matching
+    /// <paramref name="processPath"/>. Implementation of
+    /// <see cref="INavigationService"/>; passed by the constructor as a
+    /// delegate to <see cref="AlertsTabViewModel"/> so the alerts tab can
+    /// deep-link without holding a back-reference to <c>this</c>.
+    /// </summary>
+    public void NavigateToFirewallRule(string processPath) {
+        ActiveTab = TabKind.Firewall;
+        // Ensure the Firewall tab has been activated (its rule list populated)
+        // before we try to highlight a row. ActivateAsync is idempotent.
+        _ = _firewallTab.ActivateAsync(CancellationToken.None);
+        _firewallTab.HighlightRow(processPath);
     }
 
     public void Dispose() {
