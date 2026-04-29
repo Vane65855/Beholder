@@ -258,8 +258,6 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
         Assert.Equal(Direction.Outbound, removed.Direction);
     }
 
-    // ─── Master enforcement-toggle gating ────────────────────────────────
-
     [Fact]
     public async Task ApplyFirewallRule_EnforcementOff_SkipsController() {
         // With master toggle OFF the daemon must not push the rule to the

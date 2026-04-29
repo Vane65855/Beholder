@@ -223,8 +223,6 @@ public sealed class RemoveFirewallRuleRpcTests : IDisposable {
         Assert.False(second.Removed);
     }
 
-    // ─── Master enforcement-toggle gating ────────────────────────────────
-
     [Fact]
     public async Task RemoveFirewallRule_EnforcementOff_SkipsController() {
         // Seed an existing rule so the handler hits the main remove path
