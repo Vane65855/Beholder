@@ -43,6 +43,16 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
     private readonly Action<string>? _navigateToFirewallRule;
     private readonly HashSet<long> _seenSeqs = new();
 
+    /// <summary>
+    /// Process paths with an active Outbound + Block firewall rule. Seeded
+    /// from <c>GetSnapshotResponse.FirewallRules</c> at activation and
+    /// updated from the daemon's live <c>RuleChange</c> broadcast. Drives
+    /// the detail-pane BLOCK / UNBLOCK toggle on every <see cref="AlertRow"/>
+    /// whose <c>ProcessPath</c> is a member.
+    /// </summary>
+    private readonly HashSet<string> _outboundBlockedPaths =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private CancellationTokenSource? _activationCts;
     private bool _activated;
 
@@ -94,6 +104,7 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
         _navigateToFirewallRule = navigateToFirewallRule;
 
         _streamSubscriber.AlertReceived += OnAlertReceived;
+        _streamSubscriber.RuleChangeReceived += OnRuleChange;
         Alerts.CollectionChanged += (_, _) => {
             OnPropertyChanged(nameof(HasAlerts));
             OnPropertyChanged(nameof(ShowEmptyState));
@@ -104,6 +115,7 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
 
     public void Dispose() {
         _streamSubscriber.AlertReceived -= OnAlertReceived;
+        _streamSubscriber.RuleChangeReceived -= OnRuleChange;
         _activationCts?.Cancel();
         _activationCts?.Dispose();
     }
@@ -123,8 +135,18 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
         ErrorMessage = string.Empty;
         try {
             var snapshot = await _daemonClient.GetSnapshotAsync(_activationCts.Token);
+            // Seed the outbound-block cache from the snapshot's rule list
+            // BEFORE building rows so each AlertRow lands with the right
+            // IsOutboundBlocked value on first construction.
+            foreach (var rule in snapshot.FirewallRules) {
+                if (rule.Direction == Direction.Outbound && rule.Action == FirewallAction.Block) {
+                    _outboundBlockedPaths.Add(rule.ProcessPath);
+                }
+            }
             foreach (var alert in snapshot.RecentAlerts) {
-                AppendUnique(AlertRow.FromProto(alert));
+                var row = AlertRow.FromProto(alert);
+                row.IsOutboundBlocked = _outboundBlockedPaths.Contains(row.ProcessPath);
+                AppendUnique(row);
             }
             // Auto-select the newest alert so the detail pane has content
             // on first paint. Skipped if we landed on the empty state.
@@ -154,12 +176,39 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
         _dispatcher.Post(() => {
             if (ev.Alert is null) return;
             var row = AlertRow.FromProto(ev.Alert);
+            // Apply current outbound-block state so a brand-new alert for an
+            // already-blocked process renders with the right button label.
+            row.IsOutboundBlocked = _outboundBlockedPaths.Contains(row.ProcessPath);
             if (!AppendUnique(row, atFront: true)) return;
             // Auto-select the new alert if the user has nothing currently
             // selected (e.g., they just opened the tab to an empty state).
             // Otherwise leave selection alone — yanking it under the user's
             // focus would be hostile.
             SelectedAlert ??= row;
+        });
+    }
+
+    /// <summary>
+    /// Live rule update: keep <see cref="_outboundBlockedPaths"/> in sync
+    /// with the daemon and push the new state into every visible
+    /// <see cref="AlertRow"/> that shares the rule's process path. Mirrors
+    /// <c>FirewallTabViewModel.OnRuleChange</c> — same dispatcher hop, same
+    /// change-kind switch, scoped to just the outbound flag the Alerts tab
+    /// surfaces.
+    /// </summary>
+    private void OnRuleChange(FirewallRuleChange change) {
+        _dispatcher.Post(() => {
+            if (change.Rule is null) return;
+            if (change.Rule.Direction != Direction.Outbound) return;
+            var path = change.Rule.ProcessPath;
+            var nowBlocked = change.Change != FirewallRuleChange.Types.ChangeKind.Removed
+                          && change.Rule.Action == FirewallAction.Block;
+            if (nowBlocked) _outboundBlockedPaths.Add(path);
+            else _outboundBlockedPaths.Remove(path);
+            foreach (var row in Alerts) {
+                if (string.Equals(row.ProcessPath, path, StringComparison.OrdinalIgnoreCase))
+                    row.IsOutboundBlocked = nowBlocked;
+            }
         });
     }
 
@@ -212,7 +261,10 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
     /// <summary>
     /// Block the selected alert's process outbound. Failure surfaces an
     /// error banner; success is observable via the Firewall tab so this
-    /// surface doesn't need its own confirmation.
+    /// surface doesn't need its own confirmation. <see cref="AlertRow.IsOutboundBlocked"/>
+    /// flips through <see cref="OnRuleChange"/> when the daemon broadcasts
+    /// the new rule — single-writer keeps state consistent if a parallel
+    /// toggle from the Firewall tab races us.
     /// </summary>
     [RelayCommand]
     private async Task BlockProcessOutAsync(AlertRow? row) {
@@ -227,6 +279,27 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
         } catch (Exception ex) {
             HasError = true;
             ErrorMessage = $"Failed to block {row.DisplayName}: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Remove the Outbound + Block rule for the selected alert's process.
+    /// Inverse of <see cref="BlockProcessOutAsync"/> — clicking the button
+    /// when the toggle is in its "blocked" state surfaces this command.
+    /// State flip is driven by the daemon's <c>RuleChange</c> broadcast
+    /// (see <see cref="OnRuleChange"/>), not local optimism.
+    /// </summary>
+    [RelayCommand]
+    private async Task UnblockProcessOutAsync(AlertRow? row) {
+        if (row is null || string.IsNullOrEmpty(row.ProcessPath)) return;
+        try {
+            await _daemonClient.RemoveFirewallRuleAsync(new RemoveFirewallRuleRequest {
+                ProcessPath = row.ProcessPath,
+                Direction = Direction.Outbound,
+            }, CancellationToken.None);
+        } catch (Exception ex) {
+            HasError = true;
+            ErrorMessage = $"Failed to unblock {row.DisplayName}: {ex.Message}";
         }
     }
 
