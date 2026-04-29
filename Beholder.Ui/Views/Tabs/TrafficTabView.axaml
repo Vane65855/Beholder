@@ -30,7 +30,6 @@
 
     <Grid ColumnDefinitions="280,*">
 
-        <!-- ── Left: Process List Panel ──────────────────────────────── -->
         <Border Grid.Column="0"
                 Background="{DynamicResource BackgroundPanel}"
                 BorderBrush="{DynamicResource BorderSubtle}"
@@ -141,7 +140,6 @@
             </DockPanel>
         </Border>
 
-        <!-- ── Right: Chart Area ─────────────────────────────────────── -->
         <DockPanel Grid.Column="1" Margin="0">
 
             <!-- Top bar: chart title + range selector + view switcher -->

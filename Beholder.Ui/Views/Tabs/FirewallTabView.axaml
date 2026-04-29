@@ -82,12 +82,11 @@
 
     <DockPanel>
 
-        <!-- ── Activity strip (Phase 6.5) — docked at the bottom so it
-             survives resize without overlapping the rule table.        -->
+        <!-- Activity strip (Phase 6.5) — docked at the bottom so it
+             survives resize without overlapping the rule table. -->
         <tabs:FirewallActivityStrip DockPanel.Dock="Bottom"
                                     DataContext="{Binding ActivityVm}" />
 
-        <!-- ── Header bar ────────────────────────────────────────────── -->
         <Border DockPanel.Dock="Top"
                 Background="{DynamicResource BackgroundPanel}"
                 BorderBrush="{DynamicResource BorderSubtle}"
@@ -173,7 +172,6 @@
             </Grid>
         </Border>
 
-        <!-- ── Enforcement-disabled banner ──────────────────────────── -->
         <Border DockPanel.Dock="Top"
                 IsVisible="{Binding !IsFirewallEnabled}"
                 Background="{DynamicResource BackgroundElevated}"
@@ -185,7 +183,6 @@
                        FontSize="{DynamicResource FontSizeBody}" />
         </Border>
 
-        <!-- ── Error banner ─────────────────────────────────────────── -->
         <Border DockPanel.Dock="Top"
                 IsVisible="{Binding HasError}"
                 Background="{DynamicResource BackgroundElevated}"
@@ -197,10 +194,9 @@
                        FontSize="{DynamicResource FontSizeBody}" />
         </Border>
 
-        <!-- ── Transient copy banner ────────────────────────────────────
-             Shown for ~2 seconds after a row's parent directory is copied
-             to the clipboard via double-tap. Auto-clears via
-             FirewallTabViewModel.NotifyPathCopied's CTS-based timer. -->
+        <!-- Transient copy banner. Shown for ~2 seconds after a row's parent
+             directory is copied to the clipboard via double-tap. Auto-clears
+             via FirewallTabViewModel.NotifyPathCopied's CTS-based timer. -->
         <Border DockPanel.Dock="Top"
                 IsVisible="{Binding HasTransientMessage}"
                 Background="{DynamicResource BackgroundElevated}"
@@ -212,15 +208,14 @@
                        FontSize="{DynamicResource FontSizeBody}" />
         </Border>
 
-        <!-- ── Column header (sticky) ───────────────────────────────────
-             Docked Top so the legend stays visible while the rule list
-             scrolls. Column widths follow the pattern (PROCESS=*) +
-             (IN=84 = pill 76 + 8 right-margin) + (OUT=88 = pill 76 + 12
-             right-margin) + (HOSTS=140) + (RECENT=90) + (SOURCE=80).
-             Header text margins mirror the pill margins below so labels
-             centre cleanly above their column. The column-pill width
-             pairing is documented in FirewallActionPill.axaml — keep the
-             two in sync if either changes.
+        <!-- Column header (sticky). Docked Top so the legend stays visible
+             while the rule list scrolls. Column widths follow the pattern
+             (PROCESS=*) + (IN=84 = pill 76 + 8 right-margin) + (OUT=88 =
+             pill 76 + 12 right-margin) + (HOSTS=140) + (RECENT=90) +
+             (SOURCE=80). Header text margins mirror the pill margins below
+             so labels centre cleanly above their column. The column-pill
+             width pairing is documented in FirewallActionPill.axaml — keep
+             the two in sync if either changes.
 
              Trade-off: when the rule list overflows, the ScrollViewer
              below shows its ~16px scrollbar, so rule rows shift left of
@@ -245,7 +240,6 @@
             </Grid>
         </Border>
 
-        <!-- ── Loading overlay ──────────────────────────────────────── -->
         <Panel IsVisible="{Binding IsLoading}">
             <TextBlock Text="Loading firewall rules..."
                        Foreground="{DynamicResource TextMuted}"
@@ -254,7 +248,6 @@
                        VerticalAlignment="Center" />
         </Panel>
 
-        <!-- ── Empty state ──────────────────────────────────────────── -->
         <StackPanel IsVisible="{Binding !HasRows}"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
@@ -272,7 +265,6 @@
                        TextAlignment="Center" />
         </StackPanel>
 
-        <!-- ── Rule table ───────────────────────────────────────────── -->
         <ScrollViewer IsVisible="{Binding HasRows}"
                       HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto">

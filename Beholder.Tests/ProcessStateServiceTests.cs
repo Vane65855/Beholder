@@ -259,8 +259,6 @@ public class ProcessStateServiceTests {
         Assert.Equal(2, service.TrackedProcessCount);
     }
 
-    // ─── Polish-pass test (B1 from luminous-wishing-map.md) ───
-
     [Fact]
     public void OnCounterBatch_PopulatesActiveConnectionCount() {
         // The Firewall tab's HOSTS column reads ActiveConnectionCount as a
