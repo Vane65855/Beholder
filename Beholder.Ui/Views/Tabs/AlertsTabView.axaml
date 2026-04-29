@@ -132,34 +132,46 @@
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="vm:AlertRow">
-                            <Grid ColumnDefinitions="3,*,Auto" Margin="12,8" ColumnSpacing="10">
-                                <!-- Unread side-rail: 3px accent bar visible only when !IsRead. -->
+                            <!-- Two-row vertical layout: badge + timestamp on top,
+                                 process name on bottom. Process name uses
+                                 CharacterEllipsis so long names (e.g. com.docker.backend.exe)
+                                 truncate cleanly inside the 320px master column instead
+                                 of overdrawing the timestamp. -->
+                            <Grid ColumnDefinitions="3,*" Margin="12,8" ColumnSpacing="10">
                                 <Rectangle Grid.Column="0"
                                            Width="3"
                                            Fill="{DynamicResource AccentPrimary}"
                                            IsVisible="{Binding !IsRead}" />
-                                <!-- Body: kind badge + display name on top, summary below. -->
-                                <StackPanel Grid.Column="1" Spacing="2">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <Border Classes="kindBadge"
-                                                Classes.info="{Binding KindBadgeClass, Converter={StaticResource StringEqualsConverter}, ConverterParameter=info}"
-                                                Classes.warn="{Binding KindBadgeClass, Converter={StaticResource StringEqualsConverter}, ConverterParameter=warn}"
-                                                Classes.danger="{Binding KindBadgeClass, Converter={StaticResource StringEqualsConverter}, ConverterParameter=danger}"
-                                                Classes.muted="{Binding KindBadgeClass, Converter={StaticResource StringEqualsConverter}, ConverterParameter=muted}">
-                                            <TextBlock Text="{Binding KindLabel}" />
-                                        </Border>
-                                        <TextBlock Text="{Binding DisplayName}"
-                                                   FontSize="{DynamicResource FontSizeSubheading}"
-                                                   Foreground="{DynamicResource TextPrimary}"
-                                                   VerticalAlignment="Center" />
-                                    </StackPanel>
-                                </StackPanel>
-                                <!-- Timestamp on the right. -->
-                                <TextBlock Grid.Column="2"
-                                           Text="{Binding TimestampLabel}"
-                                           FontSize="{DynamicResource FontSizeCaption}"
-                                           Foreground="{DynamicResource TextMuted}"
-                                           VerticalAlignment="Center" />
+                                <Grid Grid.Column="1"
+                                      RowDefinitions="Auto,Auto"
+                                      ColumnDefinitions="Auto,*,Auto"
+                                      RowSpacing="4"
+                                      ColumnSpacing="8">
+                                    <!-- Top row: kind badge (left) + timestamp (right).
+                                         Empty middle column flexes to absorb extra width. -->
+                                    <Border Grid.Row="0" Grid.Column="0"
+                                            Classes="kindBadge"
+                                            Classes.info="{Binding KindBadgeClass, Converter={StaticResource StringEqualsConverter}, ConverterParameter=info}"
+                                            Classes.warn="{Binding KindBadgeClass, Converter={StaticResource StringEqualsConverter}, ConverterParameter=warn}"
+                                            Classes.danger="{Binding KindBadgeClass, Converter={StaticResource StringEqualsConverter}, ConverterParameter=danger}"
+                                            Classes.muted="{Binding KindBadgeClass, Converter={StaticResource StringEqualsConverter}, ConverterParameter=muted}">
+                                        <TextBlock Text="{Binding KindLabel}" />
+                                    </Border>
+                                    <TextBlock Grid.Row="0" Grid.Column="2"
+                                               Text="{Binding TimestampLabel}"
+                                               FontSize="{DynamicResource FontSizeCaption}"
+                                               Foreground="{DynamicResource TextMuted}"
+                                               VerticalAlignment="Center" />
+                                    <!-- Bottom row: process name spans all three
+                                         columns. Body-size (not Subheading) since the
+                                         row has its own line now and Subheading would
+                                         make the row uncomfortably tall. -->
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                                               Text="{Binding DisplayName}"
+                                               FontSize="{DynamicResource FontSizeBody}"
+                                               Foreground="{DynamicResource TextPrimary}"
+                                               TextTrimming="CharacterEllipsis" />
+                                </Grid>
                             </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
@@ -213,11 +225,24 @@
                         Command="{Binding AddRuleCommand}"
                         CommandParameter="{Binding SelectedAlert}"
                         ToolTip.Tip="Switch to the Firewall tab and highlight the rule for this process." />
+                <!-- BLOCK / UNBLOCK toggle: two buttons sharing the actionButton
+                     MinWidth=120, exactly one visible at a time via IsVisible.
+                     IsOutboundBlocked is owned by the VM's _outboundBlockedPaths
+                     cache, seeded from snapshot.FirewallRules at activation and
+                     kept in sync via the daemon's RuleChange broadcast. Both
+                     fixed-width so the footer doesn't reflow when state flips. -->
                 <Button Classes="actionButton danger"
                         Content="BLOCK PROCESS OUT"
                         Command="{Binding BlockProcessOutCommand}"
                         CommandParameter="{Binding SelectedAlert}"
+                        IsVisible="{Binding !SelectedAlert.IsOutboundBlocked}"
                         ToolTip.Tip="Add a Block-outbound firewall rule for this process and apply it now." />
+                <Button Classes="actionButton"
+                        Content="UNBLOCK PROCESS OUT"
+                        Command="{Binding UnblockProcessOutCommand}"
+                        CommandParameter="{Binding SelectedAlert}"
+                        IsVisible="{Binding SelectedAlert.IsOutboundBlocked}"
+                        ToolTip.Tip="Remove the existing Block-outbound firewall rule for this process." />
             </StackPanel>
         </Grid>
 

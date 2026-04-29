@@ -74,6 +74,32 @@ public class AlertsTabViewModelTests {
         del?.Invoke(ev);
     }
 
+    /// <summary>
+    /// Sibling helper: raises <see cref="DaemonStreamSubscriber.RuleChangeReceived"/>
+    /// via reflection so tests can drive the Alerts tab's outbound-block
+    /// state machine without spinning up a real gRPC stream.
+    /// </summary>
+    private static void RaiseRuleChangeReceived(DaemonStreamSubscriber subscriber, FirewallRuleChange change) {
+        var eventField = typeof(DaemonStreamSubscriber)
+            .GetField("RuleChangeReceived", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var del = (Action<FirewallRuleChange>?)eventField.GetValue(subscriber);
+        del?.Invoke(change);
+    }
+
+    private static FirewallRule MakeRule(
+        string processPath = @"C:\bin\firefox.exe",
+        Direction direction = Direction.Outbound,
+        FirewallAction action = FirewallAction.Block
+    ) => new() {
+        Id = 1,
+        ProcessPath = processPath,
+        Direction = direction,
+        Action = action,
+        Source = RuleSource.Manual,
+        CreatedAtUnixNs = FixedTimestamp.ToUnixTimeMilliseconds() * 1_000_000L,
+        UpdatedAtUnixNs = FixedTimestamp.ToUnixTimeMilliseconds() * 1_000_000L,
+    };
+
     [Fact]
     public async Task ActivateAsync_NoAlerts_ShowsEmptyState() {
         var (vm, _, _, _) = CreateVm();
@@ -243,6 +269,104 @@ public class AlertsTabViewModelTests {
         client.ApplyFirewallRuleException = new InvalidOperationException("apply failed");
 
         await vm.BlockProcessOutCommand.ExecuteAsync(vm.SelectedAlert);
+
+        Assert.True(vm.HasError);
+        Assert.Contains("app.exe", vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ActivateAsync_SeedsOutboundBlockedFromSnapshotRules() {
+        // Snapshot carries an active Outbound+Block rule for firefox.exe; the
+        // matching alert row must land with IsOutboundBlocked=true so the
+        // detail-pane footer renders UNBLOCK on first paint.
+        var snapshot = SnapshotWith(
+            MakeAlert(seq: 100, processPath: @"C:\bin\firefox.exe", isRead: true),
+            MakeAlert(seq: 99, processPath: @"C:\bin\app.exe", isRead: true));
+        snapshot.FirewallRules.Add(MakeRule(processPath: @"C:\bin\firefox.exe"));
+        var (vm, _, _, _) = CreateVm(snapshot);
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        var firefox = Assert.Single(vm.Alerts, r => r.ProcessPath == @"C:\bin\firefox.exe");
+        var app = Assert.Single(vm.Alerts, r => r.ProcessPath == @"C:\bin\app.exe");
+        Assert.True(firefox.IsOutboundBlocked);
+        Assert.False(app.IsOutboundBlocked);
+    }
+
+    [Fact]
+    public async Task LiveRuleChangeBlocked_FlipsIsOutboundBlocked() {
+        var snapshot = SnapshotWith(MakeAlert(seq: 100, processPath: @"C:\bin\firefox.exe", isRead: true));
+        var (vm, _, subscriber, _) = CreateVm(snapshot);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        var row = Assert.Single(vm.Alerts);
+        Assert.False(row.IsOutboundBlocked);
+
+        RaiseRuleChangeReceived(subscriber, new FirewallRuleChange {
+            Change = FirewallRuleChange.Types.ChangeKind.Created,
+            Rule = MakeRule(processPath: @"C:\bin\firefox.exe"),
+        });
+
+        Assert.True(row.IsOutboundBlocked);
+    }
+
+    [Fact]
+    public async Task LiveRuleChangeRemoved_FlipsIsOutboundBlockedFalse() {
+        var snapshot = SnapshotWith(MakeAlert(seq: 100, processPath: @"C:\bin\firefox.exe", isRead: true));
+        snapshot.FirewallRules.Add(MakeRule(processPath: @"C:\bin\firefox.exe"));
+        var (vm, _, subscriber, _) = CreateVm(snapshot);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        var row = Assert.Single(vm.Alerts);
+        Assert.True(row.IsOutboundBlocked);  // seeded from snapshot
+
+        RaiseRuleChangeReceived(subscriber, new FirewallRuleChange {
+            Change = FirewallRuleChange.Types.ChangeKind.Removed,
+            Rule = MakeRule(processPath: @"C:\bin\firefox.exe"),
+        });
+
+        Assert.False(row.IsOutboundBlocked);
+    }
+
+    [Fact]
+    public async Task LiveRuleChange_InboundDirection_DoesNotAffectOutboundState() {
+        // The Alerts tab only surfaces outbound state. An Inbound Block rule
+        // for the same process must not flip IsOutboundBlocked.
+        var snapshot = SnapshotWith(MakeAlert(seq: 100, processPath: @"C:\bin\firefox.exe", isRead: true));
+        var (vm, _, subscriber, _) = CreateVm(snapshot);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        var row = Assert.Single(vm.Alerts);
+
+        RaiseRuleChangeReceived(subscriber, new FirewallRuleChange {
+            Change = FirewallRuleChange.Types.ChangeKind.Created,
+            Rule = MakeRule(processPath: @"C:\bin\firefox.exe", direction: Direction.Inbound),
+        });
+
+        Assert.False(row.IsOutboundBlocked);
+    }
+
+    [Fact]
+    public async Task UnblockProcessOut_CallsRemoveFirewallRuleWithOutbound() {
+        var snapshot = SnapshotWith(MakeAlert(seq: 100, processPath: @"C:\bin\firefox.exe", isRead: true));
+        snapshot.FirewallRules.Add(MakeRule(processPath: @"C:\bin\firefox.exe"));
+        var (vm, client, _, _) = CreateVm(snapshot);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.Empty(client.RemoveFirewallRuleCalls);
+
+        await vm.UnblockProcessOutCommand.ExecuteAsync(vm.SelectedAlert);
+
+        var call = Assert.Single(client.RemoveFirewallRuleCalls);
+        Assert.Equal(@"C:\bin\firefox.exe", call.ProcessPath);
+        Assert.Equal(Direction.Outbound, call.Direction);
+    }
+
+    [Fact]
+    public async Task UnblockProcessOut_RpcFailure_SetsErrorState() {
+        var snapshot = SnapshotWith(MakeAlert(seq: 100, processPath: @"C:\bin\app.exe", isRead: true));
+        snapshot.FirewallRules.Add(MakeRule(processPath: @"C:\bin\app.exe"));
+        var (vm, client, _, _) = CreateVm(snapshot);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        client.RemoveFirewallRuleException = new InvalidOperationException("remove failed");
+
+        await vm.UnblockProcessOutCommand.ExecuteAsync(vm.SelectedAlert);
 
         Assert.True(vm.HasError);
         Assert.Contains("app.exe", vm.ErrorMessage);

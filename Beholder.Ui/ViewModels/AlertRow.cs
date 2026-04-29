@@ -31,6 +31,18 @@ internal sealed partial class AlertRow : ObservableObject {
     private bool _isRead;
 
     /// <summary>
+    /// Whether an Outbound + Block firewall rule currently exists for this
+    /// alert's process path. Drives the detail-pane footer's BLOCK / UNBLOCK
+    /// toggle. Owned by <see cref="AlertsTabViewModel"/> — the single writer
+    /// is the daemon's <c>RuleChange</c> broadcast (snapshot-seed at
+    /// activation, live updates afterwards). Multiple alerts can share a
+    /// process path; each row carries its own copy so the bindings work
+    /// without a converter.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isOutboundBlocked;
+
+    /// <summary>
     /// Uppercase label for the master-list kind badge. Matches the project's
     /// all-caps convention for compact data labels (Phase 6.4 SOURCE column,
     /// firewall activity strip kind labels). Em-dash for any future enum
