@@ -1,4 +1,5 @@
 using Beholder.Protocol.Local;
+using Beholder.Tests.TestDoubles;
 using Beholder.Ui.Services;
 using Beholder.Ui.ViewModels;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,7 +13,7 @@ public class FirewallActivityViewModelTests {
         if (response is not null) client.FirewallActivityResponse = response;
         var subscriber = new DaemonStreamSubscriber(
             client, TimeProvider.System, NullLogger<DaemonStreamSubscriber>.Instance);
-        var vm = new FirewallActivityViewModel(client, subscriber);
+        var vm = new FirewallActivityViewModel(client, subscriber, new SyncDispatcher());
         return (vm, client, subscriber);
     }
 
@@ -58,7 +59,7 @@ public class FirewallActivityViewModelTests {
         };
         var subscriber = new DaemonStreamSubscriber(
             client, TimeProvider.System, NullLogger<DaemonStreamSubscriber>.Instance);
-        var vm = new FirewallActivityViewModel(client, subscriber);
+        var vm = new FirewallActivityViewModel(client, subscriber, new SyncDispatcher());
 
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
 

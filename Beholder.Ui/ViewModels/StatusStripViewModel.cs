@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Avalonia.Threading;
 using Beholder.Ui.Helpers;
 using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -13,6 +12,7 @@ internal sealed partial class StatusStripViewModel : ViewModelBase, IDisposable 
     private const double SmoothingFactor = 0.3;
 
     private readonly ProcessStateService _processStateService;
+    private readonly IDispatcher _dispatcher;
 
     [ObservableProperty]
     private string _outboundTotalLabel = "0 B";
@@ -40,9 +40,11 @@ internal sealed partial class StatusStripViewModel : ViewModelBase, IDisposable 
 
     public double InboundRatio => 1.0 - OutboundRatio;
 
-    public StatusStripViewModel(ProcessStateService processStateService) {
+    public StatusStripViewModel(ProcessStateService processStateService, IDispatcher dispatcher) {
         ArgumentNullException.ThrowIfNull(processStateService);
+        ArgumentNullException.ThrowIfNull(dispatcher);
         _processStateService = processStateService;
+        _dispatcher = dispatcher;
         _processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
     }
 
@@ -51,10 +53,10 @@ internal sealed partial class StatusStripViewModel : ViewModelBase, IDisposable 
     }
 
     private void OnProcessStatesUpdated(IReadOnlyDictionary<string, ProcessState> states) {
-        Dispatcher.UIThread.Post(() => UpdateFromStates(states));
+        _dispatcher.Post(() => UpdateFromStates(states));
     }
 
-    internal void UpdateFromStates(IReadOnlyDictionary<string, ProcessState> states) {
+    private void UpdateFromStates(IReadOnlyDictionary<string, ProcessState> states) {
         long totalIn = 0, totalOut = 0;
         long totalDeltaIn = 0, totalDeltaOut = 0;
 

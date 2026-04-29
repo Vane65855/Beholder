@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using Avalonia.Media;
-using Avalonia.Threading;
 using Beholder.Protocol.Local;
 using Beholder.Ui.Controls;
 using Beholder.Ui.Helpers;
@@ -18,6 +17,7 @@ namespace Beholder.Ui.ViewModels;
 internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     private readonly IDaemonClient _daemonClient;
     private readonly ProcessStateService _processStateService;
+    private readonly IDispatcher _dispatcher;
     private readonly ProcessListCoordinator _processList;
     private readonly HistoricalQueryOrchestrator _historicalQueries;
     private TrafficColsViewModel? _colsVm;
@@ -88,12 +88,15 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     public TrafficTabViewModel(
         IDaemonClient daemonClient,
         ProcessStateService processStateService,
-        HistoricalChartLoader historicalChartLoader) {
+        HistoricalChartLoader historicalChartLoader,
+        IDispatcher dispatcher) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(historicalChartLoader);
+        ArgumentNullException.ThrowIfNull(dispatcher);
         _daemonClient = daemonClient;
         _processStateService = processStateService;
+        _dispatcher = dispatcher;
         _processList = new ProcessListCoordinator();
         _historicalQueries = new HistoricalQueryOrchestrator(historicalChartLoader);
 
@@ -145,7 +148,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     }
 
     private void OnDaemonStateChanged(DaemonStatusInfo status) {
-        Dispatcher.UIThread.Post(() => {
+        _dispatcher.Post(() => {
             if (status.State == ConnectionState.Connected) {
                 HasError = false;
                 ErrorMessage = string.Empty;
@@ -158,7 +161,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     }
 
     private void OnProcessStatesUpdated(IReadOnlyDictionary<string, ProcessState> states) {
-        Dispatcher.UIThread.Post(() => {
+        _dispatcher.Post(() => {
             UpdateFromStates(states);
             // Live COLS refresh: same cadence as the chart (1 Hz, driven by
             // the daemon's snapshot broadcast). ColsVm.RefreshAsync cancels

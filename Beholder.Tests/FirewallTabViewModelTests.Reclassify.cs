@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Reflection;
 using Beholder.Protocol.Local;
 using Beholder.Ui.Services;
+using Beholder.Ui.ViewModels;
 
 namespace Beholder.Tests;
 
@@ -11,9 +13,11 @@ namespace Beholder.Tests;
 // and zero Filtered* PropertyChanged on the VM. See Reclassify and
 // ReconcileSorted XML docs for the full rationale.
 //
-// Tests call ApplyProcessStates synchronously (the internal extraction)
-// instead of going through OnProcessStatesUpdated's dispatcher hop — the
-// suite has no Avalonia headless dispatcher.
+// Tests drive the VM through its real ProcessStatesUpdated event-handler
+// path (see RaiseProcessStatesUpdated below). The injected SyncDispatcher
+// makes IDispatcher.Post run synchronously, so by the time
+// RaiseProcessStatesUpdated returns, OnProcessStatesUpdated → Reclassify
+// has already mutated ActiveRows / InactiveRows.
 
 public partial class FirewallTabViewModelTests {
     /// <summary>
@@ -60,6 +64,36 @@ public partial class FirewallTabViewModelTests {
         return dict;
     }
 
+    /// <summary>
+    /// Raises <c>ProcessStatesUpdated</c> on the VM's wired
+    /// <see cref="ProcessStateService"/> with <paramref name="states"/> —
+    /// drives the same event path the daemon's live counter batch would,
+    /// so the VM's <c>OnProcessStatesUpdated → IDispatcher.Post →
+    /// ApplyProcessStates → Reclassify</c> chain runs identically to
+    /// production. With <see cref="TestDoubles.SyncDispatcher"/> injected
+    /// (see <c>CreateVm</c>), the chain runs synchronously on the calling
+    /// thread.
+    /// </summary>
+    /// <remarks>
+    /// Reflection is needed because <c>ProcessStatesUpdated</c> is a
+    /// <c>public event</c> exposing only <c>+=</c>/<c>-=</c> to subscribers;
+    /// only the owning class can <c>Invoke</c> the backing delegate.
+    /// Keeping this contained to the test layer (rather than adding an
+    /// <c>RaiseProcessStatesUpdated</c> public method to the production
+    /// service) preserves the production API surface.
+    /// </remarks>
+    private static void RaiseProcessStatesUpdated(
+        FirewallTabViewModel vm, IReadOnlyDictionary<string, ProcessState> states) {
+        var serviceField = typeof(FirewallTabViewModel)
+            .GetField("_processStateService", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var service = (ProcessStateService)serviceField.GetValue(vm)!;
+
+        var eventField = typeof(ProcessStateService)
+            .GetField("ProcessStatesUpdated", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var del = (Action<IReadOnlyDictionary<string, ProcessState>>?)eventField.GetValue(service);
+        del?.Invoke(states);
+    }
+
     [Fact]
     public async Task Reclassify_NoMembershipChange_FiresZeroCollectionChangedEvents() {
         // Headline test: the steady-state 1Hz tick where every row's
@@ -71,7 +105,7 @@ public partial class FirewallTabViewModelTests {
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
 
         // Seed two active rows.
-        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
+        RaiseProcessStatesUpdated(vm,StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
         Assert.Equal(2, vm.ActiveRows.Count);
 
         using var active = RecordCollectionChanges(vm.ActiveRows);
@@ -79,7 +113,7 @@ public partial class FirewallTabViewModelTests {
 
         // Tick again with the SAME state map — properties may update,
         // but membership and sort position are identical.
-        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
+        RaiseProcessStatesUpdated(vm,StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
 
         Assert.Empty(active.Events);
         Assert.Empty(inactive.Events);
@@ -96,13 +130,13 @@ public partial class FirewallTabViewModelTests {
         // bool. A no-op tick must emit none of them.
         var (vm, _, _) = CreateVm();
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
-        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
+        RaiseProcessStatesUpdated(vm,StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
 
         var fired = new List<string>();
         PropertyChangedEventHandler handler = (_, e) => fired.Add(e.PropertyName ?? "");
         vm.PropertyChanged += handler;
         try {
-            vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
+            RaiseProcessStatesUpdated(vm,StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
 
             Assert.DoesNotContain(nameof(vm.FilteredActiveRows), fired);
             Assert.DoesNotContain(nameof(vm.FilteredInactiveRows), fired);
@@ -123,14 +157,14 @@ public partial class FirewallTabViewModelTests {
         // row enters Inactive's tier-1 ExecutableExists bucket.)
         var (vm, _, _) = CreateVm();
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
-        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe"));
+        RaiseProcessStatesUpdated(vm,StateMap(@"C:\bin\a.exe"));
         Assert.Single(vm.ActiveRows);
 
         using var active = RecordCollectionChanges(vm.ActiveRows);
         using var inactive = RecordCollectionChanges(vm.InactiveRows);
 
         // No active processes this tick — the row's IsActive flips false.
-        vm.ApplyProcessStates(StateMap());
+        RaiseProcessStatesUpdated(vm,StateMap());
 
         var removed = Assert.Single(active.Events);
         Assert.Equal(NotifyCollectionChangedAction.Remove, removed.Action);
@@ -157,7 +191,7 @@ public partial class FirewallTabViewModelTests {
         using var active = RecordCollectionChanges(vm.ActiveRows);
         using var inactive = RecordCollectionChanges(vm.InactiveRows);
 
-        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe"));
+        RaiseProcessStatesUpdated(vm,StateMap(@"C:\bin\a.exe"));
 
         var added = Assert.Single(active.Events);
         Assert.Equal(NotifyCollectionChangedAction.Add, added.Action);
@@ -175,11 +209,11 @@ public partial class FirewallTabViewModelTests {
         // for the rows that didn't change position).
         var (vm, _, _) = CreateVm();
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
-        vm.ApplyProcessStates(StateMap(@"C:\bin\m.exe", @"C:\bin\z.exe"));
+        RaiseProcessStatesUpdated(vm,StateMap(@"C:\bin\m.exe", @"C:\bin\z.exe"));
 
         using var active = RecordCollectionChanges(vm.ActiveRows);
 
-        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\m.exe", @"C:\bin\z.exe"));
+        RaiseProcessStatesUpdated(vm,StateMap(@"C:\bin\a.exe", @"C:\bin\m.exe", @"C:\bin\z.exe"));
 
         var added = Assert.Single(active.Events);
         Assert.Equal(NotifyCollectionChangedAction.Add, added.Action);
@@ -195,11 +229,11 @@ public partial class FirewallTabViewModelTests {
         // correct index — neither append nor full reshuffle.
         var (vm, _, _) = CreateVm();
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
-        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\z.exe"));
+        RaiseProcessStatesUpdated(vm,StateMap(@"C:\bin\a.exe", @"C:\bin\z.exe"));
 
         using var active = RecordCollectionChanges(vm.ActiveRows);
 
-        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\m.exe", @"C:\bin\z.exe"));
+        RaiseProcessStatesUpdated(vm,StateMap(@"C:\bin\a.exe", @"C:\bin\m.exe", @"C:\bin\z.exe"));
 
         var added = Assert.Single(active.Events);
         Assert.Equal(NotifyCollectionChangedAction.Add, added.Action);
@@ -216,14 +250,14 @@ public partial class FirewallTabViewModelTests {
         // which preserves the pill Button's pointer state.
         var (vm, _, _) = CreateVm();
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
-        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
+        RaiseProcessStatesUpdated(vm,StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
 
         var rowA = vm.ActiveRows[0];
         var rowB = vm.ActiveRows[1];
 
         // Ten ticks with the same membership.
         for (var i = 0; i < 10; i++) {
-            vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
+            RaiseProcessStatesUpdated(vm,StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
         }
 
         Assert.Same(rowA, vm.ActiveRows[0]);
@@ -259,7 +293,7 @@ public partial class FirewallTabViewModelTests {
 
         // Trigger a no-op tick — no live processes. The Inactive rows must
         // remain in the same two-tier order they had after activation.
-        vm.ApplyProcessStates(StateMap());
+        RaiseProcessStatesUpdated(vm,StateMap());
 
         Assert.Equal(2, vm.InactiveRows.Count);
         Assert.Equal(@"C:\zzz-existing.exe", vm.InactiveRows[0].ProcessPath);

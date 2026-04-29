@@ -1,5 +1,6 @@
 using System.Linq;
 using Beholder.Protocol.Local;
+using Beholder.Tests.TestDoubles;
 using Beholder.Ui.Services;
 using Beholder.Ui.ViewModels;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,11 +20,14 @@ public partial class FirewallTabViewModelTests {
         var subscriber = new DaemonStreamSubscriber(
             client, TimeProvider.System, NullLogger<DaemonStreamSubscriber>.Instance);
         var processStateService = new ProcessStateService(subscriber, client, TimeProvider.System);
+        // SyncDispatcher runs IDispatcher.Post actions immediately on the
+        // calling thread — production handlers run synchronously under test
+        // without an Avalonia headless dispatcher fixture.
         // Default to "everything exists" for tests that don't care about the
         // executable-exists branching. Tests that DO care pass an explicit
         // predicate via fileExistsCheck.
         var vm = new FirewallTabViewModel(
-            client, processStateService, subscriber,
+            client, processStateService, subscriber, new SyncDispatcher(),
             fileExistsCheck ?? (_ => true));
         return (vm, client, subscriber);
     }
@@ -302,7 +306,7 @@ public partial class FirewallTabViewModelTests {
         var subscriber = new DaemonStreamSubscriber(
             client, TimeProvider.System, NullLogger<DaemonStreamSubscriber>.Instance);
         var processStateService = new ProcessStateService(subscriber, client, TimeProvider.System);
-        var vm = new FirewallTabViewModel(client, processStateService, subscriber);
+        var vm = new FirewallTabViewModel(client, processStateService, subscriber, new SyncDispatcher());
 
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
 

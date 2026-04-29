@@ -1,5 +1,6 @@
 using System.Reflection;
 using Beholder.Protocol.Local;
+using Beholder.Tests.TestDoubles;
 using Beholder.Ui.Models;
 using Beholder.Ui.Services;
 using Beholder.Ui.ViewModels;
@@ -17,7 +18,7 @@ public class TrafficTabViewModelTests {
             NullLogger<DaemonStreamSubscriber>.Instance);
         var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
         var loader = new HistoricalChartLoader(fakeClient);
-        return new TrafficTabViewModel(fakeClient, service, loader);
+        return new TrafficTabViewModel(fakeClient, service, loader, new SyncDispatcher());
     }
 
     private static ProcessState MakeState(
@@ -346,7 +347,7 @@ public class TrafficTabViewModelTests {
             NullLogger<DaemonStreamSubscriber>.Instance);
         var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
         var loader = new HistoricalChartLoader(fakeClient);
-        var vm = new TrafficTabViewModel(fakeClient, service, loader);
+        var vm = new TrafficTabViewModel(fakeClient, service, loader, new SyncDispatcher());
         return (vm, fakeClient);
     }
 
