@@ -30,6 +30,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? ListFirewallRulesException { get; set; }
     public Exception? SetFirewallEnabledException { get; set; }
     public Exception? FirewallActivityException { get; set; }
+    public Exception? MarkAlertReadException { get; set; }
 
     // Optional canned snapshot/response bodies so tests can drive real data
     // through the seeding path. Existing callers that don't set these get the
@@ -52,6 +53,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public List<ApplyFirewallRuleRequest> ApplyFirewallRuleCalls { get; } = new();
     public List<RemoveFirewallRuleRequest> RemoveFirewallRuleCalls { get; } = new();
     public List<SetFirewallEnabledRequest> SetFirewallEnabledCalls { get; } = new();
+    public List<MarkAlertReadRequest> MarkAlertReadCalls { get; } = new();
     // Responder variant for tests that need the CancellationToken the VM
     // passed (e.g., cancellation-plumbing tests). Takes precedence over
     // AggregateTimelineResponse when set.
@@ -119,8 +121,11 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     }
 
     public Task<MarkAlertReadResponse> MarkAlertReadAsync(
-        MarkAlertReadRequest request, CancellationToken cancellationToken) =>
-        Task.FromResult(new MarkAlertReadResponse());
+        MarkAlertReadRequest request, CancellationToken cancellationToken) {
+        MarkAlertReadCalls.Add(request);
+        if (MarkAlertReadException is not null) throw MarkAlertReadException;
+        return Task.FromResult(new MarkAlertReadResponse());
+    }
 
     public Task<VerifyChainResponse> VerifyChainAsync(
         VerifyChainRequest request, CancellationToken cancellationToken) =>

@@ -79,6 +79,18 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
     /// </summary>
     public bool IsOrphanedRule => HasRule && !ExecutableExists;
 
+    /// <summary>
+    /// Transient flag set true when the user follows an "ADD RULE" deep-link
+    /// from the Alerts tab, cleared after ~2 s. The view binds
+    /// <c>Classes.highlighted="{Binding IsHighlighted}"</c> on the row's
+    /// <c>Border.ruleRow</c> so a brief accent border draws the user's eye
+    /// to the right row after a tab switch. Mirror of
+    /// <c>FirewallTabViewModel.NotifyPathCopied</c>'s transient-banner
+    /// pattern.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isHighlighted;
+
     public FirewallRuleRow(string processPath) {
         ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
         ProcessPath = processPath;

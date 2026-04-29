@@ -38,6 +38,15 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     private bool _activated;
 
     /// <summary>
+    /// Owned CTS for the transient highlight token set by
+    /// <see cref="HighlightRow"/>. A second highlight call within the 2-second
+    /// window cancels the prior timer so the latest highlight survives,
+    /// mirroring <see cref="_transientMessageCts"/>'s last-write-wins pattern.
+    /// </summary>
+    private CancellationTokenSource? _highlightCts;
+    private FirewallRuleRow? _currentlyHighlightedRow;
+
+    /// <summary>
     /// Activity strip child VM. Owned by the Firewall tab so its lifecycle
     /// matches the parent (single dispose, single activation), but exposed
     /// to the view via a public property so the strip can bind directly.
@@ -82,6 +91,17 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     private bool _hasTransientMessage;
 
     private CancellationTokenSource? _transientMessageCts;
+
+    /// <summary>
+    /// Selected rule row, set by <see cref="HighlightRow"/> when the Alerts
+    /// tab deep-links into the Firewall tab. Bound to the rule list's
+    /// <c>SelectedItem</c> so the view's selection visual + ScrollIntoView
+    /// behavior pick the row up. Two-way so user-driven selection (click on
+    /// a row) also flows back here, but the VM has no logic on user-selection
+    /// changes today — the binding is purely for the deep-link handoff.
+    /// </summary>
+    [ObservableProperty]
+    private FirewallRuleRow? _selectedRow;
 
     /// <summary>
     /// Whether the ACTIVE APPS group renders its rows. Default true: this is
@@ -169,6 +189,8 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         _activationCts?.Dispose();
         _transientMessageCts?.Cancel();
         _transientMessageCts?.Dispose();
+        _highlightCts?.Cancel();
+        _highlightCts?.Dispose();
     }
 
     /// <summary>
@@ -687,6 +709,49 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         _transientMessageCts?.Dispose();
         _transientMessageCts = new CancellationTokenSource();
         _ = ClearTransientMessageAfterDelayAsync(_transientMessageCts.Token);
+    }
+
+    /// <summary>
+    /// Deep-link target for <c>AlertsTabViewModel.AddRule</c>. Selects the
+    /// rule row matching <paramref name="processPath"/>, sets a transient
+    /// <c>IsHighlighted</c> flag for ~2 s so the row visually stands out in
+    /// the rule list after the tab switch. No-op if no row exists for that
+    /// path (defensive — alerts can name processes that have never had a
+    /// rule and have no live traffic, so the VM hasn't created a row yet).
+    /// </summary>
+    public void HighlightRow(string processPath) {
+        if (string.IsNullOrWhiteSpace(processPath)) return;
+        if (!_rowsByPath.TryGetValue(processPath, out var row)) return;
+
+        // Clear the prior highlight (if any) so the previously-highlighted
+        // row's accent border drops immediately rather than fading at the
+        // wrong time. Last-write-wins, mirroring NotifyPathCopied's CTS
+        // pattern.
+        _highlightCts?.Cancel();
+        _highlightCts?.Dispose();
+        _highlightCts = new CancellationTokenSource();
+
+        if (_currentlyHighlightedRow is not null && _currentlyHighlightedRow != row) {
+            _currentlyHighlightedRow.IsHighlighted = false;
+        }
+        _currentlyHighlightedRow = row;
+        row.IsHighlighted = true;
+        SelectedRow = row;
+
+        _ = ClearHighlightAfterDelayAsync(row, _highlightCts.Token);
+    }
+
+    private async Task ClearHighlightAfterDelayAsync(FirewallRuleRow row, CancellationToken cancellationToken) {
+        try {
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(true);
+            if (!cancellationToken.IsCancellationRequested) {
+                row.IsHighlighted = false;
+                if (_currentlyHighlightedRow == row) _currentlyHighlightedRow = null;
+            }
+        } catch (OperationCanceledException) {
+            // Superseded by a later HighlightRow call — newer call owns the
+            // state; leave the row's IsHighlighted flag alone.
+        }
     }
 
     private async Task ClearTransientMessageAfterDelayAsync(CancellationToken cancellationToken) {

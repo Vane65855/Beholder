@@ -69,6 +69,17 @@
             <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
         </Style>
 
+        <!-- Transient highlight applied when the user follows the Alerts
+             tab's "ADD RULE" deep-link. Bound via Classes.highlighted on
+             the row's Border. The flag clears after ~2 s via the VM's
+             ClearHighlightAfterDelayAsync timer. Bound class pattern matches
+             the master toggle's Classes.active="{Binding IsFirewallEnabled}"
+             precedent. -->
+        <Style Selector="Border.ruleRow.highlighted">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentPrimary}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+
         <!-- SOURCE column foreground hierarchy. DEFAULT recedes into the
              baseline noise floor (it's the majority of rows); MANUAL and
              REMOTE lift one shade to mark "this row has a real rule." -->
@@ -312,6 +323,7 @@
                                  controls; their click events are routed
                                  independently and don't trigger this. -->
                             <Border Classes="ruleRow"
+                                    Classes.highlighted="{Binding IsHighlighted}"
                                     DoubleTapped="OnRowDoubleTapped">
                                 <Grid ColumnDefinitions="*,84,88,140,90,80">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal"
@@ -413,6 +425,7 @@
                                  rows visually, and stacking Opacity on top of muted
                                  tokens makes paths hard to read. -->
                             <Border Classes="ruleRow"
+                                    Classes.highlighted="{Binding IsHighlighted}"
                                     DoubleTapped="OnRowDoubleTapped">
                                 <Grid ColumnDefinitions="*,84,88,140,90,80">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal"
