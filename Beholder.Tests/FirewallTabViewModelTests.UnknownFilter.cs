@@ -2,13 +2,9 @@ using Beholder.Protocol.Local;
 
 namespace Beholder.Tests;
 
-// ProcessPathResolver in Beholder.Daemon.Windows emits ("unknown",
-// "unknown") when Process.GetProcessById throws — typically because the
-// process exited between the ETW kernel callback and the resolver's PID
-// lookup. Such rows are non-actionable (Windows Firewall rules require an
-// absolute path) and the bytes total under this key is the meaningless
-// aggregate of every unresolvable PID's traffic. IsExcludedProcess
-// filters them at every entry point.
+// Pin: FirewallTabViewModel.IsExcludedProcess filters the literal "unknown"
+// path emitted by ProcessPathResolver when a PID has already exited. See
+// that method's XML doc for the full why-filtered rationale.
 
 public partial class FirewallTabViewModelTests {
     [Fact]

@@ -6,31 +6,38 @@ using Beholder.Ui.Services;
 
 namespace Beholder.Tests;
 
-// The Firewall tab's pill Buttons (ALLOW/BLOCK) used to swallow the user's
-// first click whenever the cursor was hovering during the daemon's 1Hz
-// counter tick: Reclassify() called Clear() + re-Add on both observable
-// collections, Avalonia's ItemsControl recycled containers on the Reset
-// event, and PointerPressed/PointerReleased landed on different button
-// instances across the recycle. The fix uses single-step Insert/Remove/
-// Move so stable rows' container instances stay materialized. These tests
-// pin the architectural goal (zero events on no-op ticks) and the diff
-// semantics (correct sort-position for inserts, identity stability across
-// ticks). All tests call ApplyProcessStates synchronously to bypass the
-// dispatcher hop in OnProcessStatesUpdated — the existing suite has no
-// Avalonia headless dispatcher and the new internal helper exists
-// precisely so tests don't need one.
+// Pin: FirewallTabViewModel.Reclassify uses diff-and-mutate so a no-op tick
+// emits zero CollectionChanged events on the bound ObservableCollections
+// and zero Filtered* PropertyChanged on the VM. See Reclassify and
+// ReconcileSorted XML docs for the full rationale.
+//
+// Tests call ApplyProcessStates synchronously (the internal extraction)
+// instead of going through OnProcessStatesUpdated's dispatcher hop — the
+// suite has no Avalonia headless dispatcher.
 
 public partial class FirewallTabViewModelTests {
     /// <summary>
     /// Subscribes to <paramref name="collection"/>'s CollectionChanged event
-    /// and accumulates the args. Returns the captured list and an unsubscriber.
+    /// and accumulates the args until disposed. Returned recorder is meant
+    /// to be used with a <c>using</c> statement so the unsubscribe happens
+    /// automatically when the test method exits.
     /// </summary>
-    private static (List<NotifyCollectionChangedEventArgs> Events, Action Unsubscribe)
-    RecordCollectionChanges<T>(ObservableCollection<T> collection) {
-        var events = new List<NotifyCollectionChangedEventArgs>();
-        NotifyCollectionChangedEventHandler handler = (_, e) => events.Add(e);
-        collection.CollectionChanged += handler;
-        return (events, () => collection.CollectionChanged -= handler);
+    private static CollectionChangeRecorder<T> RecordCollectionChanges<T>(
+        ObservableCollection<T> collection) => new(collection);
+
+    private sealed class CollectionChangeRecorder<T> : IDisposable {
+        private readonly ObservableCollection<T> _collection;
+        private readonly NotifyCollectionChangedEventHandler _handler;
+
+        public List<NotifyCollectionChangedEventArgs> Events { get; } = new();
+
+        public CollectionChangeRecorder(ObservableCollection<T> collection) {
+            _collection = collection;
+            _handler = (_, e) => Events.Add(e);
+            _collection.CollectionChanged += _handler;
+        }
+
+        public void Dispose() => _collection.CollectionChanged -= _handler;
     }
 
     /// <summary>
@@ -67,19 +74,15 @@ public partial class FirewallTabViewModelTests {
         vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
         Assert.Equal(2, vm.ActiveRows.Count);
 
-        var active = RecordCollectionChanges(vm.ActiveRows);
-        var inactive = RecordCollectionChanges(vm.InactiveRows);
-        try {
-            // Tick again with the SAME state map — properties may update,
-            // but membership and sort position are identical.
-            vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
+        using var active = RecordCollectionChanges(vm.ActiveRows);
+        using var inactive = RecordCollectionChanges(vm.InactiveRows);
 
-            Assert.Empty(active.Events);
-            Assert.Empty(inactive.Events);
-        } finally {
-            active.Unsubscribe();
-            inactive.Unsubscribe();
-        }
+        // Tick again with the SAME state map — properties may update,
+        // but membership and sort position are identical.
+        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\b.exe"));
+
+        Assert.Empty(active.Events);
+        Assert.Empty(inactive.Events);
     }
 
     [Fact]
@@ -123,21 +126,17 @@ public partial class FirewallTabViewModelTests {
         vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe"));
         Assert.Single(vm.ActiveRows);
 
-        var active = RecordCollectionChanges(vm.ActiveRows);
-        var inactive = RecordCollectionChanges(vm.InactiveRows);
-        try {
-            // No active processes this tick — the row's IsActive flips false.
-            vm.ApplyProcessStates(StateMap());
+        using var active = RecordCollectionChanges(vm.ActiveRows);
+        using var inactive = RecordCollectionChanges(vm.InactiveRows);
 
-            var removed = Assert.Single(active.Events);
-            Assert.Equal(NotifyCollectionChangedAction.Remove, removed.Action);
-            var added = Assert.Single(inactive.Events);
-            Assert.Equal(NotifyCollectionChangedAction.Add, added.Action);
-            Assert.Equal(0, added.NewStartingIndex);
-        } finally {
-            active.Unsubscribe();
-            inactive.Unsubscribe();
-        }
+        // No active processes this tick — the row's IsActive flips false.
+        vm.ApplyProcessStates(StateMap());
+
+        var removed = Assert.Single(active.Events);
+        Assert.Equal(NotifyCollectionChangedAction.Remove, removed.Action);
+        var added = Assert.Single(inactive.Events);
+        Assert.Equal(NotifyCollectionChangedAction.Add, added.Action);
+        Assert.Equal(0, added.NewStartingIndex);
     }
 
     [Fact]
@@ -155,20 +154,16 @@ public partial class FirewallTabViewModelTests {
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
         Assert.Single(vm.InactiveRows);
 
-        var active = RecordCollectionChanges(vm.ActiveRows);
-        var inactive = RecordCollectionChanges(vm.InactiveRows);
-        try {
-            vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe"));
+        using var active = RecordCollectionChanges(vm.ActiveRows);
+        using var inactive = RecordCollectionChanges(vm.InactiveRows);
 
-            var added = Assert.Single(active.Events);
-            Assert.Equal(NotifyCollectionChangedAction.Add, added.Action);
-            Assert.Equal(0, added.NewStartingIndex);
-            var removed = Assert.Single(inactive.Events);
-            Assert.Equal(NotifyCollectionChangedAction.Remove, removed.Action);
-        } finally {
-            active.Unsubscribe();
-            inactive.Unsubscribe();
-        }
+        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe"));
+
+        var added = Assert.Single(active.Events);
+        Assert.Equal(NotifyCollectionChangedAction.Add, added.Action);
+        Assert.Equal(0, added.NewStartingIndex);
+        var removed = Assert.Single(inactive.Events);
+        Assert.Equal(NotifyCollectionChangedAction.Remove, removed.Action);
     }
 
     [Fact]
@@ -182,17 +177,14 @@ public partial class FirewallTabViewModelTests {
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
         vm.ApplyProcessStates(StateMap(@"C:\bin\m.exe", @"C:\bin\z.exe"));
 
-        var active = RecordCollectionChanges(vm.ActiveRows);
-        try {
-            vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\m.exe", @"C:\bin\z.exe"));
+        using var active = RecordCollectionChanges(vm.ActiveRows);
 
-            var added = Assert.Single(active.Events);
-            Assert.Equal(NotifyCollectionChangedAction.Add, added.Action);
-            Assert.Equal(0, added.NewStartingIndex);
-            Assert.Equal(@"C:\bin\a.exe", vm.ActiveRows[0].ProcessPath);
-        } finally {
-            active.Unsubscribe();
-        }
+        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\m.exe", @"C:\bin\z.exe"));
+
+        var added = Assert.Single(active.Events);
+        Assert.Equal(NotifyCollectionChangedAction.Add, added.Action);
+        Assert.Equal(0, added.NewStartingIndex);
+        Assert.Equal(@"C:\bin\a.exe", vm.ActiveRows[0].ProcessPath);
     }
 
     [Fact]
@@ -205,16 +197,13 @@ public partial class FirewallTabViewModelTests {
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
         vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\z.exe"));
 
-        var active = RecordCollectionChanges(vm.ActiveRows);
-        try {
-            vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\m.exe", @"C:\bin\z.exe"));
+        using var active = RecordCollectionChanges(vm.ActiveRows);
 
-            var added = Assert.Single(active.Events);
-            Assert.Equal(NotifyCollectionChangedAction.Add, added.Action);
-            Assert.Equal(1, added.NewStartingIndex);
-        } finally {
-            active.Unsubscribe();
-        }
+        vm.ApplyProcessStates(StateMap(@"C:\bin\a.exe", @"C:\bin\m.exe", @"C:\bin\z.exe"));
+
+        var added = Assert.Single(active.Events);
+        Assert.Equal(NotifyCollectionChangedAction.Add, added.Action);
+        Assert.Equal(1, added.NewStartingIndex);
     }
 
     [Fact]
