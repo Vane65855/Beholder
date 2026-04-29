@@ -56,6 +56,8 @@ internal sealed class ProcessListCoordinator {
         long allRecentIn = 0;
         long allRecentOut = 0;
         foreach (var kvp in states) {
+            if (IsExcludedProcess(kvp.Key)) continue;
+
             var state = kvp.Value;
             long recentIn = 0;
             long recentOut = 0;
@@ -132,6 +134,8 @@ internal sealed class ProcessListCoordinator {
         long allHistIn = 0;
         long allHistOut = 0;
         foreach (var summary in summaries) {
+            if (IsExcludedProcess(summary.ProcessPath)) continue;
+
             allHistIn += summary.TotalBytesIn;
             allHistOut += summary.TotalBytesOut;
             var item = new ProcessListItem(summary.ProcessPath, summary.ProcessName);
@@ -148,4 +152,25 @@ internal sealed class ProcessListCoordinator {
         if (_lookup.Remove(processPath, out var item))
             List.Remove(item);
     }
+
+    /// <summary>
+    /// Filters non-resolvable pseudo-processes out of the Traffic tab's
+    /// process list and the "All processes" aggregate. The literal sentinel
+    /// <c>"unknown"</c> is emitted by <c>ProcessPathResolver</c> in
+    /// <c>Beholder.Daemon.Windows</c> when a PID has already exited or its
+    /// <c>MainModule</c> can't be read; aggregating those rows produces a
+    /// single non-attributable byte-bucket that's visually noisy without
+    /// being actionable.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <c>FirewallTabViewModel.IsExcludedProcess</c>, this filter
+    /// does <em>not</em> exclude <c>"System"</c>: the Traffic tab is a
+    /// visibility surface and kernel-attributable traffic is legitimately
+    /// useful diagnostic data, even though no firewall rule can target it.
+    /// The Firewall tab's analog filter makes the opposite trade-off
+    /// because that tab is a rule surface where non-rule-able rows are
+    /// pure noise.
+    /// </remarks>
+    private static bool IsExcludedProcess(string processPath) =>
+        string.Equals(processPath, "unknown", StringComparison.Ordinal);
 }
