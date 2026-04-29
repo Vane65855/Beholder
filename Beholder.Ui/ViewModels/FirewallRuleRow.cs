@@ -195,32 +195,3 @@ internal sealed partial class FirewallRuleRow : ObservableObject {
     partial void OnActiveConnectionCountChanged(int value) => OnPropertyChanged(nameof(HostsLabel));
     partial void OnExecutableExistsChanged(bool value) => OnPropertyChanged(nameof(IsOrphanedRule));
 }
-
-/// <summary>
-/// Three-state action for the per-direction pill: <c>Default</c> means "no
-/// Beholder-managed rule exists" (Windows default = allow). Distinct from
-/// <see cref="FirewallAction"/> in the wire protocol, which has only
-/// Allow/Block — the absence of a rule is encoded in proto by simply not
-/// returning one.
-/// </summary>
-internal enum FirewallActionState {
-    Default = 0,
-    Allow = 1,
-    Block = 2,
-}
-
-/// <summary>
-/// Coarse row-level summary status. Drives header counts (BLOCKED / PARTIAL)
-/// and any future row-level visual cue.
-/// </summary>
-internal enum FirewallRowStatus {
-    /// <summary>
-    /// Initial pre-data sentinel. <see cref="FirewallRuleRow.OverallStatus"/>
-    /// never returns this once the row has been populated — Default and Allow
-    /// data states both fold into <see cref="Allowed"/>.
-    /// </summary>
-    Default = 0,
-    Allowed = 1,
-    Blocked = 2,
-    Partial = 3,
-}

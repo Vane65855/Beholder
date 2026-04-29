@@ -416,8 +416,3 @@ internal sealed class TrafficChartControl : Control {
         return nice * magnitude;
     }
 }
-
-/// <summary>
-/// A single data series for the traffic chart.
-/// </summary>
-internal sealed record ChartSeries(string Name, IReadOnlyList<long> Values, Color Color);
