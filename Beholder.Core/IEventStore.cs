@@ -12,9 +12,11 @@ public interface IEventStore {
     /// Appends an event to the log. The implementation computes the chain hash from
     /// <paramref name="payload"/> and the most recent row's hash, then writes the new
     /// row atomically. Callers must supply the canonical byte representation of the
-    /// event — the store does not serialize.
+    /// event — the store does not serialize. Returns the sequence number assigned to
+    /// the appended row, so callers can build a downstream payload (e.g. broadcast a
+    /// live alert) carrying the chain seq without a second database round-trip.
     /// </summary>
-    Task AppendAsync(EventKind kind, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
+    Task<long> AppendAsync(EventKind kind, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
 
     /// <summary>
     /// Walks the entire chain from the first row to the last, recomputing each row's

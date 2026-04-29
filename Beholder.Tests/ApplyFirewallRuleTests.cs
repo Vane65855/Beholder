@@ -298,7 +298,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
     }
 
     private sealed class FailingEventStore : IEventStore {
-        public Task AppendAsync(EventKind kind, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+        public Task<long> AppendAsync(EventKind kind, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
             => throw new InvalidOperationException("Simulated chain failure");
 
         public Task<ChainVerificationResult> VerifyAsync(CancellationToken cancellationToken)

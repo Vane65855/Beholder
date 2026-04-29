@@ -34,7 +34,7 @@ internal sealed class SqliteEventStore : IEventStore {
     }
 
     /// <inheritdoc />
-    public async Task AppendAsync(EventKind kind, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) {
+    public async Task<long> AppendAsync(EventKind kind, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) {
         await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try {
             using var connection = _connectionFactory.CreateConnection();
@@ -48,6 +48,7 @@ internal sealed class SqliteEventStore : IEventStore {
             await InsertRowAsync(connection, transaction, newSeq, timestampUnixNs, kind, payload, prevHash, rowHash, cancellationToken)
                 .ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return newSeq;
         } finally {
             _writeLock.Release();
         }

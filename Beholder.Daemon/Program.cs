@@ -80,6 +80,8 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<IFirewallRuleStore>(sp => sp.GetRequiredService<SqliteFirewallRuleStore>());
     builder.Services.AddSingleton<SqliteAlertStore>();
     builder.Services.AddSingleton<IAlertStore>(sp => sp.GetRequiredService<SqliteAlertStore>());
+    builder.Services.AddSingleton<SqliteProcessRegistry>();
+    builder.Services.AddSingleton<IProcessRegistry>(sp => sp.GetRequiredService<SqliteProcessRegistry>());
     builder.Services.AddSingleton<SqliteTrafficStore>();
     builder.Services.AddSingleton<ITrafficStore>(sp => sp.GetRequiredService<SqliteTrafficStore>());
     builder.Services.AddSingleton<IDnsHostnameBackfill>(sp => sp.GetRequiredService<SqliteTrafficStore>());
@@ -97,6 +99,8 @@ if (OperatingSystem.IsWindows()) {
         builder.Configuration.GetSection("Sni"));
     builder.Services.Configure<FirewallOptions>(
         builder.Configuration.GetSection("Firewall"));
+    builder.Services.Configure<AlertOptions>(
+        builder.Configuration.GetSection("Alert"));
 
     builder.Services.AddSingleton<IFirewallEnforcementState, FirewallEnforcementState>();
     builder.Services.AddHostedService<Beholder.Daemon.Pipeline.FirewallEnforcementService>();
@@ -109,7 +113,19 @@ if (OperatingSystem.IsWindows()) {
 
     builder.Services.AddSingleton<FlowEventPipeline>();
     builder.Services.AddSingleton<ISnapshotBatchSource>(sp => sp.GetRequiredService<FlowEventPipeline>());
+    builder.Services.AddSingleton<IProcessFirstNetworkFlowSource>(
+        sp => sp.GetRequiredService<FlowEventPipeline>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<FlowEventPipeline>());
+
+    // Phase 7 alert pipeline. AlertEmitter wraps IEventStore.AppendAsync +
+    // BroadcastService.BroadcastAlert; the three detectors below consume
+    // it. NewProcessDetector subscribes to the engine's first-flow event;
+    // BinaryHashMonitor + ChainIntegrityMonitor run on PeriodicTimer
+    // loops governed by AlertOptions.
+    builder.Services.AddSingleton<IAlertEmitter, AlertEmitter>();
+    builder.Services.AddHostedService<NewProcessDetector>();
+    builder.Services.AddHostedService<BinaryHashMonitor>();
+    builder.Services.AddHostedService<ChainIntegrityMonitor>();
 
     // RollupService must start after FlowEventPipeline so the first rollup
     // tick runs against raw data the engine has already begun producing.
