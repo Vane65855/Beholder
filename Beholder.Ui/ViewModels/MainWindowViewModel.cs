@@ -128,12 +128,17 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
             TabKind.Settings => _settingsTab,
             _ => _trafficTab,
         };
-        // Lazy load: the Firewall tab's initial fetch (rules + summaries +
-        // snapshot) only fires the first time the tab is shown, then
-        // ActivateAsync short-circuits on subsequent switches. Fire-and-
-        // forget — failures surface in the tab's own banner.
+        // Lazy load: each tab's ActivateAsync fires the first time the tab
+        // is shown, then short-circuits on subsequent switches. Without this
+        // call, AlertsTabViewModel's snapshot fetch never runs in production
+        // and the list only ever shows alerts that arrive via the live
+        // broadcast stream — historic alerts in event_log stay invisible
+        // until a fresh broadcast event happens to land. Fire-and-forget —
+        // failures surface in each tab's own banner.
         if (value == TabKind.Firewall) {
             _ = _firewallTab.ActivateAsync(CancellationToken.None);
+        } else if (value == TabKind.Alerts) {
+            _ = _alertsTab.ActivateAsync(CancellationToken.None);
         }
     }
 
