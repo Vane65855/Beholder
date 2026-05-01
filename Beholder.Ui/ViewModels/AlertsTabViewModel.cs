@@ -278,6 +278,9 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
     }
 
     private async Task MarkSelectedAsReadAsync(AlertRow row) {
+        // Clear any stale error from a prior action so a successful retry
+        // implicitly dismisses it (see UI_DESIGN.md §5.10 auto-clear).
+        ClearError();
         row.IsRead = true;
         OnPropertyChanged(nameof(UnreadCount));
         try {
@@ -302,6 +305,7 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
     [RelayCommand]
     private async Task BlockProcessOutAsync(AlertRow? row) {
         if (row is null || string.IsNullOrEmpty(row.ProcessPath)) return;
+        ClearError();   // see UI_DESIGN.md §5.10 auto-clear
         try {
             await _daemonClient.ApplyFirewallRuleAsync(new ApplyFirewallRuleRequest {
                 ProcessPath = row.ProcessPath,
@@ -325,6 +329,7 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
     [RelayCommand]
     private async Task UnblockProcessOutAsync(AlertRow? row) {
         if (row is null || string.IsNullOrEmpty(row.ProcessPath)) return;
+        ClearError();   // see UI_DESIGN.md §5.10 auto-clear
         try {
             await _daemonClient.RemoveFirewallRuleAsync(new RemoveFirewallRuleRequest {
                 ProcessPath = row.ProcessPath,
@@ -334,6 +339,20 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
             HasError = true;
             ErrorMessage = $"Failed to unblock {row.DisplayName}: {ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// Clears the error banner. Bound to the close-X on the inline
+    /// <see cref="Beholder.Ui.Controls.ErrorBanner"/>; also called by every
+    /// action method on entry so a successful retry implicitly dismisses
+    /// stale errors. See UI_DESIGN.md §5.10.
+    /// </summary>
+    [RelayCommand]
+    private void DismissError() => ClearError();
+
+    private void ClearError() {
+        HasError = false;
+        ErrorMessage = string.Empty;
     }
 
     /// <summary>

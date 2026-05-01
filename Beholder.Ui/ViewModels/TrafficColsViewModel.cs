@@ -8,6 +8,7 @@ using Beholder.Ui.Helpers;
 using Beholder.Ui.Models;
 using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Grpc.Core;
 
 namespace Beholder.Ui.ViewModels;
@@ -120,6 +121,16 @@ internal sealed partial class TrafficColsViewModel : ViewModelBase, IDisposable 
         _cts?.Cancel();
         _cts?.Dispose();
         _cts = null;
+    }
+
+    /// <summary>
+    /// Clears the error banner. Bound to the close-X on the inline
+    /// <see cref="Beholder.Ui.Controls.ErrorBanner"/>. See UI_DESIGN.md §5.10.
+    /// </summary>
+    [RelayCommand]
+    private void DismissError() {
+        HasError = false;
+        ErrorMessage = string.Empty;
     }
 
     private void PopulateHosts(IReadOnlyList<DestinationSummary> destinations) {

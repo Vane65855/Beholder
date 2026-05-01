@@ -214,20 +214,14 @@
                                    HorizontalAlignment="Center" />
                     </StackPanel>
 
-                    <!-- Error overlay -->
-                    <Border IsVisible="{Binding HasError}"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Top"
-                            Margin="0,8,0,0"
-                            Padding="12,6"
-                            Background="{DynamicResource BackgroundElevated}"
-                            CornerRadius="4"
-                            BorderBrush="{DynamicResource SeverityWarn}"
-                            BorderThickness="1">
-                        <TextBlock Text="{Binding ErrorMessage}"
-                                   Foreground="{DynamicResource SeverityWarn}"
-                                   FontSize="{DynamicResource FontSizeBody}" />
-                    </Border>
+                    <!-- Error overlay — see UI_DESIGN.md §5.10. Severity=Warn
+                         gives the centered yellow rounded-border treatment. -->
+                    <controls:ErrorBanner VerticalAlignment="Top"
+                                          Margin="0,8,0,0"
+                                          Severity="Warn"
+                                          Message="{Binding ErrorMessage}"
+                                          IsVisible="{Binding HasError}"
+                                          DismissCommand="{Binding DismissErrorCommand}" />
                 </Grid>
 
                 <!-- COLS view: Hosts / Traffic Type / Countries bar lists.

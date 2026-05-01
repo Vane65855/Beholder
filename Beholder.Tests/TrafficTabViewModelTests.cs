@@ -588,4 +588,40 @@ public class TrafficTabViewModelTests {
 
         Assert.Equal("a.exe", observedPath);
     }
+
+    // ---- Phase 6.9: dismiss-X + auto-clear-on-action-entry ----
+
+    [Fact]
+    public void DismissErrorCommand_ClearsErrorState() {
+        var (vm, client) = CreateViewModelWithClient();
+        client.AggregateTimelineException = new RpcException(
+            new Status(StatusCode.Unavailable, "daemon offline"));
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last7Days);
+        Assert.True(vm.HasError);
+        Assert.NotEmpty(vm.ErrorMessage);
+
+        vm.DismissErrorCommand.Execute(null);
+
+        Assert.False(vm.HasError);
+        Assert.Empty(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SelectedTimeRangeChange_ClearsStaleErrorAtEntry_OnSuccess() {
+        // First range change fails → banner. Second succeeds → auto-clear
+        // at entry to LoadHistoricalRangeAsync removes the stale state.
+        var (vm, client) = CreateViewModelWithClient();
+        client.AggregateTimelineException = new RpcException(
+            new Status(StatusCode.Unavailable, "first fail"));
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last7Days);
+        Assert.True(vm.HasError);
+
+        client.AggregateTimelineException = null;
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last24Hours);
+        // Yield to let the fire-and-forget LoadHistoricalRangeAsync run.
+        for (var i = 0; i < 10; i++) await Task.Yield();
+
+        Assert.False(vm.HasError);
+        Assert.Empty(vm.ErrorMessage);
+    }
 }

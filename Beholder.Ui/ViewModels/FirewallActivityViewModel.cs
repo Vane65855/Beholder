@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Beholder.Protocol.Local;
 using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Grpc.Core;
 
 namespace Beholder.Ui.ViewModels;
@@ -137,6 +138,16 @@ internal sealed partial class FirewallActivityViewModel : ViewModelBase, IDispos
             };
             AppendUnique(FirewallActivityRow.FromProto(ev), atFront: true);
         });
+    }
+
+    /// <summary>
+    /// Clears the error banner. Bound to the close-X on the inline
+    /// <see cref="Beholder.Ui.Controls.ErrorBanner"/>. See UI_DESIGN.md §5.10.
+    /// </summary>
+    [RelayCommand]
+    private void DismissError() {
+        HasError = false;
+        ErrorMessage = string.Empty;
     }
 
     private void AppendUnique(FirewallActivityRow row, bool atFront = false) {

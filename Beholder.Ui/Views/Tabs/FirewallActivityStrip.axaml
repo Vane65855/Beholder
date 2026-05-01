@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Beholder.Ui.ViewModels"
+             xmlns:controls="using:Beholder.Ui.Controls"
              x:Class="Beholder.Ui.Views.Tabs.FirewallActivityStrip"
              x:DataType="vm:FirewallActivityViewModel"
              Background="{DynamicResource BackgroundPanel}">
@@ -82,16 +83,11 @@
                        HorizontalAlignment="Center" />
         </StackPanel>
 
-        <!-- Error -->
-        <Border IsVisible="{Binding HasError}"
-                Background="{DynamicResource BackgroundElevated}"
-                BorderBrush="{DynamicResource SeverityDanger}"
-                BorderThickness="0,0,0,1"
-                Padding="16,6">
-            <TextBlock Text="{Binding ErrorMessage}"
-                       Foreground="{DynamicResource SeverityDanger}"
-                       FontSize="{DynamicResource FontSizeCaption}" />
-        </Border>
+        <!-- Error — see UI_DESIGN.md §5.10 -->
+        <controls:ErrorBanner Severity="Danger"
+                              Message="{Binding ErrorMessage}"
+                              IsVisible="{Binding HasError}"
+                              DismissCommand="{Binding DismissErrorCommand}" />
 
         <!-- Event list -->
         <ScrollViewer IsVisible="{Binding HasEvents}"

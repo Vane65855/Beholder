@@ -188,4 +188,24 @@ public class TrafficColsViewModelTests {
         Assert.Contains(vm.Countries, c => c.Display == "Unknown");
         Assert.Contains(vm.Countries, c => c.Display == "US");
     }
+
+    [Fact]
+    public async Task DismissErrorCommand_ClearsErrorState() {
+        // Trigger a real failure path so HasError is set through production
+        // code, then verify the dismiss command clears it (Phase 6.9).
+        var fakeClient = new FakeDaemonClient {
+            ProcessDestinationsException = new RpcException(
+                new Status(StatusCode.Unavailable, "boom")),
+        };
+        var vm = CreateViewModel(fakeClient);
+
+        await vm.RefreshAsync(Range(), processPath: null);
+        Assert.True(vm.HasError);
+        Assert.NotEmpty(vm.ErrorMessage);
+
+        vm.DismissErrorCommand.Execute(null);
+
+        Assert.False(vm.HasError);
+        Assert.Empty(vm.ErrorMessage);
+    }
 }
