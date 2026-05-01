@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Windows-specific TFM is required: Microsoft.Toolkit.Uwp.Notifications
+         7.1.3's WinRT-wrapping types (ToastNotificationActivatedEventArgsCompat,
+         the toast-XML render path) only exist in the package's
+         net5.0-windows10.0.17763.0 target. The cross-platform netcoreapp3.0
+         target ships stubs that throw at runtime. .NET 10 inherits this. -->
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>false</UseWPF>
+    <UseWindowsForms>false</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Beholder.Core\Beholder.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Beholder.Tests" />
+  </ItemGroup>
+
+  <!-- System.Drawing.Common 4.7.0 is a transitive dep of
+       Microsoft.Toolkit.Uwp.Notifications (used for toast image attachments).
+       We don't pass image attachments today — only text — so the vulnerable
+       surface is unreachable. Suppression flagged for re-evaluation when
+       Toolkit migrates off the affected dep. -->
+  <ItemGroup>
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-rxg9-xrhp-64gj" />
+  </ItemGroup>
+
+</Project>

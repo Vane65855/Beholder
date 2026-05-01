@@ -8,6 +8,12 @@ using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Grpc.Core;
+// Beholder.Core enums ordinally match Beholder.Protocol.Local enums by design
+// (per phases.md Phase 0 design decision). We alias INotificationService as
+// the only Core type touched here; the AlertKind cast at the Notify call
+// site is safe by ordinal compatibility.
+using INotificationService = Beholder.Core.INotificationService;
+using CoreAlertKind = Beholder.Core.AlertKind;
 
 namespace Beholder.Ui.ViewModels;
 
@@ -40,6 +46,7 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
     private readonly IDaemonClient _daemonClient;
     private readonly DaemonStreamSubscriber _streamSubscriber;
     private readonly IDispatcher _dispatcher;
+    private readonly INotificationService _notifications;
     private readonly Action<string>? _navigateToFirewallRule;
     private readonly HashSet<long> _seenSeqs = new();
 
@@ -93,14 +100,17 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
         IDaemonClient daemonClient,
         DaemonStreamSubscriber streamSubscriber,
         IDispatcher dispatcher,
+        INotificationService notifications,
         Action<string>? navigateToFirewallRule = null
     ) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
         ArgumentNullException.ThrowIfNull(dispatcher);
+        ArgumentNullException.ThrowIfNull(notifications);
         _daemonClient = daemonClient;
         _streamSubscriber = streamSubscriber;
         _dispatcher = dispatcher;
+        _notifications = notifications;
         _navigateToFirewallRule = navigateToFirewallRule;
 
         _streamSubscriber.AlertReceived += OnAlertReceived;
@@ -185,7 +195,30 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
             // Otherwise leave selection alone — yanking it under the user's
             // focus would be hostile.
             SelectedAlert ??= row;
+            // OS toast: title = AlertKind label, body = display name + summary
+            // on a single line. Fires only on the live path (atFront=true);
+            // historic alerts loaded via ActivateAsync use atFront=false and
+            // never reach this code, so opening the tab doesn't flood the
+            // user with a toast per row.
+            _notifications.Notify(
+                row.Seq, (CoreAlertKind)row.Kind, row.KindLabel,
+                $"{row.DisplayName} — {row.Summary}");
         });
+    }
+
+    /// <summary>
+    /// Selects the alert with <paramref name="seq"/> if it's in the currently-
+    /// loaded list. No-op if not found (e.g., evicted by the 500-row retention
+    /// cap, or the seq predates the snapshot's RecentAlertLimit). Used by the
+    /// notification click deep-link path.
+    /// </summary>
+    public void SelectBySeq(long seq) {
+        foreach (var row in Alerts) {
+            if (row.Seq == seq) {
+                SelectedAlert = row;
+                return;
+            }
+        }
     }
 
     /// <summary>

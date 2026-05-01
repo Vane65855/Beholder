@@ -1,10 +1,23 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <!-- Conditional TFM. On Windows, target net10.0-windows10.0.17763.0 so we
+       can reference Beholder.Ui.Windows (which needs WinRT-projected types
+       for Microsoft.Toolkit.Uwp.Notifications). On Linux, plain net10.0 so
+       the build doesn't require Windows SDK. The toast notification path
+       is Windows-only via PLATFORM_WINDOWS guards in App.axaml.cs; Linux
+       falls back to NoopNotificationService. -->
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <DefineConstants>$(DefineConstants);PLATFORM_WINDOWS</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(OS)' != 'Windows_NT'">
+    <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
 
   <ItemGroup>
@@ -36,10 +49,19 @@
     <ProjectReference Include="..\Beholder.Protocol\Beholder.Protocol.csproj" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <ProjectReference Include="..\Beholder.Ui.Windows\Beholder.Ui.Windows.csproj" />
+  </ItemGroup>
+
   <!-- Tmds.DBus.Protocol is an Avalonia transitive dep only loaded on Linux.
      Safe to suppress on Windows. Remove when Avalonia updates the reference. -->
   <ItemGroup>
     <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-xrw6-gwf8-vvr9" />
+    <!-- System.Drawing.Common 4.7.0 transitive from Beholder.Ui.Windows's
+         Microsoft.Toolkit.Uwp.Notifications. See Beholder.Ui.Windows.csproj
+         for the rationale; suppressed here too because the audit walks the
+         project graph. -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-rxg9-xrhp-64gj" />
   </ItemGroup>
 
   <ItemGroup>
