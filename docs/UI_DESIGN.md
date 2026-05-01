@@ -325,6 +325,22 @@ Inline colored text labels indicating verification or state. Visible in the Aler
 
 Distinct from toggle pills (5.3: bordered, interactive) and severity rails (5.1: thin edge bars on rows).
 
+### 5.9 OS Notification Toasts
+
+OS-rendered notifications fired when a new alert arrives via the live broadcast stream. Visual appearance is OS-controlled (Windows: bottom-right toast + Action Center; Linux: D-Bus notification, DE-themed); this subsection governs CONTENT, not appearance.
+
+- **Title:** the alert kind label in ALL CAPS — "NEW PROCESS", "HASH CHANGED", "CHAIN ERROR". Matches the in-app kind-badge label so the user mentally maps the toast to the row in the Alerts tab.
+- **Body:** `{display name} — {summary}` on a single line. Display name is the executable file name; summary is the same string the in-app detail pane shows.
+- **Severity mapping** (informational on Windows; sets D-Bus urgency on future Linux impl):
+  - `AlertKind.NewProcess` → `SeverityInfo`
+  - `AlertKind.HashChanged` → `SeverityWarn`
+  - `AlertKind.ChainError` → `SeverityDanger`
+- **Click activation:** restores the main window from minimized state, brings it to the foreground, switches to the Alerts tab, and selects the specific alert by its chain seq. The seq is encoded as a toast argument (`seq=N`) and parsed in the activation callback.
+- **Suppression:** none. Toasts fire on every live alert. Users mute via OS Focus Assist / Do Not Disturb. Notification rate-limiting (e.g., "+N more" coalescing) is a deferred polish item.
+- **Failure handling:** notification failure is non-critical — the alert is durably persisted in `event_log` and visible in the in-app list regardless. The Windows implementation catches and logs at Warning level; never throws.
+
+Distinct from in-app banners (none defined yet — `WindowNotificationManager` is unused) and modal dialogs (banned for routine notifications per UI_QUALITY_STANDARDS §5 #7).
+
 ---
 
 ## 6. Tab-Specific Notes
@@ -393,7 +409,7 @@ The following UI states and elements are not covered by the current mockups. The
 - Loading states (connecting to daemon, waiting for first data)
 - Error states (daemon offline, connection lost mid-session)
 - Scrollbar styling
-- Toast/notification/undo-banner appearance
+- Undo-banner appearance (toast notifications now defined in §5.9)
 
 ---
 

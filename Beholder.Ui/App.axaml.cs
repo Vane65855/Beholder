@@ -1,8 +1,11 @@
 using System;
 using System.Threading;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
+using Beholder.Core;
 using Beholder.Ui.Services;
 using Beholder.Ui.ViewModels;
 using Beholder.Ui.Views;
@@ -15,6 +18,7 @@ public partial class App : Application {
     private DaemonStreamSubscriber? _streamSubscriber;
     private ProcessStateService? _processStateService;
     private MainWindowViewModel? _mainWindowVm;
+    private INotificationService? _notifications;
 
     public override void Initialize() {
         AvaloniaXamlLoader.Load(this);
@@ -46,13 +50,40 @@ public partial class App : Application {
             // for the abstraction's rationale.
             var dispatcher = new AvaloniaDispatcher();
 
+            // OS-native notifications. Windows gets a real toast impl that
+            // hits Action Center; everyone else gets a no-op until a real
+            // Linux/macOS impl ships. The OperatingSystem.IsWindows() guard
+            // inside the PLATFORM_WINDOWS block handles the edge case of
+            // a Windows-built binary running under WSL/Mono.
+#if PLATFORM_WINDOWS
+            _notifications = OperatingSystem.IsWindows()
+                ? new Beholder.Ui.Windows.WindowsNotificationService(
+                    loggerFactory.CreateLogger<Beholder.Ui.Windows.WindowsNotificationService>())
+                : new NoopNotificationService();
+#else
+            _notifications = new NoopNotificationService();
+#endif
+
             var statusStripVm = new StatusStripViewModel(_processStateService, dispatcher);
             var historicalChartLoader = new HistoricalChartLoader(_daemonClient);
 
             _mainWindowVm = new MainWindowViewModel(
                 _daemonClient, _processStateService, _streamSubscriber,
-                statusStripVm, historicalChartLoader, dispatcher);
-            desktop.MainWindow = new MainWindow { DataContext = _mainWindowVm };
+                statusStripVm, historicalChartLoader, dispatcher, _notifications);
+            var mainWindow = new MainWindow { DataContext = _mainWindowVm };
+            desktop.MainWindow = mainWindow;
+
+            // Notification click → restore window + deep-link to alert. App
+            // is the composition root, so this is the one place we can use
+            // Dispatcher.UIThread directly (the IDispatcher abstraction is
+            // for VMs to stay testable). The handler must marshal because
+            // AlertActivated fires on the OS callback thread.
+            _notifications.AlertActivated += seq => Dispatcher.UIThread.Post(() => {
+                if (mainWindow.WindowState == WindowState.Minimized)
+                    mainWindow.WindowState = WindowState.Normal;
+                mainWindow.Activate();
+                _ = _mainWindowVm.NavigateToAlertAsync(seq);
+            });
 
             // Fire-and-forget — both loops run indefinitely until shutdown
             _ = _daemonClient.ConnectAsync(CancellationToken.None);
@@ -63,6 +94,8 @@ public partial class App : Application {
                 // still-live publishers, then tear down the publishers.
                 _mainWindowVm?.Dispose();
                 _processStateService?.Dispose();
+                if (_notifications is IDisposable disposableNotifications)
+                    disposableNotifications.Dispose();
                 if (_streamSubscriber is not null)
                     await _streamSubscriber.DisposeAsync();
                 if (_daemonClient is not null)

@@ -1,5 +1,7 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
+using Beholder.Core;
 using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -63,21 +65,25 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         DaemonStreamSubscriber streamSubscriber,
         StatusStripViewModel statusStripVm,
         HistoricalChartLoader historicalChartLoader,
-        IDispatcher dispatcher) {
+        IDispatcher dispatcher,
+        INotificationService notifications) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
         ArgumentNullException.ThrowIfNull(statusStripVm);
         ArgumentNullException.ThrowIfNull(historicalChartLoader);
         ArgumentNullException.ThrowIfNull(dispatcher);
+        ArgumentNullException.ThrowIfNull(notifications);
         _daemonClient = daemonClient;
         _dispatcher = dispatcher;
         _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader, dispatcher);
         _firewallTab = new FirewallTabViewModel(daemonClient, processStateService, streamSubscriber, dispatcher);
         // Pass NavigateToFirewallRule as the AlertsTabViewModel's deep-link
         // delegate so its ADD RULE button can switch tabs + highlight the
-        // matching rule row (Phase 6.7).
-        _alertsTab = new AlertsTabViewModel(daemonClient, streamSubscriber, dispatcher, NavigateToFirewallRule);
+        // matching rule row (Phase 6.7). Notifications go through the
+        // INotificationService abstraction so the platform impl is hidden.
+        _alertsTab = new AlertsTabViewModel(
+            daemonClient, streamSubscriber, dispatcher, notifications, NavigateToFirewallRule);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         _daemonClient.StateChanged += OnDaemonStateChanged;
@@ -96,6 +102,19 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         // before we try to highlight a row. ActivateAsync is idempotent.
         _ = _firewallTab.ActivateAsync(CancellationToken.None);
         _firewallTab.HighlightRow(processPath);
+    }
+
+    /// <summary>
+    /// Switch to the Alerts tab and select the alert with chain seq
+    /// <paramref name="seq"/>. Used by the notification click-activation
+    /// path: the toast carries the seq, App.axaml.cs's handler restores
+    /// the window and calls this. The tab's <c>ActivateAsync</c> is
+    /// awaited so <c>SelectBySeq</c> sees the populated list.
+    /// </summary>
+    public async Task NavigateToAlertAsync(long seq) {
+        ActiveTab = TabKind.Alerts;
+        await _alertsTab.ActivateAsync(CancellationToken.None);
+        _alertsTab.SelectBySeq(seq);
     }
 
     public void Dispose() {
