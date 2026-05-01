@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Beholder.Ui.ViewModels"
+             xmlns:controls="using:Beholder.Ui.Controls"
              x:Class="Beholder.Ui.Views.Tabs.TrafficColsView"
              x:DataType="vm:TrafficColsViewModel"
              Background="Transparent">
@@ -175,19 +176,13 @@
                        HorizontalAlignment="Center" />
         </StackPanel>
 
-        <!-- Error banner — matches the chart's error-banner placement -->
-        <Border IsVisible="{Binding HasError}"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Top"
-                Margin="0,8,0,0"
-                Padding="12,6"
-                Background="{DynamicResource BackgroundElevated}"
-                CornerRadius="4"
-                BorderBrush="{DynamicResource SeverityWarn}"
-                BorderThickness="1">
-            <TextBlock Text="{Binding ErrorMessage}"
-                       Foreground="{DynamicResource SeverityWarn}"
-                       FontSize="{DynamicResource FontSizeBody}" />
-        </Border>
+        <!-- Error banner — see UI_DESIGN.md §5.10. Severity=Warn matches the
+             chart's centered overlay placement. -->
+        <controls:ErrorBanner VerticalAlignment="Top"
+                              Margin="0,8,0,0"
+                              Severity="Warn"
+                              Message="{Binding ErrorMessage}"
+                              IsVisible="{Binding HasError}"
+                              DismissCommand="{Binding DismissErrorCommand}" />
     </Grid>
 </UserControl>

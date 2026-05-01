@@ -485,4 +485,71 @@ public class AlertsTabViewModelTests {
 
         Assert.Same(initialSelection, vm.SelectedAlert);  // unchanged
     }
+
+    // ---- Phase 6.9: dismiss-X + auto-clear-on-action-entry ----
+
+    [Fact]
+    public async Task DismissErrorCommand_ClearsErrorState() {
+        // Trigger a real failure path so HasError + ErrorMessage are set
+        // through production code, then verify the command clears both.
+        var snapshot = SnapshotWith(MakeAlert(seq: 100, processPath: @"C:\bin\app.exe", isRead: true));
+        var (vm, client, _, _, _) = CreateVm(snapshot);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        client.ApplyFirewallRuleException = new InvalidOperationException("apply failed");
+        await vm.BlockProcessOutCommand.ExecuteAsync(vm.SelectedAlert);
+        Assert.True(vm.HasError);
+        Assert.NotEmpty(vm.ErrorMessage);
+
+        vm.DismissErrorCommand.Execute(null);
+
+        Assert.False(vm.HasError);
+        Assert.Empty(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task BlockProcessOut_ClearsStaleErrorAtEntry_OnSuccess() {
+        // First Block fails (sticky banner); second Block on a different
+        // alert succeeds and must clear the stale error from the first.
+        var snapshot = SnapshotWith(
+            MakeAlert(seq: 100, processPath: @"C:\bin\firefox.exe", isRead: true),
+            MakeAlert(seq: 99, processPath: @"C:\bin\app.exe", isRead: true));
+        var (vm, client, _, _, _) = CreateVm(snapshot);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        // First call fails.
+        client.ApplyFirewallRuleException = new InvalidOperationException("first fail");
+        await vm.BlockProcessOutCommand.ExecuteAsync(vm.Alerts[0]);
+        Assert.True(vm.HasError);
+
+        // Clear the throw and call again on a different alert. Auto-clear
+        // at entry means the stale error is gone before the new RPC fires.
+        client.ApplyFirewallRuleException = null;
+        await vm.BlockProcessOutCommand.ExecuteAsync(vm.Alerts[1]);
+
+        Assert.False(vm.HasError);
+        Assert.Empty(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task BlockProcessOut_ReplacesStaleErrorMessage_OnFreshFailure() {
+        // First Block fails with one message; second Block fails with a
+        // different message. The new message must replace the old (not be
+        // suppressed by the auto-clear-on-entry).
+        var snapshot = SnapshotWith(
+            MakeAlert(seq: 100, processPath: @"C:\bin\firefox.exe", isRead: true),
+            MakeAlert(seq: 99, processPath: @"C:\bin\app.exe", isRead: true));
+        var (vm, client, _, _, _) = CreateVm(snapshot);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        client.ApplyFirewallRuleException = new InvalidOperationException("FIRST_ERROR_MESSAGE");
+        await vm.BlockProcessOutCommand.ExecuteAsync(vm.Alerts[0]);
+        Assert.Contains("FIRST_ERROR_MESSAGE", vm.ErrorMessage);
+
+        client.ApplyFirewallRuleException = new InvalidOperationException("SECOND_ERROR_MESSAGE");
+        await vm.BlockProcessOutCommand.ExecuteAsync(vm.Alerts[1]);
+
+        Assert.True(vm.HasError);
+        Assert.Contains("SECOND_ERROR_MESSAGE", vm.ErrorMessage);
+        Assert.DoesNotContain("FIRST_ERROR_MESSAGE", vm.ErrorMessage);
+    }
 }

@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Beholder.Ui.ViewModels"
+             xmlns:controls="using:Beholder.Ui.Controls"
              x:Class="Beholder.Ui.Views.Tabs.AlertsTabView"
              x:DataType="vm:AlertsTabViewModel"
              Background="{DynamicResource BackgroundRoot}">
@@ -274,17 +275,15 @@
                        VerticalAlignment="Center" />
         </Panel>
 
-        <!-- ────────────────  Error banner  ──────────────── -->
-        <Border Grid.Column="1"
-                IsVisible="{Binding HasError}"
-                VerticalAlignment="Top"
-                Background="{DynamicResource BackgroundElevated}"
-                BorderBrush="{DynamicResource SeverityDanger}"
-                BorderThickness="0,0,0,1"
-                Padding="16,8">
-            <TextBlock Text="{Binding ErrorMessage}"
-                       Foreground="{DynamicResource SeverityDanger}"
-                       FontSize="{DynamicResource FontSizeBody}" />
-        </Border>
+        <!-- Error banner — see UI_DESIGN.md §5.10. Severity=Danger gives the
+             full-width red bottom-border treatment. DismissCommand drives the
+             X button so users can clear stale errors that the next action
+             didn't replace. -->
+        <controls:ErrorBanner Grid.Column="1"
+                              VerticalAlignment="Top"
+                              Severity="Danger"
+                              Message="{Binding ErrorMessage}"
+                              IsVisible="{Binding HasError}"
+                              DismissCommand="{Binding DismissErrorCommand}" />
     </Grid>
 </UserControl>

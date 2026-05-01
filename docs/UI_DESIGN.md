@@ -341,6 +341,21 @@ OS-rendered notifications fired when a new alert arrives via the live broadcast 
 
 Distinct from in-app banners (none defined yet — `WindowNotificationManager` is unused) and modal dialogs (banned for routine notifications per UI_QUALITY_STANDARDS §5 #7).
 
+### 5.10 Error Banner
+
+Inline error/warning banner shown above the affected view's content area. Two severity variants:
+
+- **Danger** — full-width, red bottom-border, no corner radius. Used for action failures (RPC errors, validation failures, "Failed to apply firewall rule"). Sits at the top of the content panel like a system alert. Background `BackgroundElevated`, border + text `SeverityDanger`.
+- **Warn** — centered overlay, yellow border with corner radius, smaller padding. Used for transient soft-warning states (daemon disconnected showing stale data, historical-load failure). Background `BackgroundElevated`, border + text `SeverityWarn`.
+
+**Dismiss affordance:** every banner has a close-X button (right-aligned, `Path` glyph mirroring `WindowControls.axaml`). Click invokes the bound `DismissCommand`, which sets `HasError = false` and clears `ErrorMessage`. Cursor `Hand`; hover tints `BackgroundHover`; tooltip "Dismiss".
+
+**Auto-clear on action entry:** when the user takes another action (e.g., clicks BLOCK on a different alert), the action method clears `HasError` at entry before attempting the new operation. A successful retry implicitly dismisses the stale error; a fresh failure shows its own message. The X exists for cases where the user doesn't want to retry.
+
+**Reusable control:** `Beholder.Ui/Controls/ErrorBanner.axaml`. Bound properties: `Severity` (`Danger`/`Warn` enum), `Message` (string), `DismissCommand` (ICommand?). When `DismissCommand` is null the X button is hidden — the banner reverts to read-only display, used for cases where the banner clears via another mechanism (e.g., daemon-reconnect auto-clears the "Daemon disconnected" banner in `TrafficTabViewModel.OnDaemonStateChanged`).
+
+Distinct from in-app toasts (none defined yet) and OS notification toasts (§5.9).
+
 ---
 
 ## 6. Tab-Specific Notes
@@ -407,9 +422,8 @@ The following UI states and elements are not covered by the current mockups. The
 - Context menu styling
 - Empty states (no data, first launch)
 - Loading states (connecting to daemon, waiting for first data)
-- Error states (daemon offline, connection lost mid-session)
 - Scrollbar styling
-- Undo-banner appearance (toast notifications now defined in §5.9)
+- Undo-banner appearance (toast notifications now defined in §5.9; error banners in §5.10)
 
 ---
 

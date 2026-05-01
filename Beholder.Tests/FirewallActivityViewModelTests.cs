@@ -155,4 +155,24 @@ public class FirewallActivityViewModelTests {
         Assert.Equal("muted", row.KindBadgeClass);
         Assert.Contains("removed", row.Description);
     }
+
+    [Fact]
+    public async Task DismissErrorCommand_ClearsErrorState() {
+        // Trigger a real failure path so HasError is set through production
+        // code, then verify the dismiss command clears it (Phase 6.9).
+        var client = new FakeDaemonClient {
+            FirewallActivityException = new InvalidOperationException("Boom"),
+        };
+        var subscriber = new DaemonStreamSubscriber(
+            client, TimeProvider.System, NullLogger<DaemonStreamSubscriber>.Instance);
+        var vm = new FirewallActivityViewModel(client, subscriber, new SyncDispatcher());
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.True(vm.HasError);
+        Assert.NotEmpty(vm.ErrorMessage);
+
+        vm.DismissErrorCommand.Execute(null);
+
+        Assert.False(vm.HasError);
+        Assert.Empty(vm.ErrorMessage);
+    }
 }

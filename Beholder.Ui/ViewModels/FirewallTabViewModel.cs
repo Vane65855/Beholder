@@ -580,6 +580,7 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     [RelayCommand]
     private async Task CycleInPill(FirewallRuleRow row) {
         if (row is null) return;
+        ClearError();   // see UI_DESIGN.md §5.10 auto-clear
         var previous = row.InAction;
         var next = FirewallRuleRow.NextState(previous);
         row.InAction = next;
@@ -596,6 +597,7 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     [RelayCommand]
     private async Task CycleOutPill(FirewallRuleRow row) {
         if (row is null) return;
+        ClearError();   // see UI_DESIGN.md §5.10 auto-clear
         var previous = row.OutAction;
         var next = FirewallRuleRow.NextState(previous);
         row.OutAction = next;
@@ -656,6 +658,7 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
 
     [RelayCommand]
     private async Task ToggleEnforcement() {
+        ClearError();   // see UI_DESIGN.md §5.10 auto-clear
         var previous = IsFirewallEnabled;
         var target = !previous;
         IsFirewallEnabled = target;
@@ -670,6 +673,20 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
             HasError = true;
             ErrorMessage = $"Failed to toggle firewall enforcement: {ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// Clears the error banner. Bound to the close-X on the inline
+    /// <see cref="Beholder.Ui.Controls.ErrorBanner"/>; also called by every
+    /// action method on entry so a successful retry implicitly dismisses
+    /// stale errors. See UI_DESIGN.md §5.10.
+    /// </summary>
+    [RelayCommand]
+    private void DismissError() => ClearError();
+
+    private void ClearError() {
+        HasError = false;
+        ErrorMessage = string.Empty;
     }
 
     partial void OnSearchTextChanged(string value) {

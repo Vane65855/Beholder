@@ -1,0 +1,85 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Beholder.Ui.Controls.ErrorBanner">
+
+    <UserControl.Styles>
+        <!-- Danger variant: full-width, red bottom-border. Used for action
+             failures that demand attention (RPC errors, validation failures).
+             See UI_DESIGN.md §5.10. -->
+        <Style Selector="Border.errorBanner.danger">
+            <Setter Property="Background" Value="{DynamicResource BackgroundElevated}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SeverityDanger}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="16,8" />
+        </Style>
+        <Style Selector="Border.errorBanner.danger TextBlock#MessageText">
+            <Setter Property="Foreground" Value="{DynamicResource SeverityDanger}" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
+        </Style>
+        <Style Selector="Border.errorBanner.danger Path#DismissGlyph">
+            <Setter Property="Stroke" Value="{DynamicResource SeverityDanger}" />
+        </Style>
+
+        <!-- Warn variant: centered overlay, yellow rounded border, smaller
+             padding. Used for transient soft warnings (daemon disconnected,
+             historical-load failure). See UI_DESIGN.md §5.10. -->
+        <Style Selector="Border.errorBanner.warn">
+            <Setter Property="Background" Value="{DynamicResource BackgroundElevated}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SeverityWarn}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Border.errorBanner.warn TextBlock#MessageText">
+            <Setter Property="Foreground" Value="{DynamicResource SeverityWarn}" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
+        </Style>
+        <Style Selector="Border.errorBanner.warn Path#DismissGlyph">
+            <Setter Property="Stroke" Value="{DynamicResource SeverityWarn}" />
+        </Style>
+
+        <!-- Close X button: small icon button, hover tints background per
+             UI_QUALITY_STANDARDS §4.1; cursor Hand + tooltip per §4.4. -->
+        <Style Selector="Button.bannerCloseButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="6" />
+            <Setter Property="Margin" Value="12,0,0,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.bannerCloseButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border x:Name="BannerBorder" Classes="errorBanner">
+        <DockPanel LastChildFill="True">
+            <!-- Right-docked dismiss X. Hidden when no DismissCommand is bound,
+                 so this same control can render read-only banners that clear via
+                 a different mechanism (e.g., daemon-reconnect). -->
+            <Button x:Name="DismissButton"
+                    DockPanel.Dock="Right"
+                    Classes="bannerCloseButton"
+                    Click="OnDismissClick"
+                    ToolTip.Tip="Dismiss">
+                <!-- X glyph: two crossed strokes. Mirrors the close button in
+                     WindowControls.axaml (proven precedent). The Stroke is
+                     set per-severity via the Border.errorBanner.* selectors
+                     above. -->
+                <Path x:Name="DismissGlyph"
+                      Data="M 0,0 L 8,8 M 8,0 L 0,8"
+                      StrokeThickness="1"
+                      Width="8" Height="8"
+                      Stretch="None"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center" />
+            </Button>
+            <!-- Message fills remaining width via DockPanel.LastChildFill. -->
+            <TextBlock x:Name="MessageText"
+                       VerticalAlignment="Center"
+                       TextWrapping="Wrap" />
+        </DockPanel>
+    </Border>
+</UserControl>

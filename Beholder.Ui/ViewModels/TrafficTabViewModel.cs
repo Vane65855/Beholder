@@ -150,14 +150,27 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     private void OnDaemonStateChanged(DaemonStatusInfo status) {
         _dispatcher.Post(() => {
             if (status.State == ConnectionState.Connected) {
-                HasError = false;
-                ErrorMessage = string.Empty;
+                ClearError();
             } else if (status.State is ConnectionState.Disconnected or ConnectionState.Reconnecting) {
                 HasError = true;
                 ErrorMessage = "Daemon disconnected \u2014 showing last known data.";
                 IsLoading = false;
             }
         });
+    }
+
+    /// <summary>
+    /// Clears the error banner. Bound to the close-X on the inline
+    /// <see cref="Beholder.Ui.Controls.ErrorBanner"/>; also called by every
+    /// historical-load entry and by the daemon-reconnect handler so transient
+    /// errors don't stick after recovery. See UI_DESIGN.md \u00a75.10.
+    /// </summary>
+    [RelayCommand]
+    private void DismissError() => ClearError();
+
+    private void ClearError() {
+        HasError = false;
+        ErrorMessage = string.Empty;
     }
 
     private void OnProcessStatesUpdated(IReadOnlyDictionary<string, ProcessState> states) {
@@ -225,6 +238,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     }
 
     private async Task LoadHistoricalRangeAsync(TimeRangeSelection range) {
+        ClearError();   // see UI_DESIGN.md §5.10 auto-clear
         try {
             IsLoading = true;
             IsEmpty = false;

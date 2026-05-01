@@ -313,4 +313,44 @@ public partial class FirewallTabViewModelTests {
         Assert.True(vm.HasError);
         Assert.False(vm.IsLoading);
     }
+
+    // ---- Phase 6.9: dismiss-X + auto-clear-on-action-entry ----
+
+    [Fact]
+    public async Task DismissErrorCommand_ClearsErrorState() {
+        var client = new FakeDaemonClient {
+            SnapshotException = new InvalidOperationException("Boom"),
+        };
+        var subscriber = new DaemonStreamSubscriber(
+            client, TimeProvider.System, NullLogger<DaemonStreamSubscriber>.Instance);
+        var processStateService = new ProcessStateService(subscriber, client, TimeProvider.System);
+        var vm = new FirewallTabViewModel(client, processStateService, subscriber, new SyncDispatcher());
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.True(vm.HasError);
+        Assert.NotEmpty(vm.ErrorMessage);
+
+        vm.DismissErrorCommand.Execute(null);
+
+        Assert.False(vm.HasError);
+        Assert.Empty(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ToggleEnforcement_ClearsStaleErrorAtEntry_OnSuccess() {
+        // First toggle fails (stale banner). Second toggle succeeds and
+        // must auto-clear the prior error before the RPC fires.
+        var rules = new ListFirewallRulesResponse();
+        var (vm, client, _) = CreateVm(rules: rules);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        client.SetFirewallEnabledException = new InvalidOperationException("first toggle fail");
+        await vm.ToggleEnforcementCommand.ExecuteAsync(null);
+        Assert.True(vm.HasError);
+
+        client.SetFirewallEnabledException = null;
+        await vm.ToggleEnforcementCommand.ExecuteAsync(null);
+
+        Assert.False(vm.HasError);
+        Assert.Empty(vm.ErrorMessage);
+    }
 }

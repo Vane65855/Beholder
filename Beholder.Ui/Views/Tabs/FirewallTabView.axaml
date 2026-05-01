@@ -194,16 +194,11 @@
                        FontSize="{DynamicResource FontSizeBody}" />
         </Border>
 
-        <Border DockPanel.Dock="Top"
-                IsVisible="{Binding HasError}"
-                Background="{DynamicResource BackgroundElevated}"
-                BorderBrush="{DynamicResource SeverityDanger}"
-                BorderThickness="0,0,0,1"
-                Padding="16,8">
-            <TextBlock Text="{Binding ErrorMessage}"
-                       Foreground="{DynamicResource SeverityDanger}"
-                       FontSize="{DynamicResource FontSizeBody}" />
-        </Border>
+        <controls:ErrorBanner DockPanel.Dock="Top"
+                              Severity="Danger"
+                              Message="{Binding ErrorMessage}"
+                              IsVisible="{Binding HasError}"
+                              DismissCommand="{Binding DismissErrorCommand}" />
 
         <!-- Transient copy banner. Shown for ~2 seconds after a row's parent
              directory is copied to the clipboard via double-tap. Auto-clears
