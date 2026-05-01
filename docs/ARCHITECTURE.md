@@ -144,8 +144,8 @@ Only three alert types exist:
 
 | Kind          | Trigger                                      | Frequency         |
 |---------------|----------------------------------------------|--------------------|
-| `NewProcess`  | A binary path accesses the network for the first time | Once per unique path, ever |
-| `HashChanged` | A tracked binary's SHA-256 differs from the stored value | Once per update per binary |
+| `NewProcess`  | A binary accesses the network for the first time. Identity = (signed publisher subject, ProductName, install-root folder) when available; falls back to path for unsigned or no-VersionInfo binaries. See ADR 007. | Once per logical identity, ever |
+| `HashChanged` | A tracked binary's SHA-256 differs from the stored value, OR a known logical app appears with a different signing publisher (spoof detection — see ADR 007). | Per change |
 | `ChainError`  | Hash chain verification detects a mismatch or gap | Should be never |
 
 Alerts are written to the chain-hashed event log. The UI receives them via the IPC event stream. Alerts are never deleted — they transition from "unread" to "read" when the user views them.
