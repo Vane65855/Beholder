@@ -42,6 +42,7 @@ public sealed class DatabaseInitializer {
 
         EnableWalMode(connection);
         CreateTables(connection);
+        MigrateProcessRegistryFor75(connection);
         CreateIndexes(connection);
     }
 
@@ -196,9 +197,51 @@ public sealed class DatabaseInitializer {
             """);
     }
 
+    /// <summary>
+    /// Idempotent ALTER TABLE migration that adds the Phase 7.5 logical-
+    /// identity + Authenticode columns to <c>process_registry</c>. Each
+    /// column is only added when missing, so re-running on an upgraded
+    /// database is a no-op. Pre-7.5 rows keep NULL identity columns and
+    /// fall back to path-based dedup. See ADR 007.
+    /// </summary>
+    private static void MigrateProcessRegistryFor75(SqliteConnection connection) {
+        var existingColumns = ReadColumnNames(connection, "process_registry");
+        AddColumnIfMissing(connection, existingColumns, "process_registry", "company_name", "TEXT");
+        AddColumnIfMissing(connection, existingColumns, "process_registry", "product_name", "TEXT");
+        AddColumnIfMissing(connection, existingColumns, "process_registry", "install_root", "TEXT");
+        AddColumnIfMissing(connection, existingColumns, "process_registry", "cert_subject_cn", "TEXT");
+        AddColumnIfMissing(connection, existingColumns, "process_registry", "cert_issuer_cn", "TEXT");
+        AddColumnIfMissing(connection, existingColumns, "process_registry", "signature_status", "TEXT");
+    }
+
+    private static HashSet<string> ReadColumnNames(SqliteConnection connection, string table) {
+        using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({table});";
+        using var reader = command.ExecuteReader();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (reader.Read()) names.Add(reader.GetString(1));  // column 1 is the name
+        return names;
+    }
+
+    private static void AddColumnIfMissing(
+        SqliteConnection connection, HashSet<string> existing,
+        string table, string column, string type
+    ) {
+        if (existing.Contains(column)) return;
+        Execute(connection, $"ALTER TABLE {table} ADD COLUMN {column} {type};");
+    }
+
     private static void CreateIndexes(SqliteConnection connection) {
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_event_log_kind ON event_log(kind);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_firewall_rules_process_path ON firewall_rules(process_path);");
+
+        // Partial index supporting Phase 7.5 logical-identity dedup queries.
+        // Only indexes rows that actually have identity data (post-7.5 rows
+        // and any pre-7.5 rows that were re-resolved). Keeps the index tight.
+        Execute(connection,
+            "CREATE INDEX IF NOT EXISTS idx_process_registry_logical_identity " +
+            "ON process_registry(company_name, product_name, install_root) " +
+            "WHERE company_name IS NOT NULL;");
 
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_raw_process_time ON traffic_raw(process_path, bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_raw_time ON traffic_raw(bucket_start_ms);");

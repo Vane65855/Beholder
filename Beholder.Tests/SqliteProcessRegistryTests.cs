@@ -195,19 +195,132 @@ public sealed class SqliteProcessRegistryTests : IDisposable {
         Assert.Equal((byte)0x11, fetched.Sha256[0]);
     }
 
+    // ---- Phase 7.5: identity columns + FindByLogicalIdentity ----
+
+    [Fact]
+    public async Task RegisterAsync_StoresIdentityColumns_RoundTrip() {
+        var info = MakeProcessInfo(
+            companyName: "Discord, Inc.",
+            productName: "Discord",
+            installRoot: @"C:\Users\X\AppData\Local\Discord",
+            certSubjectCn: "CN=Discord Inc.",
+            certIssuerCn: "CN=DigiCert",
+            signatureStatus: SignatureValidationStatus.Valid);
+
+        await _registry.RegisterAsync(info, CancellationToken.None);
+
+        var fetched = await _registry.GetByPathAsync("/usr/bin/curl", CancellationToken.None);
+        Assert.NotNull(fetched);
+        Assert.Equal("Discord, Inc.", fetched.CompanyName);
+        Assert.Equal("Discord", fetched.ProductName);
+        Assert.Equal(@"C:\Users\X\AppData\Local\Discord", fetched.InstallRoot);
+        Assert.Equal("CN=Discord Inc.", fetched.CertSubjectCn);
+        Assert.Equal("CN=DigiCert", fetched.CertIssuerCn);
+        Assert.Equal(SignatureValidationStatus.Valid, fetched.SignatureStatus);
+    }
+
+    [Fact]
+    public async Task RegisterAsync_NullIdentityColumns_RoundTripAsNull() {
+        // Pre-7.5 row equivalent: no identity metadata. Defaults already
+        // null on MakeProcessInfo overload.
+        var info = MakeProcessInfo();
+
+        await _registry.RegisterAsync(info, CancellationToken.None);
+
+        var fetched = await _registry.GetByPathAsync("/usr/bin/curl", CancellationToken.None);
+        Assert.NotNull(fetched);
+        Assert.Null(fetched.CompanyName);
+        Assert.Null(fetched.ProductName);
+        Assert.Null(fetched.InstallRoot);
+        Assert.Null(fetched.CertSubjectCn);
+        Assert.Null(fetched.CertIssuerCn);
+        Assert.Null(fetched.SignatureStatus);
+    }
+
+    [Fact]
+    public async Task FindByLogicalIdentityAsync_MatchingIdentity_ReturnsRow() {
+        await _registry.RegisterAsync(MakeProcessInfo(
+            path: @"C:\Users\X\AppData\Local\Discord\app-1.0.9225\Discord.exe",
+            companyName: "Discord, Inc.", productName: "Discord",
+            installRoot: @"C:\Users\X\AppData\Local\Discord"), CancellationToken.None);
+
+        var found = await _registry.FindByLogicalIdentityAsync(
+            "Discord, Inc.", "Discord", @"C:\Users\X\AppData\Local\Discord",
+            CancellationToken.None);
+
+        Assert.NotNull(found);
+        Assert.Equal(@"C:\Users\X\AppData\Local\Discord\app-1.0.9225\Discord.exe", found.Path);
+    }
+
+    [Fact]
+    public async Task FindByLogicalIdentityAsync_NoMatch_ReturnsNull() {
+        await _registry.RegisterAsync(MakeProcessInfo(
+            path: @"C:\Users\X\AppData\Local\Discord\app-1.0.9225\Discord.exe",
+            companyName: "Discord, Inc.", productName: "Discord",
+            installRoot: @"C:\Users\X\AppData\Local\Discord"), CancellationToken.None);
+
+        var found = await _registry.FindByLogicalIdentityAsync(
+            "Discord, Inc.", "Discord", @"C:\Program Files\Discord",
+            CancellationToken.None);
+
+        Assert.Null(found);
+    }
+
+    [Fact]
+    public async Task FindByLogicalIdentityAsync_InstallRootCaseInsensitive_StillMatches() {
+        // Windows paths are case-insensitive. The query uses COLLATE NOCASE
+        // on install_root so a registered row with mixed-case path is still
+        // findable from a lookup using a different case.
+        await _registry.RegisterAsync(MakeProcessInfo(
+            path: @"C:\Users\X\AppData\Local\Discord\app-1.0.9225\Discord.exe",
+            companyName: "Discord, Inc.", productName: "Discord",
+            installRoot: @"C:\Users\X\AppData\Local\Discord"), CancellationToken.None);
+
+        var found = await _registry.FindByLogicalIdentityAsync(
+            "Discord, Inc.", "Discord", @"c:\users\x\appdata\local\discord",
+            CancellationToken.None);
+
+        Assert.NotNull(found);
+    }
+
+    [Fact]
+    public async Task Initialize_SchemaMigration_IsIdempotent() {
+        // Call Initialize twice on the same database. Second call must
+        // succeed without errors — the ALTER TABLE migration is gated on
+        // existing column presence.
+        new DatabaseInitializer(_databasePath, pooling: false).Initialize();
+        new DatabaseInitializer(_databasePath, pooling: false).Initialize();
+
+        // Sanity check: the registry still works after re-init.
+        var info = await _registry.GetByPathAsync("/never/registered", CancellationToken.None);
+        Assert.Null(info);
+    }
+
     private static ProcessInfo MakeProcessInfo(
         string path = "/usr/bin/curl",
         string displayName = "curl",
         byte[]? sha256 = null,
         DateTimeOffset? firstSeen = null,
         DateTimeOffset? lastSeen = null,
-        DateTimeOffset? lastHashedAt = null
+        DateTimeOffset? lastHashedAt = null,
+        string? companyName = null,
+        string? productName = null,
+        string? installRoot = null,
+        string? certSubjectCn = null,
+        string? certIssuerCn = null,
+        SignatureValidationStatus? signatureStatus = null
     ) => new ProcessInfo(
         path: path,
         displayName: displayName,
         sha256: sha256,
         firstSeen: firstSeen ?? DefaultTimestamp,
         lastSeen: lastSeen ?? DefaultTimestamp,
-        lastHashedAt: lastHashedAt
+        lastHashedAt: lastHashedAt,
+        companyName: companyName,
+        productName: productName,
+        installRoot: installRoot,
+        certSubjectCn: certSubjectCn,
+        certIssuerCn: certIssuerCn,
+        signatureStatus: signatureStatus
     );
 }

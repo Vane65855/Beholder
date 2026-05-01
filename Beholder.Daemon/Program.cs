@@ -82,6 +82,11 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<IAlertStore>(sp => sp.GetRequiredService<SqliteAlertStore>());
     builder.Services.AddSingleton<SqliteProcessRegistry>();
     builder.Services.AddSingleton<IProcessRegistry>(sp => sp.GetRequiredService<SqliteProcessRegistry>());
+    // Phase 7.5: Windows-only PE VersionInfo + Authenticode reader. Linux
+    // daemon registers no IBinaryIdentityProvider; NewProcessDetector
+    // accepts a nullable dependency and falls back to path-based dedup.
+    // See ADR 007.
+    builder.Services.AddSingleton<IBinaryIdentityProvider, WindowsBinaryIdentityProvider>();
     builder.Services.AddSingleton<SqliteTrafficStore>();
     builder.Services.AddSingleton<ITrafficStore>(sp => sp.GetRequiredService<SqliteTrafficStore>());
     builder.Services.AddSingleton<IDnsHostnameBackfill>(sp => sp.GetRequiredService<SqliteTrafficStore>());

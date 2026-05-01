@@ -30,4 +30,22 @@ internal sealed class FakeProcessRegistry : IProcessRegistry {
 
     public Task<IReadOnlyList<ProcessInfo>> ListAllAsync(CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<ProcessInfo>>(_store.Values.ToList());
+
+    public Task<ProcessInfo?> FindByLogicalIdentityAsync(
+        string companyName, string productName, string installRoot,
+        CancellationToken cancellationToken
+    ) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(companyName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(productName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(installRoot);
+
+        foreach (var info in _store.Values) {
+            if (string.Equals(info.CompanyName, companyName, StringComparison.Ordinal)
+                && string.Equals(info.ProductName, productName, StringComparison.Ordinal)
+                && string.Equals(info.InstallRoot, installRoot, StringComparison.OrdinalIgnoreCase)) {
+                return Task.FromResult<ProcessInfo?>(info);
+            }
+        }
+        return Task.FromResult<ProcessInfo?>(null);
+    }
 }

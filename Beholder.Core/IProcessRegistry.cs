@@ -24,4 +24,17 @@ public interface IProcessRegistry {
     /// on snapshot.
     /// </summary>
     Task<IReadOnlyList<ProcessInfo>> ListAllAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Find a registered process matching the given logical identity, or null
+    /// if no match. "Logical identity" = (CompanyName, ProductName, InstallRoot).
+    /// All three components must match exactly (case-insensitive on
+    /// InstallRoot since paths are case-insensitive on Windows). Used by the
+    /// Phase 7.5 NewProcess dedup path to recognize Squirrel-style auto-
+    /// updaters (Discord, Slack-old, GitHub Desktop) as a single logical app
+    /// across versions. See ADR 007.
+    /// </summary>
+    Task<ProcessInfo?> FindByLogicalIdentityAsync(
+        string companyName, string productName, string installRoot,
+        CancellationToken cancellationToken);
 }
