@@ -94,14 +94,27 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
 
     /// <summary>
     /// Selected rule row, set by <see cref="HighlightRow"/> when the Alerts
-    /// tab deep-links into the Firewall tab. Bound to the rule list's
-    /// <c>SelectedItem</c> so the view's selection visual + ScrollIntoView
-    /// behavior pick the row up. Two-way so user-driven selection (click on
-    /// a row) also flows back here, but the VM has no logic on user-selection
-    /// changes today — the binding is purely for the deep-link handoff.
+    /// tab deep-links into the Firewall tab. Two-way so user-driven selection
+    /// (click on a row) also flows back here, but the VM has no logic on
+    /// user-selection changes today — the binding is purely for the deep-link
+    /// handoff. The actual scroll-into-view affordance is driven separately
+    /// by the <see cref="RowScrollRequested"/> event raised inside
+    /// <c>HighlightRow</c>; the view code-behind subscribes and calls
+    /// <c>BringIntoView</c> on the row's container.
     /// </summary>
     [ObservableProperty]
     private FirewallRuleRow? _selectedRow;
+
+    /// <summary>
+    /// Raised by <see cref="HighlightRow"/> after the matching row is found
+    /// and its containing group expanded. The view code-behind subscribes to
+    /// this and calls <c>BringIntoView</c> on the row's realized container so
+    /// the deep-link from Alerts → Firewall lands the user on the highlighted
+    /// row instead of wherever the scroll position happened to be. Internal
+    /// because only the matching <c>FirewallTabView</c> needs to consume it;
+    /// it has no role outside that single view↔VM binding.
+    /// </summary>
+    internal event Action<FirewallRuleRow>? RowScrollRequested;
 
     /// <summary>
     /// Whether the ACTIVE APPS group renders its rows. Default true: this is
@@ -754,6 +767,20 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         _currentlyHighlightedRow = row;
         row.IsHighlighted = true;
         SelectedRow = row;
+
+        // If the row lives in the (collapsed-by-default) Inactive group,
+        // expand the group so the row's container can be realized — the
+        // bring-into-view call the view does in response to the event below
+        // is a no-op against a collapsed (IsVisible=false) ItemsControl.
+        // Active is expanded by default but flip it defensively in case the
+        // user collapsed it earlier in the session.
+        if (InactiveRows.Contains(row)) {
+            IsInactiveExpanded = true;
+        } else if (ActiveRows.Contains(row)) {
+            IsActiveExpanded = true;
+        }
+
+        RowScrollRequested?.Invoke(row);
 
         _ = ClearHighlightAfterDelayAsync(row, _highlightCts.Token);
     }
