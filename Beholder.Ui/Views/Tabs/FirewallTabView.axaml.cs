@@ -72,43 +72,52 @@ public partial class FirewallTabView : UserControl {
     }
 
     /// <summary>
-    /// Brings the row's container into view inside the rule list's
-    /// ScrollViewer. Tries both ItemsControls — the VM has already expanded
-    /// the relevant group, so the matching ItemsControl returns a non-null
-    /// container if the row's already realized. For VirtualizingStackPanel
-    /// rows that haven't been materialized yet (the panel doesn't think
-    /// they're visible at the current scroll position), we subscribe to a
-    /// single LayoutUpdated tick on both controls and retry; if still null
-    /// after that pass, we give up — likely filtered out by the active
-    /// search/filter combination.
+    /// Maximum number of LayoutUpdated ticks we'll wait for a freshly-
+    /// revealed ItemsControl's panel to materialize before giving up.
+    /// Each tick is one layout pass (~ms scale); 10 covers the worst-case
+    /// cascade where the IsVisible binding flips, the StackPanel re-lays
+    /// out, and only then the ItemsControl realizes its ItemsPanelRoot.
+    /// Bounded so a misconfigured panel doesn't leak the handler.
+    /// </summary>
+    private const int ScrollIntoViewMaxLayoutTicks = 10;
+
+    /// <summary>
+    /// Scrolls the row into view. Picks the target ItemsControl from
+    /// <c>row.IsActive</c> (the VM has already toggled
+    /// <c>IsActiveExpanded</c> / <c>IsInactiveExpanded</c> to match) and
+    /// delegates to <c>ItemsControl.ScrollIntoView</c>, which forces panel
+    /// materialization for unrealized rows in a VirtualizingStackPanel and
+    /// then bubbles the BringIntoView request up to the outer ScrollViewer.
+    /// If the group was just expanded, the panel may not exist yet; defer
+    /// the call until LayoutUpdated reports a realized ItemsPanelRoot.
     /// </summary>
     private void OnRowScrollRequested(FirewallRuleRow row) {
-        if (TryBringIntoView(row)) return;
+        var target = row.IsActive ? ActiveRulesItems : InactiveRulesItems;
 
+        if (TryScrollIntoView(target, row)) return;
+
+        var attempts = 0;
         EventHandler? handler = null;
         handler = (_, _) => {
-            // Unsubscribe first so a single tick doesn't fire the handler
-            // twice (LayoutUpdated raises on every layout pass; without
-            // unsubscribing, the second subscriber would still be live).
-            ActiveRulesItems.LayoutUpdated -= handler!;
-            InactiveRulesItems.LayoutUpdated -= handler!;
-            // Best-effort second attempt; intentionally no third retry to
-            // avoid leaking the handler if the row is filtered out of view.
-            TryBringIntoView(row);
+            attempts++;
+            if (TryScrollIntoView(target, row)) {
+                target.LayoutUpdated -= handler!;
+                return;
+            }
+            if (attempts >= ScrollIntoViewMaxLayoutTicks) {
+                target.LayoutUpdated -= handler!;
+            }
         };
-        ActiveRulesItems.LayoutUpdated += handler;
-        InactiveRulesItems.LayoutUpdated += handler;
+        target.LayoutUpdated += handler;
     }
 
-    private bool TryBringIntoView(FirewallRuleRow row) {
-        if (ActiveRulesItems.ContainerFromItem(row) is Control activeContainer) {
-            activeContainer.BringIntoView();
-            return true;
-        }
-        if (InactiveRulesItems.ContainerFromItem(row) is Control inactiveContainer) {
-            inactiveContainer.BringIntoView();
-            return true;
-        }
-        return false;
+    private static bool TryScrollIntoView(ItemsControl items, FirewallRuleRow row) {
+        // ItemsPanelRoot is null until the ItemsControl's first layout pass
+        // after becoming visible. Once non-null, ScrollIntoView is safe to
+        // call even for virtualized (off-viewport) items — it forces the
+        // panel to realize the container before raising BringIntoView.
+        if (items.ItemsPanelRoot is null) return false;
+        items.ScrollIntoView(row);
+        return true;
     }
 }

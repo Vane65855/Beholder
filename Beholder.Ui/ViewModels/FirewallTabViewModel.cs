@@ -35,7 +35,19 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     private readonly Dictionary<string, FirewallRuleRow> _rowsByPath = new(StringComparer.Ordinal);
 
     private CancellationTokenSource? _activationCts;
-    private bool _activated;
+
+    /// <summary>
+    /// In-flight (or completed) activation task. Tracking the Task instead of
+    /// a plain <c>bool _activated</c> closes the cold-start race the deep-link
+    /// from Alerts → Firewall hit: <c>OnActiveTabChanged</c> fires
+    /// <c>ActivateAsync</c> as fire-and-forget, then
+    /// <c>NavigateToFirewallRuleAsync</c> awaits its own call. With a bool
+    /// guard, the second call would see <c>_activated = true</c> and return
+    /// instantly while the first call's RPCs were still in flight, leaving
+    /// <c>_rowsByPath</c> empty when <c>HighlightRow</c> ran. Storing the
+    /// Task makes both callers await the same underlying load.
+    /// </summary>
+    private Task? _activationTask;
 
     /// <summary>
     /// Owned CTS for the transient highlight token set by
@@ -207,20 +219,23 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
     }
 
     /// <summary>
-    /// Initial load. Idempotent — calling more than once short-circuits after
-    /// the first activation. Tests and the tab-switch path both invoke this;
-    /// the second call is a no-op so repeated tab switches don't re-fetch.
+    /// Initial load. Idempotent — concurrent callers and post-completion
+    /// callers all await the same underlying activation task so the data is
+    /// guaranteed to be loaded by the time <c>await ActivateAsync</c>
+    /// returns. Tests and the tab-switch path both invoke this; the second
+    /// call hands back the in-flight task instead of returning a bogus
+    /// completed task.
     /// </summary>
-    public async Task ActivateAsync(CancellationToken cancellationToken) {
-        if (_activated) return;
-        _activated = true;
+    public Task ActivateAsync(CancellationToken cancellationToken) {
+        if (_activationTask is not null) return _activationTask;
         _activationCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         // Activity strip and rule list fetch in parallel — both are cheap
         // queries against SQLite and they share no failure mode, so a stuck
         // strip wouldn't gate the table.
         var ruleLoad = ReloadAsync(_activationCts.Token);
         var activityLoad = ActivityVm.ActivateAsync(_activationCts.Token);
-        await Task.WhenAll(ruleLoad, activityLoad);
+        _activationTask = Task.WhenAll(ruleLoad, activityLoad);
+        return _activationTask;
     }
 
     private async Task ReloadAsync(CancellationToken cancellationToken) {
@@ -768,16 +783,17 @@ internal sealed partial class FirewallTabViewModel : ViewModelBase, IDisposable 
         row.IsHighlighted = true;
         SelectedRow = row;
 
-        // If the row lives in the (collapsed-by-default) Inactive group,
-        // expand the group so the row's container can be realized — the
-        // bring-into-view call the view does in response to the event below
-        // is a no-op against a collapsed (IsVisible=false) ItemsControl.
-        // Active is expanded by default but flip it defensively in case the
-        // user collapsed it earlier in the session.
-        if (InactiveRows.Contains(row)) {
-            IsInactiveExpanded = true;
-        } else if (ActiveRows.Contains(row)) {
+        // Expand the row's containing group so the container can be realized
+        // — BringIntoView is a no-op against a collapsed (IsVisible=false)
+        // ItemsControl. We key off row.IsActive (intrinsic property) rather
+        // than ActiveRows/InactiveRows.Contains because Reclassify's noise
+        // filter (!ExecutableExists && !HasRule) drops some rows from the
+        // ObservableCollections even though they live in _rowsByPath, and
+        // alerts can deep-link to such rows.
+        if (row.IsActive) {
             IsActiveExpanded = true;
+        } else {
+            IsInactiveExpanded = true;
         }
 
         RowScrollRequested?.Invoke(row);

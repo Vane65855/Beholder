@@ -48,7 +48,7 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
     private readonly DaemonStreamSubscriber _streamSubscriber;
     private readonly IDispatcher _dispatcher;
     private readonly INotificationService _notifications;
-    private readonly Action<string>? _navigateToFirewallRule;
+    private readonly Func<string, Task>? _navigateToFirewallRule;
     private readonly Func<string, bool> _fileExistsCheck;
     private readonly HashSet<long> _seenSeqs = new();
 
@@ -103,7 +103,7 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
         DaemonStreamSubscriber streamSubscriber,
         IDispatcher dispatcher,
         INotificationService notifications,
-        Action<string>? navigateToFirewallRule = null,
+        Func<string, Task>? navigateToFirewallRule = null,
         Func<string, bool>? fileExistsCheck = null
     ) {
         ArgumentNullException.ThrowIfNull(daemonClient);
@@ -385,11 +385,17 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
     /// <summary>
     /// Deep-link to the Firewall tab and surface the matching rule row.
     /// The <c>navigateToFirewallRule</c> delegate (supplied by
-    /// <c>MainWindowViewModel</c>) handles the tab switch + scroll/highlight.
+    /// <c>MainWindowViewModel</c>) handles the tab switch + scroll/highlight,
+    /// awaiting the Firewall tab's <c>ActivateAsync</c> internally so a
+    /// cold-start deep-link doesn't race against rule-list population. The
+    /// generated command is named <c>AddRuleCommand</c> (the <c>Async</c>
+    /// suffix is stripped by <c>[RelayCommand]</c>), so the existing AXAML
+    /// binding continues to resolve unchanged.
     /// </summary>
     [RelayCommand]
-    private void AddRule(AlertRow? row) {
+    private async Task AddRuleAsync(AlertRow? row) {
         if (row is null || string.IsNullOrEmpty(row.ProcessPath)) return;
-        _navigateToFirewallRule?.Invoke(row.ProcessPath);
+        if (_navigateToFirewallRule is null) return;
+        await _navigateToFirewallRule(row.ProcessPath);
     }
 }

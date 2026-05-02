@@ -33,7 +33,12 @@ public class AlertsTabViewModelTests {
         var notifications = new FakeNotificationService();
         var vm = new AlertsTabViewModel(
             client, subscriber, new SyncDispatcher(), notifications,
-            navigateToFirewallRule: captures.Add,
+            // Delegate is now Func<string, Task> (was Action<string>) so the
+            // production NavigateToFirewallRuleAsync can await the Firewall
+            // tab's activation before highlighting. Capture synchronously
+            // before returning the completed task — the test still sees the
+            // path immediately on AddRule invocation.
+            navigateToFirewallRule: path => { captures.Add(path); return Task.CompletedTask; },
             fileExistsCheck: fileExistsCheck);
         return (vm, client, subscriber, captures, notifications);
     }

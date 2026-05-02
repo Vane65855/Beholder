@@ -83,7 +83,7 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         // matching rule row (Phase 6.7). Notifications go through the
         // INotificationService abstraction so the platform impl is hidden.
         _alertsTab = new AlertsTabViewModel(
-            daemonClient, streamSubscriber, dispatcher, notifications, NavigateToFirewallRule);
+            daemonClient, streamSubscriber, dispatcher, notifications, NavigateToFirewallRuleAsync);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         _daemonClient.StateChanged += OnDaemonStateChanged;
@@ -96,11 +96,19 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
     /// delegate to <see cref="AlertsTabViewModel"/> so the alerts tab can
     /// deep-link without holding a back-reference to <c>this</c>.
     /// </summary>
-    public void NavigateToFirewallRule(string processPath) {
+    /// <remarks>
+    /// Awaits the Firewall tab's <c>ActivateAsync</c> before calling
+    /// <c>HighlightRow</c>: on a cold-start deep-link (user opens the app
+    /// and clicks ADD RULE on Alerts before ever visiting the Firewall
+    /// tab), a fire-and-forget activation would leave <c>_rowsByPath</c>
+    /// empty when the synchronous highlight ran, and the highlight + scroll
+    /// would silently no-op. <c>ActivateAsync</c> is idempotent, so the
+    /// already-warm path returns instantly. Mirrors the shape used by
+    /// <see cref="NavigateToAlertAsync"/>.
+    /// </remarks>
+    public async Task NavigateToFirewallRuleAsync(string processPath) {
         ActiveTab = TabKind.Firewall;
-        // Ensure the Firewall tab has been activated (its rule list populated)
-        // before we try to highlight a row. ActivateAsync is idempotent.
-        _ = _firewallTab.ActivateAsync(CancellationToken.None);
+        await _firewallTab.ActivateAsync(CancellationToken.None);
         _firewallTab.HighlightRow(processPath);
     }
 
