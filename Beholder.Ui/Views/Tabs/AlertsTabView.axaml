@@ -221,28 +221,47 @@
                         Spacing="12"
                         HorizontalAlignment="Right"
                         Margin="0,20,0,0">
+                <!-- Phase 6.10: contextual warning when the alert's binary
+                     no longer exists on disk. Visible only alongside the
+                     disabled buttons so the user immediately understands
+                     why they're grayed out. Mirrors the Firewall tab's
+                     orphaned-row affordance for cross-tab consistency. -->
+                <TextBlock Text="EXECUTABLE NOT FOUND"
+                           IsVisible="{Binding SelectedAlert.IsExecutableMissing}"
+                           Foreground="{DynamicResource SeverityWarn}"
+                           FontSize="{DynamicResource FontSizeCaption}"
+                           LetterSpacing="1"
+                           VerticalAlignment="Center" />
                 <Button Classes="actionButton"
                         Content="ADD RULE"
                         Command="{Binding AddRuleCommand}"
                         CommandParameter="{Binding SelectedAlert}"
+                        IsEnabled="{Binding !SelectedAlert.IsExecutableMissing}"
+                        ToolTip.ShowOnDisabled="True"
                         ToolTip.Tip="Switch to the Firewall tab and highlight the rule for this process." />
                 <!-- BLOCK / UNBLOCK toggle: two buttons sharing the actionButton
                      MinWidth=120, exactly one visible at a time via IsVisible.
                      IsOutboundBlocked is owned by the VM's _outboundBlockedPaths
                      cache, seeded from snapshot.FirewallRules at activation and
                      kept in sync via the daemon's RuleChange broadcast. Both
-                     fixed-width so the footer doesn't reflow when state flips. -->
+                     fixed-width so the footer doesn't reflow when state flips.
+                     IsEnabled gates on IsExecutableMissing per Phase 6.10 so
+                     a deleted binary's buttons gray out. -->
                 <Button Classes="actionButton danger"
                         Content="BLOCK PROCESS OUT"
                         Command="{Binding BlockProcessOutCommand}"
                         CommandParameter="{Binding SelectedAlert}"
                         IsVisible="{Binding !SelectedAlert.IsOutboundBlocked}"
+                        IsEnabled="{Binding !SelectedAlert.IsExecutableMissing}"
+                        ToolTip.ShowOnDisabled="True"
                         ToolTip.Tip="Add a Block-outbound firewall rule for this process and apply it now." />
                 <Button Classes="actionButton"
                         Content="UNBLOCK PROCESS OUT"
                         Command="{Binding UnblockProcessOutCommand}"
                         CommandParameter="{Binding SelectedAlert}"
                         IsVisible="{Binding SelectedAlert.IsOutboundBlocked}"
+                        IsEnabled="{Binding !SelectedAlert.IsExecutableMissing}"
+                        ToolTip.ShowOnDisabled="True"
                         ToolTip.Tip="Remove the existing Block-outbound firewall rule for this process." />
             </StackPanel>
         </Grid>

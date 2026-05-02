@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Beholder.Protocol.Local;
@@ -48,6 +49,7 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
     private readonly IDispatcher _dispatcher;
     private readonly INotificationService _notifications;
     private readonly Action<string>? _navigateToFirewallRule;
+    private readonly Func<string, bool> _fileExistsCheck;
     private readonly HashSet<long> _seenSeqs = new();
 
     /// <summary>
@@ -101,7 +103,8 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
         DaemonStreamSubscriber streamSubscriber,
         IDispatcher dispatcher,
         INotificationService notifications,
-        Action<string>? navigateToFirewallRule = null
+        Action<string>? navigateToFirewallRule = null,
+        Func<string, bool>? fileExistsCheck = null
     ) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
@@ -112,6 +115,9 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
         _dispatcher = dispatcher;
         _notifications = notifications;
         _navigateToFirewallRule = navigateToFirewallRule;
+        // Defaults to File.Exists for production; tests inject a controllable
+        // predicate. Mirrors FirewallTabViewModel's _fileExistsCheck pattern.
+        _fileExistsCheck = fileExistsCheck ?? File.Exists;
 
         _streamSubscriber.AlertReceived += OnAlertReceived;
         _streamSubscriber.RuleChangeReceived += OnRuleChange;
@@ -273,8 +279,29 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
     /// </summary>
     partial void OnSelectedAlertChanged(AlertRow? value) {
         OnPropertyChanged(nameof(UnreadCount));
-        if (value is null || value.IsRead) return;
+        if (value is null) return;
+        // Refresh missing-file state on every selection — the binary may
+        // have been deleted (or restored) since the row was last selected.
+        // ChainError alerts have empty ProcessPath; treat them as "not
+        // missing" so the (already-hidden by IsVisible) buttons stay in
+        // their unreachable state without a stale flag. See Phase 6.10.
+        value.IsExecutableMissing = !string.IsNullOrEmpty(value.ProcessPath)
+                                  && !SafeFileExists(value.ProcessPath);
+        if (value.IsRead) return;
         _ = MarkSelectedAsReadAsync(value);
+    }
+
+    /// <summary>
+    /// Wraps the injected <see cref="_fileExistsCheck"/> in a try/catch so
+    /// permission errors or malformed paths can't lock the user out of the
+    /// action buttons. Defaults to "exists" on exception — the user can
+    /// still attempt the firewall action, and the daemon will surface a
+    /// real error if the path genuinely fails. Mirrors
+    /// <c>FirewallTabViewModel.SafeFileExists</c>.
+    /// </summary>
+    private bool SafeFileExists(string path) {
+        try { return _fileExistsCheck(path); }
+        catch { return true; }
     }
 
     private async Task MarkSelectedAsReadAsync(AlertRow row) {

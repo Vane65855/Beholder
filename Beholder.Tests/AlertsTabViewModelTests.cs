@@ -21,7 +21,10 @@ public class AlertsTabViewModelTests {
     /// AddRule tests can assert the deep-link target.
     /// </summary>
     private static (AlertsTabViewModel Vm, FakeDaemonClient Client, DaemonStreamSubscriber Subscriber, List<string> NavigateCaptures, FakeNotificationService Notifications)
-    CreateVm(GetSnapshotResponse? snapshot = null) {
+    CreateVm(
+        GetSnapshotResponse? snapshot = null,
+        Func<string, bool>? fileExistsCheck = null
+    ) {
         var client = new FakeDaemonClient();
         if (snapshot is not null) client.SnapshotResponse = snapshot;
         var subscriber = new DaemonStreamSubscriber(
@@ -30,7 +33,8 @@ public class AlertsTabViewModelTests {
         var notifications = new FakeNotificationService();
         var vm = new AlertsTabViewModel(
             client, subscriber, new SyncDispatcher(), notifications,
-            navigateToFirewallRule: captures.Add);
+            navigateToFirewallRule: captures.Add,
+            fileExistsCheck: fileExistsCheck);
         return (vm, client, subscriber, captures, notifications);
     }
 
@@ -528,6 +532,94 @@ public class AlertsTabViewModelTests {
 
         Assert.False(vm.HasError);
         Assert.Empty(vm.ErrorMessage);
+    }
+
+    // ---- Phase 6.10: orphaned-binary disable ----
+
+    [Fact]
+    public async Task SelectingAlertWithMissingExecutable_FlipsIsExecutableMissing() {
+        var snapshot = SnapshotWith(MakeAlert(seq: 100, processPath: @"C:\bin\app.exe", isRead: true));
+        // Inject a checker that says "missing" for this path. Selection must
+        // flip the row's IsExecutableMissing to true so the view's IsEnabled
+        // bindings disable the action buttons.
+        var (vm, _, _, _, _) = CreateVm(snapshot, fileExistsCheck: _ => false);
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.SelectedAlert);
+        Assert.True(vm.SelectedAlert.IsExecutableMissing);
+    }
+
+    [Fact]
+    public async Task SelectingAlertWithExistingExecutable_KeepsIsExecutableMissingFalse() {
+        var snapshot = SnapshotWith(MakeAlert(seq: 100, processPath: @"C:\bin\app.exe", isRead: true));
+        var (vm, _, _, _, _) = CreateVm(snapshot, fileExistsCheck: _ => true);
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.SelectedAlert);
+        Assert.False(vm.SelectedAlert.IsExecutableMissing);
+    }
+
+    [Fact]
+    public async Task ReSelectingAlert_ReChecksFileExistence() {
+        // Mutable checker — file "exists" on first selection, "missing" on
+        // re-selection. Pins the "re-check on every OnSelectedAlertChanged"
+        // semantics: a binary deleted between selections must reflect on the
+        // next click.
+        var fileExists = true;
+        var snapshot = SnapshotWith(
+            MakeAlert(seq: 100, processPath: @"C:\bin\app.exe", isRead: true),
+            MakeAlert(seq: 99, processPath: @"C:\bin\other.exe", isRead: true));
+        var (vm, _, _, _, _) = CreateVm(snapshot, fileExistsCheck: _ => fileExists);
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        var primary = vm.SelectedAlert!;
+        Assert.False(primary.IsExecutableMissing);
+
+        // Simulate a deletion between user clicks. Switch selection away
+        // and back so OnSelectedAlertChanged re-fires for the original row.
+        fileExists = false;
+        vm.SelectedAlert = vm.Alerts[1];
+        vm.SelectedAlert = primary;
+
+        Assert.True(primary.IsExecutableMissing);
+    }
+
+    [Fact]
+    public async Task ChainErrorAlert_EmptyProcessPath_NeverSetsIsExecutableMissing() {
+        // ChainError alerts have empty ProcessPath by convention. The check
+        // must short-circuit on empty path so a checker that interprets ""
+        // as "missing" doesn't set a stale flag (the buttons are already
+        // hidden via IsVisible for ChainError alerts anyway, but the flag
+        // shouldn't lie).
+        var snapshot = SnapshotWith(
+            MakeAlert(seq: 100, kind: AlertKind.ChainError, processPath: "",
+                      summary: "chain failed at seq 5", isRead: true));
+        // Aggressive checker: even calls with empty path return "missing".
+        // Verifies the short-circuit in OnSelectedAlertChanged.
+        var (vm, _, _, _, _) = CreateVm(snapshot, fileExistsCheck: _ => false);
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.SelectedAlert);
+        Assert.False(vm.SelectedAlert.IsExecutableMissing);
+    }
+
+    [Fact]
+    public async Task FileExistsCheckThrowing_DefaultsToNotMissing() {
+        // SafeFileExists wraps the injected checker in a try/catch and
+        // defaults to "exists" on exception — defensive so a transient
+        // I/O error (network drive timeout, locked file, malformed path)
+        // doesn't lock the user out of the action buttons.
+        var snapshot = SnapshotWith(MakeAlert(seq: 100, processPath: @"C:\bin\app.exe", isRead: true));
+        var (vm, _, _, _, _) = CreateVm(snapshot,
+            fileExistsCheck: _ => throw new UnauthorizedAccessException("permission denied"));
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.SelectedAlert);
+        Assert.False(vm.SelectedAlert.IsExecutableMissing);
     }
 
     [Fact]

@@ -377,6 +377,7 @@ Distinct from in-app toasts (none defined yet) and OS notification toasts (§5.9
 - **Summary bar:** Below tabs. Shows alert counts ("47 TODAY · 3 CRITICAL · 12 NEW") followed by the filter chip row (ALL/CRITICAL/WARN/INFO) and utility buttons (filter, EXPORT).
 - **Timeline (left):** Grouped by date headers (-- TODAY, -- YESTERDAY). Each row: timestamp, kind badge (CHAIN, BLOCK, HOST, RULE, NEW, HASH, WIFI), description, and optional count. Severity rail on left edge. Selected row highlighted in `BackgroundSelected` with a play-triangle indicator.
 - **Detail pane (right):** Shows selected alert's full context. Subsections: header with type and timestamp, description, PROCESS (name, path, hash status badge), REMOTE (hostname, IP, country, ASN), CONNECTION (first seen, bytes, status), ACTIONS (button row).
+- **Detail pane footer (orphaned binary):** When the alert's binary no longer exists on disk, both action buttons (ADD RULE and BLOCK / UNBLOCK PROCESS OUT) disable (default Avalonia opacity reduction) and an `EXECUTABLE NOT FOUND` caption in `SeverityWarn` appears next to them. Mirrors the Firewall tab's orphaned-row treatment so users get the same affordance for "this binary is gone" across both tabs. Existing button tooltips remain readable on the disabled buttons via `ToolTip.ShowOnDisabled="True"`.
 
 ### Map and Scanner
 
