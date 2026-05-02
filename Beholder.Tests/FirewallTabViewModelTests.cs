@@ -353,4 +353,95 @@ public partial class FirewallTabViewModelTests {
         Assert.False(vm.HasError);
         Assert.Empty(vm.ErrorMessage);
     }
+
+    // ---- Phase 6.7 polish: scroll highlighted row into view on Alerts deep-link ----
+
+    [Fact]
+    public async Task HighlightRow_RowInActiveCollection_RaisesScrollRequestEvent() {
+        // Active group is expanded by default — the event still fires so the
+        // view code-behind can BringIntoView. Active flag flipping uses the
+        // shared RaiseProcessStatesUpdated helper from the Reclassify partial
+        // to drive the same wiring production uses.
+        const string path = @"C:\bin\active.exe";
+        var rules = new ListFirewallRulesResponse();
+        rules.Rules.Add(new FirewallRule {
+            ProcessPath = path,
+            Direction = Direction.Outbound,
+            Action = FirewallAction.Block,
+            Source = RuleSource.Manual,
+        });
+        var (vm, _, _) = CreateVm(rules: rules);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        RaiseProcessStatesUpdated(vm, StateMap(path));
+        Assert.Single(vm.ActiveRows);
+
+        FirewallRuleRow? raised = null;
+        var raiseCount = 0;
+        vm.RowScrollRequested += row => {
+            raised = row;
+            raiseCount++;
+        };
+
+        vm.HighlightRow(path);
+
+        Assert.Equal(1, raiseCount);
+        Assert.NotNull(raised);
+        Assert.Equal(path, raised!.ProcessPath);
+        Assert.True(vm.IsActiveExpanded);
+    }
+
+    [Fact]
+    public async Task HighlightRow_RowInInactiveCollection_ExpandsInactiveGroup_AndRaisesScrollRequestEvent() {
+        // Inactive is collapsed by default per Phase 6.4, so without the
+        // group-expand step the row's container is never realized and
+        // BringIntoView would silently no-op against an IsVisible=false
+        // ItemsControl. Verify the VM flips IsInactiveExpanded before raising.
+        const string path = @"C:\bin\inactive.exe";
+        var rules = new ListFirewallRulesResponse();
+        rules.Rules.Add(new FirewallRule {
+            ProcessPath = path,
+            Direction = Direction.Outbound,
+            Action = FirewallAction.Block,
+            Source = RuleSource.Manual,
+        });
+        var (vm, _, _) = CreateVm(rules: rules);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.Single(vm.InactiveRows);
+        Assert.False(vm.IsInactiveExpanded);
+
+        FirewallRuleRow? raised = null;
+        vm.RowScrollRequested += row => raised = row;
+
+        vm.HighlightRow(path);
+
+        Assert.True(vm.IsInactiveExpanded);
+        Assert.NotNull(raised);
+        Assert.Equal(path, raised!.ProcessPath);
+    }
+
+    [Fact]
+    public async Task HighlightRow_NoMatchingPath_DoesNotRaiseScrollRequestEvent() {
+        // Defensive guard: the alert may name a process that has never had
+        // a rule and isn't currently active, so the VM has no row for it.
+        // The existing _rowsByPath.TryGetValue guard short-circuits — the
+        // event must NOT fire and the group expansion state must stay put.
+        var rules = new ListFirewallRulesResponse();
+        rules.Rules.Add(new FirewallRule {
+            ProcessPath = @"C:\bin\known.exe",
+            Direction = Direction.Outbound,
+            Action = FirewallAction.Block,
+            Source = RuleSource.Manual,
+        });
+        var (vm, _, _) = CreateVm(rules: rules);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        var inactiveExpandedBefore = vm.IsInactiveExpanded;
+
+        var raiseCount = 0;
+        vm.RowScrollRequested += _ => raiseCount++;
+
+        vm.HighlightRow(@"C:\does\not\exist.exe");
+
+        Assert.Equal(0, raiseCount);
+        Assert.Equal(inactiveExpandedBefore, vm.IsInactiveExpanded);
+    }
 }

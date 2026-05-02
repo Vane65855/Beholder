@@ -303,7 +303,8 @@
                     </Border>
                 </Button>
 
-                <ItemsControl ItemsSource="{Binding FilteredActiveRows}"
+                <ItemsControl x:Name="ActiveRulesItems"
+                              ItemsSource="{Binding FilteredActiveRows}"
                               IsVisible="{Binding IsActiveExpanded}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
@@ -406,7 +407,8 @@
                     </Border>
                 </Button>
 
-                <ItemsControl ItemsSource="{Binding FilteredInactiveRows}"
+                <ItemsControl x:Name="InactiveRulesItems"
+                              ItemsSource="{Binding FilteredInactiveRows}"
                               IsVisible="{Binding IsInactiveExpanded}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
