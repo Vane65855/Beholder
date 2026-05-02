@@ -1,3 +1,5 @@
+using System.Threading.Tasks;
+
 namespace Beholder.Ui.Services;
 
 /// <summary>
@@ -14,6 +16,9 @@ internal interface INavigationService {
     /// an accent border so the user can locate it. No-op if no rule row
     /// exists for that path (e.g., the alert's process has never had a
     /// firewall rule and no live traffic has populated a row for it yet).
+    /// Awaits the Firewall tab's <c>ActivateAsync</c> before scrolling so
+    /// a cold-start deep-link (user has not yet visited the tab) doesn't
+    /// race against rule-list population.
     /// </summary>
-    void NavigateToFirewallRule(string processPath);
+    Task NavigateToFirewallRuleAsync(string processPath);
 }
