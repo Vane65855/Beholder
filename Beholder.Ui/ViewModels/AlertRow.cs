@@ -43,6 +43,16 @@ internal sealed partial class AlertRow : ObservableObject {
     private bool _isOutboundBlocked;
 
     /// <summary>
+    /// Whether the binary at <see cref="ProcessPath"/> no longer exists on
+    /// disk. Owned by <see cref="AlertsTabViewModel"/> — checked on every
+    /// selection (via <c>OnSelectedAlertChanged</c>). When true, the detail
+    /// pane disables the action buttons because they'd produce a useless
+    /// firewall rule against a path no process can occupy. See Phase 6.10.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isExecutableMissing;
+
+    /// <summary>
     /// Uppercase label for the master-list kind badge. Matches the project's
     /// all-caps convention for compact data labels (Phase 6.4 SOURCE column,
     /// firewall activity strip kind labels). Em-dash for any future enum
