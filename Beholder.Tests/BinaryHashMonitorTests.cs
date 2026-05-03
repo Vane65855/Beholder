@@ -113,6 +113,48 @@ public sealed class BinaryHashMonitorTests : IDisposable {
     }
 
     [Fact]
+    public async Task SweepOnce_HashChanged_PreservesIdentityColumns_OnRegistryUpdate() {
+        // Regression for the Phase 7.5 identity-wipe bug:
+        // BinaryHashMonitor.UpdateRegistryAsync used to construct ProcessInfo
+        // with only the 6 pre-7.5 args, dropping companyName / productName /
+        // installRoot / certSubjectCn / certIssuerCn / signatureStatus to
+        // null. SqliteProcessRegistry's INSERT...ON CONFLICT DO UPDATE SET
+        // would then NULL the existing row's identity on every hash check,
+        // breaking ADR 007's spoof-detection guarantee. Mirrors
+        // NewProcessDetector.RefreshLastSeenAsync which preserves all 11
+        // fields correctly.
+        var fixture = new Fixture();
+        var (path, _) = await fixture.WriteBinaryAsync("discord.exe", new byte[] { 0xAB });
+        var staleHash = SHA256.HashData(new byte[] { 0x01 });
+        await fixture.RegisterFullAsync(
+            path,
+            sha256: staleHash,
+            companyName: "Discord Inc.",
+            productName: "Discord",
+            installRoot: @"C:\Users\u\AppData\Local\Discord",
+            certSubjectCn: "Discord Inc.",
+            certIssuerCn: "DigiCert SHA2 Assured ID Code Signing CA",
+            signatureStatus: SignatureValidationStatus.Valid);
+
+        await fixture.Monitor.SweepOnceAsync(CancellationToken.None);
+
+        // Hash change emits the alert (sanity).
+        var emission = Assert.Single(fixture.Emitter.Emissions);
+        Assert.Equal(AlertKind.HashChanged, emission.Kind);
+
+        // Critical assertion: every identity column survives the registry
+        // update so the next NewProcess flow can still match logical identity.
+        var info = await fixture.Registry.GetByPathAsync(path, CancellationToken.None);
+        Assert.NotNull(info);
+        Assert.Equal("Discord Inc.", info.CompanyName);
+        Assert.Equal("Discord", info.ProductName);
+        Assert.Equal(@"C:\Users\u\AppData\Local\Discord", info.InstallRoot);
+        Assert.Equal("Discord Inc.", info.CertSubjectCn);
+        Assert.Equal("DigiCert SHA2 Assured ID Code Signing CA", info.CertIssuerCn);
+        Assert.Equal(SignatureValidationStatus.Valid, info.SignatureStatus);
+    }
+
+    [Fact]
     public async Task SweepOnce_FileMissing_SkipsEntry_NoCrash() {
         var fixture = new Fixture();
         // Register an entry whose file doesn't actually exist on disk.
@@ -169,6 +211,38 @@ public sealed class BinaryHashMonitorTests : IDisposable {
                 firstSeen: FixedTimestamp,
                 lastSeen: FixedTimestamp,
                 lastHashedAt: lastHashedAt);
+            return Registry.RegisterAsync(info, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// Seed the registry with a fully-identified entry — all six Phase 7.5
+        /// identity columns populated. Used by identity-preservation
+        /// regression tests.
+        /// </summary>
+        public Task RegisterFullAsync(
+            string path,
+            byte[]? sha256,
+            string companyName,
+            string productName,
+            string installRoot,
+            string certSubjectCn,
+            string certIssuerCn,
+            SignatureValidationStatus signatureStatus,
+            DateTimeOffset? lastHashedAt = null
+        ) {
+            var info = new ProcessInfo(
+                path: path,
+                displayName: Path.GetFileName(path),
+                sha256: sha256,
+                firstSeen: FixedTimestamp,
+                lastSeen: FixedTimestamp,
+                lastHashedAt: lastHashedAt,
+                companyName: companyName,
+                productName: productName,
+                installRoot: installRoot,
+                certSubjectCn: certSubjectCn,
+                certIssuerCn: certIssuerCn,
+                signatureStatus: signatureStatus);
             return Registry.RegisterAsync(info, CancellationToken.None);
         }
     }
