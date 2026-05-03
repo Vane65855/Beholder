@@ -165,13 +165,27 @@ internal sealed class BinaryHashMonitor : IHostedService, IDisposable {
     private async Task UpdateRegistryAsync(
         ProcessInfo entry, byte[] sha256, DateTimeOffset now, CancellationToken cancellationToken
     ) {
+        // Pass all 11 ProcessInfo fields so SqliteProcessRegistry's
+        // INSERT...ON CONFLICT DO UPDATE SET preserves the Phase 7.5 identity
+        // columns. Constructing with only the pre-7.5 6 args left
+        // companyName/productName/installRoot/certSubjectCn/certIssuerCn/
+        // signatureStatus null in `excluded.*`, which then NULL'd the
+        // existing row's identity on every hash check and broke ADR 007's
+        // spoof-detection guarantee. Mirrors NewProcessDetector
+        // .RefreshLastSeenAsync which already preserves all 11 fields.
         var updated = new ProcessInfo(
             path: entry.Path,
             displayName: entry.DisplayName,
             sha256: sha256,
             firstSeen: entry.FirstSeen,
             lastSeen: entry.LastSeen,
-            lastHashedAt: now);
+            lastHashedAt: now,
+            companyName: entry.CompanyName,
+            productName: entry.ProductName,
+            installRoot: entry.InstallRoot,
+            certSubjectCn: entry.CertSubjectCn,
+            certIssuerCn: entry.CertIssuerCn,
+            signatureStatus: entry.SignatureStatus);
         try {
             await _processRegistry.RegisterAsync(updated, cancellationToken).ConfigureAwait(false);
         } catch (Exception ex) {

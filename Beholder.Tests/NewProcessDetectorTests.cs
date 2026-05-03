@@ -241,6 +241,31 @@ public sealed class NewProcessDetectorTests {
     }
 
     [Fact]
+    public async Task FirstFlow_IdentityProviderReturnsNull_FallsBackToPathBased() {
+        // Provider IS registered (Windows daemon) but ReadIdentityAsync
+        // returns null — binary unreadable, PE corrupt, file vanished
+        // between flow detection and the identity read. Must fall back to
+        // path-based dedup, not crash. ADR 007 §Out of scope: "graceful
+        // degradation when identity metadata is unavailable."
+        var fixture = new Fixture(withIdentityProvider: true);
+        var path = @"C:\bin\unreadable.exe";
+        fixture.IdentityProvider!.Set(path, identity: null);  // provider can't read
+
+        await fixture.Detector.ProcessAsync(path, CancellationToken.None);
+
+        var emission = Assert.Single(fixture.Emitter.Emissions);
+        Assert.Equal(AlertKind.NewProcess, emission.Kind);
+        Assert.Equal(path, emission.ProcessPath);
+
+        // Row registered with null identity columns (path is the only key).
+        var info = await fixture.Registry.GetByPathAsync(path, CancellationToken.None);
+        Assert.NotNull(info);
+        Assert.Null(info.CompanyName);
+        Assert.Null(info.ProductName);
+        Assert.Null(info.InstallRoot);
+    }
+
+    [Fact]
     public void ResolveInstallRoot_AncestorMatchesProductName_ReturnsAncestor() {
         var root = NewProcessDetector.ResolveInstallRoot(
             @"C:\Users\Vane\AppData\Local\Discord\app-1.0.9235\Discord.exe",
