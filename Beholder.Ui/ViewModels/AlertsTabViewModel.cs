@@ -63,7 +63,20 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
         new(StringComparer.OrdinalIgnoreCase);
 
     private CancellationTokenSource? _activationCts;
-    private bool _activated;
+
+    /// <summary>
+    /// In-flight (or completed) activation task. Tracking the Task instead of
+    /// a plain <c>bool _activated</c> closes the cold-start race the toast →
+    /// <c>NavigateToAlertAsync</c> deep-link hits: <c>OnActiveTabChanged</c>
+    /// fires <c>ActivateAsync</c> as fire-and-forget, then
+    /// <c>NavigateToAlertAsync</c> awaits its own call. With a bool guard,
+    /// the second call would see <c>_activated = true</c> and return
+    /// instantly while the first call's snapshot RPC was still in flight,
+    /// leaving <see cref="Alerts"/> empty when <c>SelectBySeq</c> ran.
+    /// Storing the Task makes both callers await the same underlying load.
+    /// Mirrors the same fix in <c>FirewallTabViewModel</c> (commit 2cb8753).
+    /// </summary>
+    private Task? _activationTask;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowEmptyState))]
@@ -137,20 +150,28 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
     }
 
     /// <summary>
-    /// Initial load. Idempotent — a second call short-circuits so repeated
-    /// tab switches don't re-fetch. Mirrors
+    /// Initial load. Idempotent — concurrent callers and post-completion
+    /// callers all await the same underlying activation task so the data is
+    /// guaranteed to be loaded by the time <c>await ActivateAsync</c>
+    /// returns. Both the tab-switch (via <c>OnActiveTabChanged</c>'s fire-
+    /// and-forget) and the deep-link (via <c>NavigateToAlertAsync</c>'s
+    /// awaited call) hit this; the second caller hands back the in-flight
+    /// task instead of returning a bogus completed task. Mirrors
     /// <see cref="FirewallTabViewModel.ActivateAsync"/>'s contract.
     /// </summary>
-    public async Task ActivateAsync(CancellationToken cancellationToken) {
-        if (_activated) return;
-        _activated = true;
+    public Task ActivateAsync(CancellationToken cancellationToken) {
+        if (_activationTask is not null) return _activationTask;
         _activationCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _activationTask = LoadInitialDataAsync(_activationCts.Token);
+        return _activationTask;
+    }
 
+    private async Task LoadInitialDataAsync(CancellationToken cancellationToken) {
         IsLoading = true;
         HasError = false;
         ErrorMessage = string.Empty;
         try {
-            var snapshot = await _daemonClient.GetSnapshotAsync(_activationCts.Token);
+            var snapshot = await _daemonClient.GetSnapshotAsync(cancellationToken);
             // Seed the outbound-block cache from the snapshot's rule list
             // BEFORE building rows so each AlertRow lands with the right
             // IsOutboundBlocked value on first construction.

@@ -36,6 +36,16 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     // through the seeding path. Existing callers that don't set these get the
     // empty-response default as before.
     public GetSnapshotResponse? SnapshotResponse { get; set; }
+
+    /// <summary>
+    /// Optional async responder for <see cref="GetSnapshotAsync"/>. Lets tests
+    /// inject a deferred Task (e.g., a TaskCompletionSource the test signals
+    /// when ready) so they can exercise the cold-start race between two
+    /// concurrent <c>ActivateAsync</c> callers. When set, takes precedence
+    /// over <see cref="SnapshotResponse"/>; when null, the synchronous
+    /// path applies.
+    /// </summary>
+    public Func<CancellationToken, Task<GetSnapshotResponse>>? SnapshotResponder { get; set; }
     public Func<GetProcessTimelineRequest, GetProcessTimelineResponse>? ProcessTimelineResponder { get; set; }
     public GetProcessSummariesResponse? ProcessSummariesResponse { get; set; }
     public GetAggregateTimelineResponse? AggregateTimelineResponse { get; set; }
@@ -89,6 +99,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
 
     public Task<GetSnapshotResponse> GetSnapshotAsync(CancellationToken cancellationToken) {
         if (SnapshotException is not null) throw SnapshotException;
+        if (SnapshotResponder is not null) return SnapshotResponder(cancellationToken);
         return Task.FromResult(SnapshotResponse ?? new GetSnapshotResponse());
     }
 
