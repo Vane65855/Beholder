@@ -395,6 +395,47 @@ public class AlertsTabViewModelTests {
     }
 
     [Fact]
+    public async Task ActivateAsync_ConcurrentCallers_ShareSameUnderlyingLoad() {
+        // Regression for the cold-start race the toast → NavigateToAlertAsync
+        // deep-link hits. Pre-fix, the bool _activated guard let the second
+        // concurrent caller see _activated=true and return Task.CompletedTask
+        // while the first caller's snapshot RPC was still in flight, so
+        // SelectBySeq would run against an empty Alerts collection.
+        // Post-fix (Task? _activationTask), the second call returns the
+        // in-flight Task so the awaited caller doesn't return until the load
+        // actually completes.
+        var snapshot = SnapshotWith(MakeAlert(seq: 100, processPath: @"C:\app.exe", isRead: true));
+        var client = new FakeDaemonClient();
+        var release = new TaskCompletionSource<GetSnapshotResponse>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        client.SnapshotResponder = _ => release.Task;
+        var subscriber = new DaemonStreamSubscriber(
+            client, TimeProvider.System, NullLogger<DaemonStreamSubscriber>.Instance);
+        var vm = new AlertsTabViewModel(
+            client, subscriber, new SyncDispatcher(), new FakeNotificationService());
+
+        // Caller A (the OnActiveTabChanged fire-and-forget): kicks off the
+        // load, doesn't await. Snapshot is gated on `release` so the load
+        // can't possibly have completed yet.
+        var firstCall = vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.False(firstCall.IsCompleted);
+
+        // Caller B (the deep-link's awaited call): MUST receive the same
+        // in-flight task, not a synthetic Task.CompletedTask.
+        var secondCall = vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.False(secondCall.IsCompleted);
+        Assert.Same(firstCall, secondCall);
+
+        // Release the snapshot RPC; both callers should complete and Alerts
+        // should be populated by the time `await secondCall` returns.
+        release.SetResult(snapshot);
+        await secondCall;
+
+        Assert.Single(vm.Alerts);
+        Assert.Equal(@"C:\app.exe", vm.Alerts[0].ProcessPath);
+    }
+
+    [Fact]
     public void Ctor_NullDaemonClient_Throws() =>
         Assert.Throws<ArgumentNullException>("daemonClient", () => new AlertsTabViewModel(
             null!,
