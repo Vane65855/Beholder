@@ -1,14 +1,14 @@
 # Beholder NMT — Project Status & Phase Plan
 
-**Last updated:** 2026-04-27
-**Current checkpoint:** Phase 5.4.4 (Hostname capture quality) + roadmap reorganization
-**Test count:** 611
+**Last updated:** 2026-05-03
+**Current checkpoint:** Phases 6.4 → 7.5 (Alerts pipeline + UI complete; identity-aware dedup; spoof detection; cold-start race fixed across both tab VMs)
+**Test count:** 848
 
 ---
 
 ## 1. Status Summary
 
-As of 2026-04-26, the daemon captures per-process network telemetry via ETW on Windows, enriches flows with DB-IP country codes, and persists per-destination traffic to SQLite through a five-tier rollup cascade (`traffic_raw` → `_10s` → `_1m` → `_10m` → `_1h`). Historical timeline RPCs use a stitched multi-tier query that serves each time slice from the finest-retention tier that covers it — recent data at 1-second fidelity, older data smoothly coarser. The UI shell ships a Traffic tab with a time-range dropdown (5 Minutes live + 1 Hour / 24 Hours / 7 Days / 30 Days / All Time / Custom historical) and a chart that guarantees "same data → same shape" regardless of which range preset is selected. The Firewall tab is now a working surface: a rule table with three-state ALLOW/BLOCK/DEFAULT pills per direction, GlassWire-style Active/Inactive grouping, master ON/OFF toggle that disables every Beholder-managed rule without losing the configuration, and a recent-activity strip backed by the chain-hashed event log. Five `Get*` RPCs serve aggregated traffic data from SQLite, plus the firewall surface adds `RemoveFirewallRule`, `ListFirewallRules`, `SetFirewallEnabled`, and `GetFirewallActivity`. The hostname-resolution ladder has four layers: (1) Windows DNS resolver-cache preload at startup via the verified `DnsGetCacheDataTableEx` export (ADR 004), (2) live `Microsoft-Windows-DNS-Client` ETW capture (`EtwDnsCache`), (3) reverse-DNS PTR fallback for direct-IP destinations gated by `DnsOptions.EnableReverseDnsFallback` (ADR 005), and (4) SNI extraction from TCP/443 ClientHello packets via `Microsoft-Windows-PktMon` ETW gated by `SniOptions.EnableSniCapture` (ADR 006). DNS hostname mappings are persisted to a `dns_cache` table; SQLite-side hostname backfill retroactively names historical buckets when a late resolution arrives. The gRPC IPC surface has fourteen RPCs. 689 tests pass deterministically. Next up: Phase 6.6 (Alerts tab). Settings is repositioned as **Phase 13** — the dedicated final UI phase — so its information architecture can encompass every option that accumulates across Phases 6–12 rather than being retrofitted. Scanner sits at **Phase 9** as a placeholder slot whose feature set is scoped by ADR before implementation begins.
+As of 2026-05-03, the daemon captures per-process network telemetry via ETW on Windows, enriches flows with DB-IP country codes, and persists per-destination traffic to SQLite through a five-tier rollup cascade (`traffic_raw` → `_10s` → `_1m` → `_10m` → `_1h`). Historical timeline RPCs use a stitched multi-tier query that serves each time slice from the finest-retention tier that covers it — recent data at 1-second fidelity, older data smoothly coarser. The Traffic tab ships with a time-range dropdown (5 Minutes live + 1 Hour / 24 Hours / 7 Days / 30 Days / All Time / Custom historical) and a chart that guarantees "same data → same shape" regardless of which range preset is selected. The **Firewall** tab is a working surface: rule table with three-state ALLOW/BLOCK/DEFAULT pills, GlassWire-style Active/Inactive grouping with the orphaned-rule warning glyph for missing binaries, master ON/OFF toggle, recent-activity strip backed by the chain-hashed event log, and Alerts → Firewall deep-linking that auto-expands the row's group and scrolls it into view. The **Alerts** tab is now feature-complete end-to-end: master-detail layout with optimistic mark-read, BLOCK/UNBLOCK toggle and ADD RULE deep-link, dismissable error banner with auto-clear-on-action, OS-native toast notifications via the new `Beholder.Ui.Windows` project (with click-activation that restores the window and selects the matched alert), and detail-pane disable when the alert's binary no longer exists on disk. The **alert-generation pipeline** runs entirely daemon-side: `NewProcessDetector`, `BinaryHashMonitor`, and `ChainIntegrityMonitor` emit the three alert kinds via the `AlertEmitter` facade (chain-write + broadcast in one call) and `BroadcastService.BroadcastAlert` streams them to the UI. Phase 7.5 added **logical app identity + Authenticode spoof detection** (ADR 007): NewProcess dedup is now keyed by `(CompanyName, ProductName, install-root)` from PE VersionInfo when a Valid signature is present, so Squirrel auto-updaters (Discord, GitHub Desktop, Slack) stay silent across version bumps; a same-identity match with a different signing publisher fires `HashChanged` with a publisher-mismatch summary — beats GlassWire/SimpleWall on this class. Cold-start races in both `FirewallTabViewModel.ActivateAsync` and `AlertsTabViewModel.ActivateAsync` were resolved by replacing `bool _activated` idempotency with shared `Task? _activationTask` so concurrent callers (tab-switch fire-and-forget + deep-link awaited) await the same underlying load. The hostname-resolution ladder retains its four layers (preload, ETW DNS-Client, reverse-DNS PTR, SNI extraction) per ADRs 004/005/006. The gRPC IPC surface now has eighteen RPCs. **848 tests pass deterministically**. Next up: Phase 8 (Map tab) per the existing roadmap, OR a Phase 12 polish pull-forward if uplift on existing surfaces is preferred — TBD per next planning cycle. Settings stays at **Phase 13** as the dedicated final UI phase. Scanner stays at **Phase 9** as the unscoped placeholder.
 
 ---
 
@@ -454,6 +454,174 @@ Out-of-scope for v1 (per the plan): per-packet enforcement events (a packet was 
 
 ---
 
+### Phase 6.4/6.5 polish addendum (`70ddc79`, `9841306`, `89fc67a`, `909027c`, `5103174`, `81e810b`, `ffcbcdd`, `34c17ab`, `3eeaf87`, `974a833`, `349a960`) ✅
+
+Eleven follow-up commits accumulated against the Firewall tab between the base 6.4 ship and the start of 6.6. Each is small but worth a per-line entry because they collectively define the tab's polish bar:
+
+- **Pill semantics: effective connectivity, not rule state** (`70ddc79`). ALLOW shows when Beholder has no Block rule AND the OS firewall isn't blocking; BLOCK shows when either side blocks. Stops the user from reading "ALLOW" while their app is silently being blocked by a stale Windows Firewall rule.
+- **Polish pass** (`9841306`): inactive group collapsed by default, `SOURCE` and `HOSTS` placeholders for not-yet-loaded rows, zero-byte counts muted to `TextMuted`.
+- **Orphaned-rule warning glyph + uninstalled-app filter** (`89fc67a`). Rules with no matching binary on disk (uninstalled apps) get a `⚠` glyph in `SeverityWarn` next to the path; uninstalled apps WITHOUT a rule are filtered out entirely (they're noise — the app is gone and no rule references them). `IsOrphanedRule = HasRule && !ExecutableExists`.
+- **URL-safe rule name encoding** (`909027c`) + **HResult-based COMException catch** (`5103174`). Two atomic fixes for `0x80070002 ELEMENT_NOT_FOUND` from `INetFwRules.Add` — the old base64 encoding produced rule names with `/` characters that the firewall service rejected on `Item` lookup; the catch was using `COMException` type rather than the HResult so the not-found case wasn't being recognized as the expected branch.
+- **Enforcement-OFF bypass in Apply/Remove RPCs** (`81e810b`). When the master toggle is OFF, Apply/Remove still persist + chain-log + broadcast, but skip the OS-firewall call entirely. Previously the OS call would succeed against an empty rule set, producing nothing visible but adding latency.
+- **Double-tap to copy parent directory** (`ffcbcdd`). Quality-of-life affordance that caught the "where on disk does this live?" use case without requiring a separate detail pane.
+- **Source labels UPPERCASE; MANUAL/REMOTE in TextSecondary, DEFAULT muted** (`34c17ab`). Density tweak so manually-managed rules visually stand out from the default-allow majority.
+- **Sticky column header + widened pill columns** (`3eeaf87`). The header stayed sticky as the rule list scrolled; pill columns widened so ALLOW/BLOCK labels stopped clipping at compact widths. Plus rule-source default literal `"default"` instead of empty string so the column never reads blank.
+- **Unknown-PID filter on rule table** (`974a833`). Same filter that the Traffic tab applies — rows whose process resolution failed (`pid:1234` style fallback names) are dropped from the rule list. ETW transient-process noise.
+- **Reclassify diff-and-mutate** (`349a960`). 1Hz tick was rebuilding `ActiveRows` and `InactiveRows` via `Clear+Add`, which Avalonia's `ItemsControl` recycles on `Reset` — pill containers were being re-templated mid-click, swallowing the click. New `Reclassify` uses single-step `Insert/Remove/Move` ops so stable rows' container instances stay mounted across ticks. Hover-during-tick scenarios now survive.
+
+These eleven commits add ~78 of the ~234 tests gained this checkpoint.
+
+---
+
+### Phase 6.6 — Alerts master-detail (read/unread + auto-select) ✅
+
+**Purpose:** Build the Alerts tab as a master-detail surface that surfaces every alert from the chain (`event_log` rows where `kind ∈ {NewProcess, HashChanged, ChainError}`). Master list on the left; detail pane on the right. Read state managed via `MarkAlertRead` RPC with optimistic UI and revert-on-failure.
+
+**Key components:**
+
+- **`AlertsTabViewModel`** — fans out one RPC on activation (`GetSnapshotAsync` for the alert list + outbound-block cache), subscribes to `DaemonStreamSubscriber.AlertReceived` for live updates and `RuleChangeReceived` for outbound-block state. Auto-selects the newest alert on first paint. `OnSelectedAlertChanged` fires the `MarkAlertRead` RPC opportunistically and reverts `IsRead` on failure.
+- **`AlertRow`** — observable row VM. Keeps the wire `Alert` proto fields immutable; only `IsRead`, `IsOutboundBlocked`, and `IsExecutableMissing` are observable.
+- **`AlertsTabView.axaml`** — master-detail layout per `UI_DESIGN.md` §5.5. Severity rail on each row (color-coded by `KindBadgeClass`), kind badge, timestamp, summary. Detail pane sections: PROCESS / REMOTE / CONNECTION / ACTIONS.
+- Composition root wires `AlertsTabViewModel` with the `_navigateToFirewallRule` delegate (still `Action<string>` here; made async in 6.7-polish).
+
+**Tests added:** ~30 in `AlertsTabViewModelTests.cs` — activation populates list + auto-selects newest, mark-read optimistic + revert, live alert prepends to top, dedupe by seq, snapshot RPC failure surfaces error state, idempotent activation.
+
+**Design decisions:**
+- **Optimistic mark-read.** `OnSelectedAlertChanged` flips `IsRead = true` immediately and fires the `MarkAlertRead` RPC in the background. RPC failure reverts. The user sees instant feedback even on slow IPC.
+- **Snapshot's `recent_alerts` is the seed.** Avoids a separate `ListAlerts` RPC; the `GetSnapshot` shape was already returning the recent-alerts slice.
+- **Reflection-based event raise in tests.** `DaemonStreamSubscriber.AlertReceived` is a public event with `+=`/`-=` only; tests use a `RaiseAlertReceived` helper (mirrors `RaiseProcessStatesUpdated` from `FirewallTabViewModelTests.Reclassify.cs`) to drive the live-update path without spinning up a real gRPC stream.
+
+---
+
+### Phase 6.7 — Action buttons (BLOCK PROCESS OUT, ADD RULE, two-line layout) ✅
+
+**Purpose:** Wire the detail-pane action buttons to actual daemon RPCs. Add the BLOCK/UNBLOCK toggle (calls `ApplyFirewallRule` / `RemoveFirewallRule` against the alert's process path with `Outbound + Block`) and the ADD RULE deep-link to the Firewall tab. Plus a master-list two-line row layout so the timestamp and process name no longer overlap.
+
+**Key components:**
+- **Two-line master row layout** (commit `c0b1c3c`). Process name + timestamp on row 1, summary on row 2. Solves the overlap reported during smoke test of 6.6.
+- **BLOCK/UNBLOCK toggle.** State derived from `_outboundBlockedPaths` (seeded at activation, updated via `RuleChange` broadcasts). One button that flips between the two RPCs.
+- **ADD RULE deep-link.** Navigates to Firewall tab and calls `_firewallTab.HighlightRow(processPath)` via the `_navigateToFirewallRule` delegate from `MainWindowViewModel`.
+- **`AlertsTab.ActivateAsync` wiring** (commits `ce33139` → `fb7ef28` revert → `a7e881a` re-apply). The original 6.6 commit added `AlertsTab.ActivateAsync` but never called it from production: the Alerts tab list was being populated only by live broadcasts, so historic alerts at startup never showed. Soft-reverted the unauthorized one-line fix to enforce plan-mode discipline, then re-applied it via a proper plan as `a7e881a`. Workflow lesson — see §3 below.
+
+**Tests added:** ~20 covering the BLOCK/UNBLOCK pill state machine, ADD RULE delegate invocation, two-row layout binding shape.
+
+---
+
+### Phase 6.7 polish — scroll-into-view + cold-start race fix ✅
+
+**Two atomic commits** (`816763f`, `2cb8753`) addressing UX issues surfaced by smoke testing the deep-link from Alerts → Firewall:
+
+- **`816763f`** — `FirewallTabViewModel.HighlightRow` now expands the row's containing group (intrinsic `row.IsActive` selector — robust against the `Reclassify` noise filter) and raises a new `RowScrollRequested` event; the view code-behind subscribes and calls `ItemsControl.ScrollIntoView(row)` (Avalonia 12 surface — verified in `Avalonia.Controls.xml` line 11392) which forces `VirtualizingPanel.ScrollIntoView(index)` to materialize the container before bubbling `BringIntoView` to the outer `ScrollViewer`. The original attempt used `ContainerFromItem(row)?.BringIntoView()` — silently no-oped because `ContainerFromItem` returns null until the row is realized.
+- **`2cb8753`** — `MainWindowViewModel.NavigateToFirewallRule` was renamed to `NavigateToFirewallRuleAsync` returning `Task` and now awaits `_firewallTab.ActivateAsync` before calling `HighlightRow`. The actual root cause: `FirewallTabViewModel.ActivateAsync`'s `bool _activated` idempotency lied to concurrent callers — when `OnActiveTabChanged` fired its own fire-and-forget activation, the second call saw `_activated=true` and returned a synthetic completed Task while the first call was still loading. Replaced with `Task? _activationTask` so all callers await the same in-flight load. `INavigationService` delegate becomes `Func<string, Task>`; `AlertsTabViewModel.AddRule` becomes `async Task AddRuleAsync` (the `[RelayCommand]` suffix-strip keeps the existing `AddRuleCommand` AXAML binding stable).
+
+Bundled into the 6.7 entry rather than a separate phase because the surface is unchanged.
+
+---
+
+### Phase 6.8 — OS-native notifications + new `Beholder.Ui.Windows` project ✅
+
+**Purpose:** Fire OS-native notifications when an alert arrives via the live broadcast, with click-activation that restores the window and selects the matched alert. First UI-side platform split (mirrors `Beholder.Daemon.Windows`).
+
+**Key components:**
+- **`Beholder.Ui.Windows`** — new project, TFM `net10.0-windows10.0.17763.0` (Windows 10 1809+ for `Microsoft.Toolkit.Uwp.Notifications` 7.1.3). Hosts `WindowsNotificationService : INotificationService` which builds `ToastContentBuilder`, registers an `Activated` callback that parses `seq=N` from the toast args and restores the main window via `MainWindowViewModel.NavigateToAlertAsync`.
+- **`Beholder.Core/INotificationService.cs`** — abstract `RaiseAsync(AlertKind, string title, string body, long seq)` + a `Activated` event. Cross-platform; the Windows impl is the only registration today.
+- **`Beholder.Ui/Services/NoopNotificationService.cs`** — Linux fallback (no-op `RaiseAsync`, never raises `Activated`). Composition root picks Windows when available, Noop otherwise.
+- **Conditional TFM** in `Beholder.Ui.csproj` AND `Beholder.Tests.csproj` (`net10.0-windows10.0.17763.0` on Windows builds, plain `net10.0` on Linux). Required because `Beholder.Ui` references `Beholder.Ui.Windows` conditionally — the consuming TFM must match.
+- **`MainWindowViewModel.NavigateToAlertAsync(seq)`** — awaits `_alertsTab.ActivateAsync` then `SelectBySeq(seq)`. Toast click-activation entry point.
+
+**Tests added:** ~25 covering `WindowsNotificationService` (severity → urgency mapping, title/body shape, click-callback parses seq correctly, registration idempotency), `NoopNotificationService` (silent + non-throwing), `MainWindowViewModel.NavigateToAlertAsync` (activates + selects).
+
+**Design decisions:**
+- **`Microsoft.Toolkit.Uwp.Notifications` 7.1.3** chosen over Windows App SDK's `AppNotifications` because the Toolkit package supports unpackaged WPF/Avalonia executables without WinAppSDK runtime requirements.
+- **`SystemDrawing.Common 4.7.0` vulnerability suppression** — transitively pulled by the toolkit; the toast-image surface is unreachable in our code (we don't attach images), so the suppression is documented in `Directory.Packages.props` with a comment.
+- **No app-side rate-limiting.** OS Action Center groups toasts visually; per-alert toast firing is the v1 design. Coalescing ("+N more") deferred to a polish pass.
+
+---
+
+### Phase 6.9 — Dismissable error banner (`ErrorBanner` reusable control) ✅
+
+**Purpose:** Five inline error-banner sites across `TrafficTabViewModel`, `FirewallTabViewModel`, `AlertsTabViewModel`, `FirewallActivityViewModel`, etc. all rendered slightly different XAML. Consolidate into one reusable control and add the missing X-dismiss affordance per UI_DESIGN.md §5.10.
+
+**Key components:**
+- **`Beholder.Ui/Controls/ErrorBanner.axaml*`** — UserControl with `Severity` (`Danger`/`Warn`), `Message`, and optional `DismissCommand` styled properties. When `DismissCommand` is null the X is hidden. Class-based styling for the two severity variants.
+- **5 view sites** updated: `TrafficTabView`, `FirewallTabView`, `AlertsTabView`, `FirewallActivityStrip`, plus the `TrafficColsView` overlay banner — all now use `<controls:ErrorBanner Severity="Danger" Message="{Binding ErrorMessage}" DismissCommand="{Binding DismissErrorCommand}" />`.
+- **5 VMs** gained `[RelayCommand] DismissError` + a `ClearError()` helper that all action methods call at entry (auto-clear-on-action-retry — the X is for "I don't want to retry").
+- **UI_DESIGN.md §5.10** added to document the pattern (this commit landed the doc + the implementation in one go).
+
+**Tests added:** ~20 covering `DismissError` clears state across all 5 VMs, action-method-entry auto-clear, `ErrorBanner` hides the X when `DismissCommand` is null.
+
+**Design decisions:**
+- **No new component pattern without a §5 doc entry.** UI_DESIGN.md §9 rule #5 mandates that new component patterns get documented in the same commit. The doc-update is a hard gate, not an after-the-fact cleanup.
+
+---
+
+### Phase 6.10 — Disable action buttons when alert's executable is missing ✅
+
+**Purpose:** Mirror the Firewall tab's orphaned-rule affordance on the Alerts detail pane. When the alert's process binary no longer exists on disk, both action buttons (BLOCK/UNBLOCK and ADD RULE) gray out and an `EXECUTABLE NOT FOUND` caption appears in `SeverityWarn`. The buttons are useless on a missing binary — a Block rule against a path no process can occupy is just noise.
+
+**Key components:**
+- **`AlertsTabViewModel._fileExistsCheck` injection** — `Func<string, bool>?` constructor parameter, defaults to `File.Exists`. Mirrors `FirewallTabViewModel`'s exact pattern.
+- **`AlertRow.IsExecutableMissing`** — observable. Refreshed in `AlertsTabViewModel.OnSelectedAlertChanged` (selection-driven, not eager — a 500-row alert list shouldn't trigger 500 file-existence checks at activation).
+- **`AlertsTabView.axaml` detail-pane footer** — buttons bound to `IsEnabled="{Binding !SelectedAlert.IsExecutableMissing}"` with `ToolTip.ShowOnDisabled="True"` so the existing button tooltips remain readable.
+
+**Tests added:** ~5 covering selection of an alert with missing exe sets `IsExecutableMissing=true`, selection of an alert with present exe leaves it false, `_fileExistsCheck` is invoked exactly once per selection change, buttons-disabled state survives `MarkAlertRead` round-trip.
+
+**Design decisions:**
+- **Selection-driven, not eager.** Firewall tab does eager file-existence check for ~80 rules at activation (sub-millisecond on warm caches); Alerts can have 500 rows and selection is rare, so on-demand check is cheaper.
+- **Mirror over invent.** Phase 6.10 plan specifically called for matching the Firewall tab's affordance, not designing a new one. ~30 LOC to deliver because the pattern was already established.
+
+---
+
+### Phase 7 — Alert pipeline (daemon side, all 4 sub-phases atomic in `d51c625`) ✅
+
+**Purpose:** Generate the three alert kinds end-to-end: `NewProcess` on first network flow per binary, `HashChanged` on SHA-256 mismatch (or Phase 7.5 publisher mismatch), `ChainError` on chain-verify failure. Detectors run as `IHostedService` instances and emit via the `AlertEmitter` facade.
+
+**Key components:**
+
+- **`Beholder.Daemon/Pipeline/NewProcessDetector.cs`** — subscribes to `IProcessFirstNetworkFlowSource.OnProcessFirstNetworkFlow` (a session-scoped fire-once-per-key event raised by `TrafficEngine`). Three-tier dedup walk: path lookup (daemon-restart re-observation → silent + last-seen refresh), logical-identity lookup (Phase 7.5), genuinely-new (register + emit `NewProcess`).
+- **`Beholder.Daemon/Pipeline/BinaryHashMonitor.cs`** — `IHostedService` running `SweepOnceAsync` every `AlertOptions.BinaryHashCheckIntervalMinutes` (default 60). Re-hashes every registered binary, emits `HashChanged` on mismatch, refreshes `last_hash_at` regardless. First hash establishes baseline silently.
+- **`Beholder.Daemon/Pipeline/ChainIntegrityMonitor.cs`** — periodic `IEventStore.VerifyAsync` runs; emits `ChainError` (with the failing seq + reason) on integrity failure. Daemon does NOT refuse to start on chain failure — just alerts and continues, so the user can investigate.
+- **`Beholder.Daemon/Pipeline/AlertEmitter.cs` + `IAlertEmitter`** — facade combining `IEventStore.AppendAsync` + `BroadcastService.BroadcastAlert`. Saves the three detectors from each juggling both. The `IEventStore.AppendAsync` signature change `Task → Task<long>` (returning the new chain seq) was source-compatible because every existing caller discarded the return value.
+- **`Beholder.Daemon/Pipeline/IProcessFirstNetworkFlowSource.cs`** — new interface; `TrafficEngine` implements it by tracking which `(path, displayName)` pairs have already fired in this session. Cross-session re-observations are caught at the registry-lookup tier of `NewProcessDetector`.
+- **`Beholder.Daemon/Pipeline/BroadcastService.cs`** — added `BroadcastAlert` hook + `AlertEvent` proto wiring (commit `1eef757`, separate prereq commit before the atomic Phase 7 detector ship).
+- **`Beholder.Daemon/Storage/AlertPayloadEncoder.cs`** — deterministic JSON encoder for `Alert` proto. Same byte-stable contract pattern as `FirewallRulePayloadEncoder`.
+
+**Tests added:** ~80 across `NewProcessDetectorTests`, `BinaryHashMonitorTests`, `ChainIntegrityMonitorTests`, `AlertEmitterTests`, `BinaryHasherTests`. Plus 6 new test doubles: `FakeAlertEmitter`, `FakeProcessFirstNetworkFlowSource`, extensions to `FakeProcessRegistry` / `FakeEventStore`.
+
+**Design decisions:**
+- **Detector + facade emitter.** Each detector knows when to alert; `AlertEmitter` knows how. SRP intact even though the seam is "small" — the alternative (each detector calls both `_eventStore.AppendAsync` and `_broadcast.BroadcastAlert`) duplicates the chain+broadcast contract three times.
+- **Session-scoped fire-once-per-key dedup at the source.** `TrafficEngine.OnProcessFirstNetworkFlow` only fires once per unique `(path, displayName)` per process lifetime. Cross-session dedup is the registry's job. This split keeps the engine stateless across restarts.
+- **First hash establishes baseline silently.** A registry entry created by `NewProcessDetector` arrives with `Sha256 == null`. The first hash check stores the value without alerting. Subsequent ticks compare against the stored hash; inequality emits + overwrites so a single patch only alerts once.
+
+---
+
+### Phase 7.5 — Logical app identity + Authenticode spoof detection ✅
+
+**Purpose:** Fix the Discord-auto-update repeated-NEW-alert problem. Squirrel auto-updaters extract each new version into a sibling `app-<version>` folder under the app's install root, so every patch produced a fresh `NewProcess` alert against an essentially identical binary. Solution: dedup by `(CompanyName, ProductName, install-root)` from PE VersionInfo when a Valid Authenticode signature is present. Beats GlassWire/SimpleWall on this class. New ADR 007.
+
+**Key components:**
+
+- **`Beholder.Core/IBinaryIdentityProvider.cs`** — `Task<BinaryIdentity?> ReadIdentityAsync(string path, CancellationToken ct)`. Returns `null` for unreadable / corrupt binaries (graceful degradation).
+- **`Beholder.Core/BinaryIdentity` record** + `AuthenticodeInfo` + `SignatureValidationStatus` enum. All in `Beholder.Core` so `NewProcessDetector` doesn't depend on the Windows-specific implementation.
+- **`Beholder.Daemon.Windows/PeVersionInfoReader.cs`** — `LibraryImport`-based P/Invoke into `version.dll`'s `GetFileVersionInfoExW` + `VerQueryValueW`. Reads `\StringFileInfo\<lcid>\CompanyName` and `\ProductName`.
+- **`Beholder.Daemon.Windows/AuthenticodeVerifier.cs`** — `WinVerifyTrust` for signature validation + `X509Certificate.CreateFromSignedFile` for cert extraction. Returns `null` for catalog-signed binaries (no embedded cert; falls through to path-based dedup).
+- **`Beholder.Daemon.Windows/WindowsBinaryIdentityProvider.cs`** — composes the two above. Resolves install root by walking ancestors looking for a folder name matching `ProductName` (case-insensitive). Catches Discord at AppData vs Program Files as different installs.
+- **`Beholder.Core/ProcessInfo.cs`** — added 6 fields: `CompanyName`, `ProductName`, `InstallRoot`, `CertSubjectCn`, `CertIssuerCn`, `SignatureStatus`.
+- **`Beholder.Core/IProcessRegistry.cs`** — added `FindByLogicalIdentityAsync(companyName, productName, installRoot, ...)`.
+- **`Beholder.Daemon/Storage/SqliteProcessRegistry.cs`** — extended with idempotent `ALTER TABLE ADD COLUMN IF NOT EXISTS` migration for the 6 new identity columns; `RegisterAsync` updates them via `INSERT...ON CONFLICT DO UPDATE SET company_name = excluded.company_name, ...`.
+- **`Beholder.Daemon/Pipeline/NewProcessDetector.cs`** — three-tier dedup walk now: (1) path → silent; (2) logical-identity match → silent if same publisher (Squirrel update), `HashChanged` with publisher-mismatch summary if different publisher (SPOOF DETECTED); (3) genuinely new → `NewProcess`.
+- **ADR 007** (`docs/decisions/007-logical-app-identity-and-spoof-detection.md`) — full rationale, alternatives considered, out-of-scope items.
+
+**Tests added:** ~50 across `WindowsBinaryIdentityProviderTests`, `AuthenticodeVerifierTests`, `PeVersionInfoReaderTests`, plus the Phase 7.5 sections in `NewProcessDetectorTests` (logical-identity match same/different publisher, different install root, no provider, unsigned, identity-provider-returns-null fallback added in checkpoint cleanup).
+
+**Design decisions:**
+- **Tier 1 = logical identity (signed publisher + product + install root); Tier 2 = path fallback.** Public-key pinning / Tier 4 ADR considered and ruled out as over-engineered for v1 (false-positive risk on legitimate cert rotation).
+- **Catalog-signed binaries fall through to path-based.** notepad.exe et al. have no embedded cert — `AuthenticodeVerifier.Read` returns `null` and `NewProcessDetector` skips identity dedup for them. Documented limitation per ADR 007 § Out of scope.
+- **Identity backfill not auto-applied.** Pre-7.5 `process_registry` rows have NULL identity columns; only newly-seen paths get identity resolved. Listed as a known gap in §5.
+- **`SignatureValidationStatus.Valid` required for identity dedup.** Untrusted/Expired/Revoked signatures don't qualify — those binaries fall through to path-based dedup so a spoofer can't suppress the alert via a self-signed cert.
+
+---
+
 ## 3. Phase-by-Phase Lessons Learned
 
 ### Phase 0
@@ -524,6 +692,60 @@ Out-of-scope for v1 (per the plan): per-packet enforcement events (a packet was 
 - **`NiceMax` `{1, 2, 5, 10}` amplifies sub-percent value drift to 2× visual jumps.** A peak bucket value sitting at `10^N` flips between `Y-max = 10 × 10^(N−1)` and `Y-max = 2 × 10^N` — exactly 2× — when the value nudges across the decade boundary. Expanding to `{1, 1.5, 2, 3, 5, 7, 10}` caps the worst-case jump at ~1.4× and matches how commercial tools (Grafana, Datadog) scale.
 - **Caller parameters can be demoted to hints without breaking the RPC contract.** The IPC proto still accepts `resolution_ms`; the daemon simply ignores it for bucket-width purposes now. This avoids a protocol breaking change while fixing the semantics — the caller's old behavior (send whatever resolution) is still accepted, just reinterpreted.
 
+### Phase 6.4/6.5 polish addendum
+
+- **Pill state should reflect effective connectivity, not stored rule state.** A user reading "ALLOW" while their app is silently blocked by a stale Windows Firewall rule is worse than no UI at all. The pill's truth source is the union of "is there a Beholder block rule?" + "is the OS firewall blocking this path?" — derived, not stored.
+- **`Reclassify` via `Clear+Add` recycles every container.** Avalonia's `ItemsControl` handles `Reset` (the event raised by `Clear+Add`) by recycling all containers, which made pill containers re-template mid-click and swallowed the click. Fix: `Insert/Remove/Move` ops keep stable rows' container instances mounted across 1Hz daemon ticks. Hover-during-tick scenarios now survive.
+- **HResult-based COMException catch over type-based.** `0x80070002 ELEMENT_NOT_FOUND` from `INetFwRules.Add` was being treated as an unhandled exception because the catch was on `COMException` type rather than the HResult — the not-found branch is the EXPECTED path on first-add and needed explicit catch. Always switch on HResult for COM interop.
+
+### Phase 6.6/6.7
+
+- **Optimistic UI + revert-on-failure for any RPC-backed user action.** `MarkAlertRead` flips `IsRead` immediately and fires the RPC in the background; failure reverts. Same pattern for the BLOCK/UNBLOCK toggle. The user gets instant feedback; the wire-side failure surfaces as an `ErrorBanner` without blocking the UI.
+- **Reflection-based event raise is an acceptable test seam.** `DaemonStreamSubscriber.AlertReceived` is a public event with `+=`/`-=` only; tests can't `Invoke` it directly. A `RaiseAlertReceived` reflection helper (mirrors the `RaiseProcessStatesUpdated` pattern in `FirewallTabViewModelTests.Reclassify.cs`) drives the live-update path without a real gRPC stream. Worth the type-coupling cost — the alternative (exposing an internal raiser) leaks state to production for test convenience.
+- **Method-exists + tests-pass isn't enough; production wiring needs explicit verification.** Phase 6.6 added `AlertsTab.ActivateAsync` but never called it from production — the Alerts list was being populated only by live broadcasts, so historic alerts at startup were invisible. Manual smoke-test caught the miss. Lesson: the composition root must be reviewed alongside any new VM lifecycle method.
+- **Plan-mode discipline is non-negotiable for any non-trivial fix, even one-liners.** Soft-reverted an unauthorized ActivateAsync wiring fix (`ce33139` → `fb7ef28`) and re-applied it via a proper plan as `a7e881a`. The plan-mode workflow exists to catch missed-context errors that "trivial fix" intuition doesn't.
+
+### Phase 6.7 polish (the scroll-into-view + cold-start race saga)
+
+- **`ContainerFromItem(item)?.BringIntoView()` silently no-ops for unrealized `VirtualizingStackPanel` rows.** `ContainerFromItem` returns null until the row is materialized; the null-conditional then skips the call entirely. The correct Avalonia 12 API is `ItemsControl.ScrollIntoView(item)` (verified in `Avalonia.Controls.xml:11392`) which delegates to `VirtualizingPanel.ScrollIntoView(int index)` — that method *forces* container realization before bubbling `BringIntoView` up to the outer `ScrollViewer`.
+- **`bool _activated` idempotency in async lazy-load lies to concurrent callers.** When `OnActiveTabChanged` fires `_ = _vm.ActivateAsync()` (fire-and-forget) right before another caller awaits its own `ActivateAsync`, the second call sees `_activated = true` and returns a synthetic completed Task while the first call is still loading. The fix: store the in-flight `Task?` instead so all callers await the same underlying work. Same bug existed in BOTH `FirewallTabViewModel` and `AlertsTabViewModel` (the second one resolved in this checkpoint's cleanup commit `7299702`).
+- **Approved plans need smoke-test before commit, not after.** Committed the original scroll-into-view fix (`816763f`) without manual UI verification because unit tests passed; user smoke-test then surfaced two real bugs (wrong API + cold-start race). Subsequent fix commits (`2cb8753`) explicitly gated commit on user smoke-test confirmation. The "build clean + tests green" bar is a necessary but not sufficient check.
+
+### Phase 6.8
+
+- **Multi-targeting cost is non-local.** `Microsoft.Toolkit.Uwp.Notifications` requires the Windows TFM. Adding it to `Beholder.Ui.Windows` forced conditional TFMs in `Beholder.Ui.csproj` AND `Beholder.Tests.csproj` (`net10.0-windows10.0.17763.0` on Windows builds, plain `net10.0` on Linux). Any consumer of a Windows-TFM project must match TFM at the consuming side too — there's no "this reference is conditional" syntax.
+- **Mirror the `Daemon.Windows` precedent for new platform-split projects.** `Beholder.Ui.Windows` follows the same shape: `internal sealed` defaults, `[SupportedOSPlatform("windows")]` gates, no cross-platform code. Composition root in `App.axaml.cs` selects between the Windows impl and a `NoopNotificationService` based on `OperatingSystem.IsWindows()`.
+- **NuGet vulnerability suppressions need a "why this is safe" comment.** `System.Drawing.Common` 4.7.0 (transitive of the toolkit) has a documented vuln; we suppress because the toast-image surface is unreachable in our code. The suppression in `Directory.Packages.props` carries that justification inline so a future audit doesn't have to re-derive it.
+
+### Phase 6.9
+
+- **Reusable controls pay back at scale.** Five inline error-banner sites collapsed into one `ErrorBanner` UserControl + five 4-line callsites. Net code reduction was modest, but the consistency win was large — the dismiss affordance and severity-token usage are now uniform across all five tabs.
+- **Auto-clear-on-action-entry is the right UX pattern.** When the user retries the failing action, the stale banner clears automatically — no need to dismiss first. The X is for "I don't want to retry; just acknowledge and move on." Two paths to clearing the banner, neither one mandatory.
+- **New component pattern? §5 doc entry in the same commit.** UI_DESIGN.md §9 rule #5 enforces this. Phase 6.9 landed §5.10 ErrorBanner spec + the implementation atomically.
+
+### Phase 6.10
+
+- **Mirror existing affordances rather than invent new ones.** Phase 6.10's `_fileExistsCheck` injection on `AlertsTabViewModel` is byte-for-byte identical to `FirewallTabViewModel`'s pattern. ~30 LOC to deliver the feature because the pattern was already designed and tested in 6.4.
+- **Selection-driven > eager for sparse use cases.** Firewall tab does eager file-existence checks at activation (~80 rules, sub-millisecond on warm caches); Alerts can have 500 rows and selection is rare, so the on-demand check in `OnSelectedAlertChanged` is cheaper. Match the cost model to the access pattern.
+
+### Phase 7
+
+- **Hosted-service detector + facade emitter pattern.** Each detector knows when to alert; `AlertEmitter` knows how (chain-write + broadcast in one call). Saved 3 detectors from each duplicating both contracts. Adding a new alert kind is a new detector + a new `AlertKind` enum value, zero changes to existing detectors.
+- **Source-compatible signature change via discarded return value.** `IEventStore.AppendAsync Task → Task<long>` was non-breaking because every existing caller discarded the return value. Whenever you can change a return type from `Task → Task<T>` without anyone needing to await the new T, the change is free at the wire.
+- **Session-scoped fire-once-per-key dedup at the source.** `TrafficEngine.OnProcessFirstNetworkFlow` only fires once per unique `(path, displayName)` per process lifetime — the engine doesn't know about cross-restart history. Cross-session dedup is the registry's job. This split keeps the engine stateless across daemon restarts and makes both sides independently testable.
+
+### Phase 7.5
+
+- **Catalog-signed Windows binaries (notepad.exe et al.) have no embedded cert.** `AuthenticodeVerifier.Read` returns `null` when cert extraction fails — these binaries silently fall through to path-based dedup. The "validate then extract" path needs explicit handling for catalog signatures, can't assume embedded cert iff signed. Documented limitation per ADR 007 § Out of scope.
+- **ADR-driven semantic shifts deserve their own ADR.** Changing NewProcess from "once per path" to "once per logical identity" is a behavior change visible to users (Discord no longer spams new alerts on auto-update). ADR 007 captures the rationale + alternatives + out-of-scope items so a future contributor doesn't try to "fix" it back to per-path.
+- **`SignatureValidationStatus.Valid` required for identity dedup.** Untrusted/Expired/Revoked signatures don't qualify — those binaries fall through to path-based dedup so a spoofer can't suppress the alert via a self-signed cert. Tier 1 is "Microsoft trusts this signing chain"; weaker tiers are excluded by design.
+- **Walk ancestors looking for a folder name matching ProductName.** Discord's install root is whatever AppData folder is named "Discord" (case-insensitive); same Discord under Program Files is a DIFFERENT install. The walk catches both shapes without hard-coding install-root heuristics per app.
+
+### Checkpoint cleanup (post-2cb8753, this round)
+
+- **When adding columns to a record/proto, audit every callsite that constructs it.** `BinaryHashMonitor.UpdateRegistryAsync` was the canonical example: passed only the pre-7.5 6 args to `new ProcessInfo`, so the 6 new identity columns silently became NULL on every hash check, breaking Phase 7.5's spoof-detection guarantee. The compiler couldn't catch it because all 6 new columns are optional with defaults. Fix: a regression test that asserts "the right side-effect happened on the registry" beats one that asserts "the function returned." `HashChange_PreservesIdentityColumns_OnRegistryUpdate` is the lock.
+- **Field-default-on-omission silently breaks downstream contracts.** Any time you add an optional field/parameter to a widely-constructed type, search the codebase for the constructor and audit every caller. Even when the language makes the omission legal, the semantics may not be.
+
 ---
 
 ## 4. Checkpoint Review History
@@ -540,6 +762,7 @@ Out-of-scope for v1 (per the plan): per-packet enforcement events (a packet was 
 | 5.4.2 | 2026-04-16 | Time-range selector UI + `GetProcessSummaries` RPC | Historical process list hid evicted processes; chart X-axis stretched to requested range instead of data extent; single-point responses rendered as empty canvas | New `GetProcessSummaries` RPC queries tier tables directly; `ChartDataSpan` computed from first/last response timestamps; single-point padding to 11-entry array with burst at index 1 |
 | 5.4.3 | 2026-04-16 | Historical query fidelity and stability | "All Time" blank (old retention-gated tier selector picked empty `_1h`); 7d/30d/All Time produced different charts on identical data; Y-axis flipped 2× on rapid re-switching due to `NiceMax` decade-boundary quantization | Stitched multi-tier query partitions range across tier slices; bucket width driven by `extent/400` rounded to discrete `NiceResolutionsMs`; `nowMs` snapped to minute; `NiceMax` expanded to `{1, 1.5, 2, 3, 5, 7, 10}` |
 | 5.4.3 cleanup | 2026-04-17 to 2026-04-18 | Full audit across daemon, UI, protocol, tests (40 findings) | Missing guard clauses on public APIs (#1–#17); UI deviations from `UI_QUALITY_STANDARDS.md` — hardcoded FontSize literals, 4 buttons lacking hover feedback, `ct` vs `cancellationToken` naming drift (#18–#24); `_10m`/`_1h` tiers uncovered in stitched-timeline test (#29); `fromMs == toMs` zero-width range case untested across all 5 query RPCs (#30); query-RPC errors from the #17 store guards surfaced as `Internal` instead of `InvalidArgument` (#32–#33); `ProtocolConverters.AlertKind` asymmetric (forward-only converter) + `FakeDaemonClient` exception-hook gaps on 2 RPCs (#34, #40); `TrafficStorageOptions` registered as bare singleton inconsistent with `Configure<T>` siblings, `IOptionsMonitor` live-reload untested (#35–#36); `MainWindowViewModel` stub-tab VMs undisposed + 10 hand-fired `PropertyChanged` for derived props + `ClearProcessList` O(n) `CollectionChanged` churn (#37–#39); `phases.md` stale (#31) | All closed. Added guard clauses (`ArgumentOutOfRangeException.ThrowIfLessThan`, `ArgumentException.ThrowIfNullOrWhiteSpace`). Added 5-token FontSize scale (`Small/Caption/Body/Subheading/Heading`) to theme files, replaced 38 literals, added hover styles to 4 buttons, renamed 28 UI `ct` → `cancellationToken` sites. Added 5 `_ZeroWidthRange_ReturnsEmpty` tests + expanded stitched test to all 5 tiers. Extracted `BeholderLocalService.ExecuteQueryAsync<T>` helper that classifies `ArgumentOutOfRangeException`/`ArgumentException` as `InvalidArgument`. Added `AlertKind.FromProto` + strengthened existing theory to full round-trip + added 2 missing `FakeDaemonClient` exception hooks. Moved `TrafficStorageOptions` to `Configure<T>` + `IOptionsMonitor<T>` everywhere + added `PresetSwitchedLive` test + `FakeOptionsMonitor.Set()` mutator + XML doc on `RollupService` documenting live-reload contract. Stub tab VMs now implement `IDisposable`, `MainWindowViewModel` disposes all 4, `[NotifyPropertyChangedFor]` replaces manual notifications, `ClearProcessList` uses `Clear + Add` (2 events vs N). 472 → 526 tests. |
+| 6.4 → 7.5 + 6.7 polish | 2026-05-03 | Daemon alert pipeline (Phase 7 + 7.5 logical identity + spoof detection + ADR 007), UI Phases 6.6–6.10 (Alerts master-detail, action buttons, OS notifications, ErrorBanner reusable control, executable-not-found disable), `IDispatcher` abstraction (commit `6b5de2e`), new `Beholder.Ui.Windows` project (first UI platform split), Firewall tab polish (~11 follow-up commits), scroll-into-view + cold-start race fixes for the Alerts → Firewall deep-link (commits `816763f` + `2cb8753`). ~32 commits since `80ab759` total. | **2 Critical**: (C1) `BinaryHashMonitor.UpdateRegistryAsync` constructed `new ProcessInfo` with only the pre-7.5 6 args, dropping all 6 Phase 7.5 identity columns to NULL on every hash check — `INSERT...ON CONFLICT DO UPDATE SET` then NULL'd the existing row's identity, breaking ADR 007's spoof-detection guarantee. (C2) `AlertsTabViewModel.ActivateAsync` had the same `bool _activated` cold-start race that `FirewallTabViewModel` had pre-`2cb8753`: synthetic completed Task returned to the second concurrent caller (toast-click → `NavigateToAlertAsync`) while the first call's snapshot RPC was still in flight, so `SelectBySeq` ran against an empty `Alerts` collection. **3 Minor** (test gaps): no regression test for identity-column preservation through the SHA-256 update path; no test for `FirstFlow_NoIdentityProviderResult_FallsBackToPathBased` (provider exists but `ReadIdentityAsync` returns null); no test for the AlertsTab cold-start race. **Deferred** (kept in §5): verified-publisher UI badge, identity backfill for pre-7.5 rows, catalog-signed binary path-fallback documentation, master-list orphaned-binary indicator, notification rate-limiting. | Commit `b05442b`: BinaryHashMonitor passes all 11 ProcessInfo args mirroring `NewProcessDetector.RefreshLastSeenAsync` + 2 regression tests. Commit `7299702`: `AlertsTabViewModel.ActivateAsync` stores `Task? _activationTask` instead of `bool _activated` so concurrent callers await the same load (mirrors FirewallTab `2cb8753` change exactly), `FakeDaemonClient` gains `SnapshotResponder` for delay-injection in the regression test. Resolves the spawned-task chip filed after `2cb8753`. **845 → 848 tests**. |
 
 ---
 
@@ -547,14 +770,18 @@ Out-of-scope for v1 (per the plan): per-packet enforcement events (a packet was 
 
 - **O(n) chain verification** — `VerifyAsync` reads all rows sequentially. Fine for weeks of uptime, but months of data will need checkpoint-based verification (verify from last checkpoint instead of seq 1). Address in Phase 11.
 - **Startup OS/SQLite firewall reconciliation** — on daemon restart, OS firewall rules and SQLite `firewall_rules` table may diverge (crash during apply, manual OS changes). A reconciliation pass at startup is deferred to Phase 12.
-- **Linux platform (Beholder.Daemon.Linux)** — project stub exists. `NetlinkFlowSource` and `NftablesFirewallController` implementations are deferred. No timeline; Windows is the primary platform.
+- **Linux platform** — `Beholder.Daemon.Linux` (`NetlinkFlowSource` + `NftablesFirewallController`) and Linux UI port both deferred. No timeline; Windows is the primary platform. The new `Beholder.Ui.Windows` project (Phase 6.8) establishes the platform-split precedent for the UI side, so the Linux UI port is now well-shaped — composition root selects the appropriate `INotificationService` impl by `OperatingSystem.IsWindows()`.
 - **Uplink client (Beholder.Daemon.Uplink)** — project stub exists. Outbound gRPC client with connection state machine, JWT auth, and telemetry forwarding. Phase 10.
 - **Uplink test stub (Beholder.Tests.UplinkStub)** — project stub exists. Reference gRPC server for uplink integration testing. Phase 10.
-- **Alert pipeline (daemon side)** — `NewProcessDetector`, `BinaryHashMonitor`, `ChainIntegrityMonitor` not yet implemented. The `AlertKind` enum and `IAlertStore` interface are defined, but no daemon code generates alerts yet. Phase 7.
 - **TrafficEngineTests residual flakiness** — inherited from AccumulatorTests. The settle-signal fix eliminated most failures, but ~1-2% timeout rate may persist under extreme CPU contention. Monitor during future test runs.
-- **UI quality standards enforcement** — Phase 5.4 onward must comply with `docs/UI_QUALITY_STANDARDS.md`. Phases 5.1–5.3 are retroactively compliant (their quality issues were caught and fixed during manual review). Every future UI phase plan must include the verification and reference comparison sections defined in that document.
+- **UI quality standards enforcement** — Phase 5.4 onward must comply with `docs/UI_QUALITY_STANDARDS.md`. Phases 5.1–5.3 are retroactively compliant (their quality issues were caught and fixed during manual review). Phases 6.4–6.10 each followed the discipline (three-window-size verification, real-data 30s+ uptime, reference comparison against GlassWire / Windows Firewall). Every future UI phase plan must continue including the verification and reference comparison sections defined in that document.
 - **LiveCharts2 Avalonia 12 support** — a dev build (`2.1.0-dev-247`) is installed in `Beholder.Ui` but not yet used in any view. Evaluate stability before building the Phase 8 map tab against it.
-- **Tmds.DBus.Protocol vulnerability** — force-upgraded to 0.92.0 via explicit `PackageReference` to avoid Avalonia 12's transitive pull of vulnerable 0.90.3. Monitor for Avalonia updates that resolve this transitively.
+- **NuGet vulnerability suppressions (2 active):** (1) **Tmds.DBus.Protocol** — force-upgraded to 0.92.0 via explicit `PackageReference` to avoid Avalonia 12's transitive pull of vulnerable 0.90.3. Monitor for Avalonia updates that resolve this transitively. (2) **System.Drawing.Common 4.7.0** — added in Phase 6.8 because `Microsoft.Toolkit.Uwp.Notifications` 7.1.3 transitively pulls it; the toast-image surface is unreachable in our code (we don't attach images), so the suppression in `Directory.Packages.props` is documented inline. Drop both when their respective parent packages release fixed versions.
+- **Catalog-signed binary fallback** (Phase 7.5 limitation per ADR 007 §Out of scope) — `AuthenticodeVerifier.Read` returns null for catalog-signed binaries (notepad.exe et al. — no embedded cert, signature lives in a `.cat` file). These binaries fall through to path-based dedup, identical to pre-7.5 behavior. Catalog-signature reading is doable (`WinVerifyTrust` + `CryptCATAdminCalcHashFromFileHandle`) but adds platform code for a class of binaries that rarely matter for spoof detection.
+- **Identity backfill** (Phase 7.5 limitation) — pre-7.5 `process_registry` rows have NULL identity columns; only newly-seen paths get identity resolved at first observation. A backfill sweep (re-read VersionInfo + signature for every existing row) is straightforward but deferred — the practical impact is just that pre-7.5 binaries get one extra `NewProcess` alert when the identity provider catches up on next observation.
+- **Verified-publisher UI badge** (Phase 7.5 deferred per ADR 007 §Out of scope) — protocol surface is complete (cert subject + status stored per `process_registry` row), but no UI affordance ships yet. Candidates: small "verified" badge in the Alerts detail pane PROCESS subsection, lock icon next to the path in the Firewall rule list. Defer until at least one user complains the data is invisible.
+- **Notification rate-limiting** (Phase 6.8 deferred) — toast fires per alert with no app-side coalescing. Windows Action Center groups them visually but bursts (e.g., 20 NewProcess alerts when a user opens Steam) still produce 20 individual toast pop-ups. A polish pass would add "+N more" coalescing keyed on a small time window.
+- **Master-list orphaned-binary indicator** (Phase 6.10 deferred) — only the detail-pane action buttons disable when the alert's binary is missing. The master-list row gives no visual hint, so a user scrolling the list doesn't know which alerts are actionable. A `⚠` glyph next to the kind badge (mirroring the Firewall tab's orphaned-rule treatment) is the obvious extension.
 
 ---
 
@@ -589,17 +816,23 @@ Not a code deliverable. A project milestone marking the point at which the Traff
 - 6.3 — Traffic tab, sub-view toggles (GRAPH / COLS / MAP within traffic panel)
 - ~~6.4 — Firewall tab (rule table, three-state ALLOW/BLOCK/DEFAULT pill, Active/Inactive grouping, master ON/OFF toggle).~~ ✅ See §2.
 - ~~6.5 — Firewall tab, recent activity strip.~~ ✅ See §2.
-- 6.6 — Alerts tab, master-detail layout (read/unread state via `MarkAlertRead` RPC)
-- 6.7 — Alerts tab, action buttons (BLOCK HOST, BLOCK PROCESS OUT, ADD RULE)
-- Checkpoint: all core tabs functional end-to-end.
+- ~~6.6 — Alerts tab, master-detail layout.~~ ✅ See §2.
+- ~~6.7 — Alerts tab, action buttons (BLOCK PROCESS OUT, ADD RULE) + scroll-into-view + cold-start race fix.~~ ✅ See §2.
+- ~~6.8 — OS-native notifications + new `Beholder.Ui.Windows` project.~~ ✅ See §2.
+- ~~6.9 — Dismissable error banner (`ErrorBanner` reusable control).~~ ✅ See §2.
+- ~~6.10 — Disable action buttons when alert's executable is missing.~~ ✅ See §2.
+- Checkpoint: all core tabs functional end-to-end. **Reached.**
 
-### Phase 7 — Alert pipeline (daemon side)
+### Phase 7 — Alert pipeline (daemon side) ✅
 
-- 7.1 — `NewProcessDetector`: watches flow stream, checks `IProcessRegistry`, emits `NewProcess` alert
-- 7.2 — `BinaryHashMonitor`: SHA-256 of binary on first-seen and periodically, emits `HashChanged` alert
-- 7.3 — `ChainIntegrityMonitor`: runs `VerifyAsync` on startup and periodically, emits `ChainError` alert
-- 7.4 — Wire detectors into pipeline, broadcast alerts via IPC
-- Checkpoint: alerts flow end-to-end from daemon detection to UI display.
+All four sub-phases shipped atomically in commit `d51c625`; Phase 7.5 (logical app identity + Authenticode spoof detection, ADR 007) shipped in `a3515f4`. See §2 for full entries.
+
+- ~~7.1 — `NewProcessDetector`~~ ✅
+- ~~7.2 — `BinaryHashMonitor`~~ ✅
+- ~~7.3 — `ChainIntegrityMonitor`~~ ✅
+- ~~7.4 — Wire detectors into pipeline, broadcast alerts via IPC~~ ✅
+- ~~7.5 — Logical app identity + Authenticode spoof detection (out-of-roadmap addition).~~ ✅ See §2.
+- Checkpoint: **alerts flow end-to-end from daemon detection to UI display, with logical-identity dedup so Squirrel auto-updaters stay silent and a spoofed publisher fires `HashChanged`.** Reached.
 
 ### Phase 8 — Map tab
 
