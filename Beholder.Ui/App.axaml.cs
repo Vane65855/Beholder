@@ -54,11 +54,14 @@ public partial class App : Application {
             // hits Action Center; everyone else gets a no-op until a real
             // Linux/macOS impl ships. The OperatingSystem.IsWindows() guard
             // inside the PLATFORM_WINDOWS block handles the edge case of
-            // a Windows-built binary running under WSL/Mono.
+            // a Windows-built binary running under WSL/Mono. The Windows
+            // impl lives inline in Beholder.Ui.Services per ADR 008 (UI
+            // single-project policy) — the platform delta is too small to
+            // justify a separate project.
 #if PLATFORM_WINDOWS
             _notifications = OperatingSystem.IsWindows()
-                ? new Beholder.Ui.Windows.WindowsNotificationService(
-                    loggerFactory.CreateLogger<Beholder.Ui.Windows.WindowsNotificationService>())
+                ? new WindowsNotificationService(
+                    loggerFactory.CreateLogger<WindowsNotificationService>())
                 : new NoopNotificationService();
 #else
             _notifications = new NoopNotificationService();

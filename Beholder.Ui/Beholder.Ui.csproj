@@ -7,11 +7,15 @@
   </PropertyGroup>
 
   <!-- Conditional TFM. On Windows, target net10.0-windows10.0.17763.0 so we
-       can reference Beholder.Ui.Windows (which needs WinRT-projected types
-       for Microsoft.Toolkit.Uwp.Notifications). On Linux, plain net10.0 so
-       the build doesn't require Windows SDK. The toast notification path
-       is Windows-only via PLATFORM_WINDOWS guards in App.axaml.cs; Linux
-       falls back to NoopNotificationService. -->
+       can pull Microsoft.Toolkit.Uwp.Notifications (which only ships its
+       WinRT-projected toast types on the net5.0-windows10.0.17763.0 target;
+       the cross-platform target ships stubs that throw at runtime). On
+       Linux, plain net10.0 so the build doesn't require Windows SDK. The
+       toast notification path is Windows-only via PLATFORM_WINDOWS source
+       guards (see Services/WindowsNotificationService.cs); Linux falls
+       back to NoopNotificationService. Per ADR 008, Windows-specific UI
+       code lives inline here rather than in a separate Beholder.Ui.Windows
+       project — the platform delta is too small to justify the overhead. -->
   <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
     <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
     <DefineConstants>$(DefineConstants);PLATFORM_WINDOWS</DefineConstants>
@@ -49,19 +53,30 @@
     <ProjectReference Include="..\Beholder.Protocol\Beholder.Protocol.csproj" />
   </ItemGroup>
 
+  <!-- Windows-only PackageReference + matching audit suppress. Lives inline
+       here per ADR 008 (UI single-project policy); previously hosted in a
+       separate Beholder.Ui.Windows project but the 60-LOC platform delta
+       didn't justify the separate-project overhead. The PackageReference
+       only resolves on the Windows TFM; Linux builds skip it entirely so
+       the audit graph never walks the vulnerable System.Drawing.Common
+       transitive — but the suppression is colocated here for completeness
+       and to silence the Windows-build audit. The toast types are
+       consumed by Services/WindowsNotificationService.cs under
+       #if PLATFORM_WINDOWS. -->
   <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
-    <ProjectReference Include="..\Beholder.Ui.Windows\Beholder.Ui.Windows.csproj" />
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
+    <!-- System.Drawing.Common 4.7.0 is a transitive dep of
+         Microsoft.Toolkit.Uwp.Notifications (used for toast image attachments).
+         We don't pass image attachments today — only text — so the vulnerable
+         surface is unreachable. Re-evaluate when Toolkit migrates off the
+         affected dep. -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-rxg9-xrhp-64gj" />
   </ItemGroup>
 
   <!-- Tmds.DBus.Protocol is an Avalonia transitive dep only loaded on Linux.
      Safe to suppress on Windows. Remove when Avalonia updates the reference. -->
   <ItemGroup>
     <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-xrw6-gwf8-vvr9" />
-    <!-- System.Drawing.Common 4.7.0 transitive from Beholder.Ui.Windows's
-         Microsoft.Toolkit.Uwp.Notifications. See Beholder.Ui.Windows.csproj
-         for the rationale; suppressed here too because the audit walks the
-         project graph. -->
-    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-rxg9-xrhp-64gj" />
   </ItemGroup>
 
   <ItemGroup>
