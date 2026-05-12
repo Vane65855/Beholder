@@ -2,23 +2,34 @@
 
 **Network Monitoring Tool** — see what your machine is doing on the network.
 
-Beholder NMT is an open-source network monitoring and firewall management application for Windows and Linux. It provides real-time per-process traffic visibility, a simple application firewall, geographic traffic mapping, and a tamper-evident audit log of all network activity.
+Beholder NMT is an open-source network monitoring and firewall management application for Windows (Linux planned). It provides real-time per-process traffic visibility, a simple application firewall, alert detection for new processes and binary tampering, and a tamper-evident audit log of all network activity.
+
+**Status:** Pre-release / under active development. Currently on Phases 6.4 → 7.5 (Alerts surface + Authenticode spoof detection shipped); next up Phase 8 (Map tab). **848 tests** pass deterministically. See [`docs/phases.md`](docs/phases.md) for the current state, lessons learned, and the full roadmap.
 
 ## Features
 
-- **Per-process traffic monitoring** — see which applications are using the network, how much data they're sending and receiving, and where that data is going
-- **Application firewall** — block or allow network access per application, per direction (inbound/outbound), with one click
-- **Geographic traffic map** — world heat map showing which countries your machine is communicating with, powered by DB-IP Lite
-- **Tamper-evident audit log** — all events are stored in a hash-chained SQLite database with optional Ed25519 signed checkpoints, making it cryptographically difficult to alter historical records
-- **Alert system** — notifications for new processes accessing the network, binary hash changes, and chain integrity warnings
-- **Cross-platform** — runs on Windows (as a service) and Linux (as a systemd unit) with a shared Avalonia UI
-- **Uplink-ready** — optional outbound connection to a remote aggregator for centralized monitoring (aggregator sold separately; the daemon and UI are fully functional standalone)
+### Working today
+
+- **Per-process traffic monitoring** — which applications are using the network, how much they're sending and receiving, and where it's going. Stitched five-tier rollup serves 1-second fidelity on recent data and progressively coarser bucket sizes on older data, all from the same query.
+- **Application firewall** — three-state ALLOW / BLOCK / DEFAULT pills per direction, with a master ON/OFF toggle that disables every Beholder-managed rule without losing the configuration. Active vs. inactive process grouping with orphaned-rule warning glyphs for uninstalled apps.
+- **Alert system with logical-app-identity dedup** — fires `NewProcess` once per logical app (publisher + product + install-root from PE VersionInfo + Authenticode signature) rather than once per file path, so Squirrel auto-updaters like Discord, GitHub Desktop, and Slack stay silent across version bumps. A same-identity match with a *different* signing publisher fires `HashChanged` with a publisher-mismatch summary — spoof detection in the first network monitor on Windows to handle this class. See [ADR 007](docs/decisions/007-logical-app-identity-and-spoof-detection.md).
+- **Tamper-evident audit log** — every state-changing event is stored as a SHA-256 hash-chained row in SQLite. Chain integrity is verified periodically and on startup; failures surface as `ChainError` alerts.
+- **OS-native notifications** — Windows toasts via the unpackaged-exe path (Microsoft.Toolkit.Uwp.Notifications), with click-activation that restores the window and selects the matched alert in the Alerts tab.
+- **Comprehensive hostname capture** — four-layer ladder: (1) Windows DNS resolver-cache preload at startup, (2) live `Microsoft-Windows-DNS-Client` ETW capture, (3) reverse-DNS PTR fallback for direct-IP destinations, (4) SNI extraction from TCP/443 ClientHello packets via `Microsoft-Windows-PktMon` ETW. See ADRs [004](docs/decisions/004-dns-cache-preload-undocumented-api.md), [005](docs/decisions/005-reverse-dns-fallback.md), [006](docs/decisions/006-sni-capture.md).
+
+### Planned
+
+- **Geographic traffic map** (Phase 8) — world heat map showing which countries your machine is communicating with, powered by DB-IP Lite (already wired into the daemon's GeoIP layer; UI surface not yet built).
+- **Uplink to remote aggregator** (Phase 10) — optional outbound TLS gRPC to a centralized aggregator for fleet monitoring. Off by default; the daemon and UI are fully functional standalone.
+- **Signed checkpoints + chain export** (Phase 11) — Ed25519 signed checkpoints over the audit chain; signed JSON export of filtered events.
+- **Linux platform** — `Beholder.Daemon.Linux` (netlink + nftables) and Linux UI port. Project stubs exist; Windows is the primary platform today.
+- **Scanner tab** (Phase 9, unscoped) — feature surface defined by ADR before implementation.
 
 ## Architecture
 
 Beholder NMT consists of two components:
 
-**Daemon** (`Beholder.Daemon`) — a background service that collects network telemetry, enforces firewall rules, resolves IP geolocation, and maintains the audit log. Runs with elevated privileges. Communicates with the UI over a local named pipe (Windows) or Unix domain socket (Linux).
+**Daemon** (`Beholder.Daemon`) — a background service that collects network telemetry, enforces firewall rules, resolves IP geolocation, runs the detector pipeline (`NewProcessDetector` + `BinaryHashMonitor` + `ChainIntegrityMonitor`), and maintains the audit log. Runs with elevated privileges. Communicates with the UI over a local named pipe (Windows) or Unix domain socket (Linux, planned).
 
 **UI** (`Beholder.Ui`) — an Avalonia desktop application that connects to the local daemon and provides the user interface. Runs with normal user privileges. Does not access the network directly.
 
@@ -27,7 +38,7 @@ Beholder NMT consists of two components:
 ### Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later
-- Windows 10+ or a modern Linux distribution
+- Windows 10 1809+ (for the toast-notification surface) or a modern Linux distribution
 - Git
 
 ### Build
@@ -43,7 +54,7 @@ dotnet build
 ```bash
 # Start the daemon (requires elevated privileges)
 # Windows: run terminal as Administrator
-# Linux: use sudo or grant NET_ADMIN + NET_RAW + SYS_PTRACE capabilities
+# Linux: use sudo or grant NET_ADMIN + NET_RAW + SYS_PTRACE capabilities (Linux daemon not yet implemented)
 dotnet run --project Beholder.Daemon
 
 # In a separate terminal, start the UI
@@ -59,49 +70,60 @@ dotnet test
 ## Project Structure
 
 ```
-Beholder.Core              — Models, interfaces, shared logic
+Beholder.Core              — Models, interfaces, shared logic (zero OS dependencies)
 Beholder.Protocol          — gRPC protocol definitions (.proto files)
-Beholder.Daemon            — Background service host
-Beholder.Daemon.Windows    — Windows ETW + WFP implementations
-Beholder.Daemon.Linux      — Linux netlink + nftables implementations
-Beholder.Daemon.GeoIp      — IP geolocation via DB-IP Lite
-Beholder.Daemon.Uplink     — Optional outbound aggregator connection
-Beholder.Ui                — Avalonia desktop UI
+Beholder.Daemon            — Background service host (DI, scheduling, IPC server)
+Beholder.Daemon.Windows    — Windows ETW + WFP + Authenticode + PE VersionInfo
+Beholder.Daemon.Linux      — Linux netlink + nftables (stub; no impl yet)
+Beholder.Daemon.GeoIp      — IP geolocation via DB-IP Lite MMDB
+Beholder.Daemon.Uplink     — Optional outbound aggregator connection (stub)
+Beholder.Ui                — Avalonia desktop UI (MVVM)
+Beholder.Ui.Windows        — Windows-only TFM; hosts the toast-notification service
 Beholder.Tests             — Unit and integration tests
-Beholder.Tests.UplinkStub  — Test stub for the uplink protocol
+Beholder.Tests.UplinkStub  — Reference gRPC server for uplink integration testing
+Beholder.Tools.GeoIpFetcher — Console tool that downloads the DB-IP Lite MMDB
 ```
 
 ## Data Sources
 
 - **IP geolocation**: [DB-IP Lite](https://db-ip.com/db/lite.php) (CC BY 4.0). IP geolocation by [DB-IP](https://db-ip.com).
-- **Network telemetry**: ETW (Windows) / netlink + /proc (Linux) — no third-party collection agents
+- **Network telemetry**: ETW (Windows) — `NT Kernel Logger` for TCP/UDP, `Microsoft-Windows-DNS-Client` for DNS resolution, `Microsoft-Windows-PktMon` for SNI extraction. No third-party collection agents, no kernel drivers.
 
 ## Configuration
 
-The daemon reads configuration from `beholder.toml` in its working directory. A default configuration file is created on first run. Key settings:
+The daemon reads configuration from `appsettings.json` in its working directory via the standard ASP.NET Core options binding. A default file is created on first run. The key binding surfaces:
 
-```toml
-[daemon]
-storage_path = "/var/lib/beholder"        # where the SQLite database lives
-log_level = "Information"
-
-[firewall]
-default_policy = "allow"                  # "allow" or "block" for unseen processes
-
-[geoip]
-database_path = "data/dbip-country-lite.mmdb"
-auto_update = true                        # check for monthly MMDB updates
-
-[uplink]
-enabled = false                           # off by default, no outbound connections
-# endpoint = "https://aggregator.example.com:8443"
-# key_file = "/etc/beholder/uplink.key"
-# trusted_issuers = ["/etc/beholder/issuers/"]
+```json
+{
+  "Rollup": {
+    "Preset": "Balanced"
+  },
+  "Recording": {
+    "FilterSelfTraffic": true
+  },
+  "Dns": {
+    "EnablePreload": true,
+    "EnableReverseDnsFallback": true
+  },
+  "Sni": {
+    "EnableSniCapture": true
+  },
+  "Alert": {
+    "EnableNewProcessDetection": true,
+    "EnableHashChangeDetection": true,
+    "BinaryHashCheckIntervalMinutes": 60
+  },
+  "Firewall": {
+    "EnableEnforcement": true
+  }
+}
 ```
+
+`Rollup.Preset` is `Balanced` (default, ~1.4 GB year-1 footprint) or `Compact` (~580 MB). Runtime-mutable toggles — currently just master firewall enforcement — flow through the gRPC `SetFirewallEnabled` RPC, not config edits. Most other options bind via `IOptionsMonitor<T>` so flipping a value in `appsettings.json` and saving takes effect on the next event without a daemon restart.
 
 ## License
 
-Copyright (C) 2026 [Your Name]
+Copyright (C) 2026 Vane65855
 
 Beholder NMT (daemon and UI) is licensed under the **GNU Affero General Public License v3.0 or later** (AGPL-3.0-or-later). See [LICENSE](LICENSE) for the full text.
 
@@ -113,4 +135,4 @@ The AGPL-3.0 license means:
 ### Third-Party Attributions
 
 - IP geolocation data by [DB-IP](https://db-ip.com), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- Country boundary data via LiveCharts2 (Natural Earth, public domain)
+- Windows toast notifications via [Microsoft.Toolkit.Uwp.Notifications](https://github.com/CommunityToolkit/WindowsCommunityToolkit) (MIT License)
