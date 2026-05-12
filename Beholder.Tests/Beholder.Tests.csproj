@@ -8,8 +8,9 @@
   </PropertyGroup>
 
   <!-- TFM matches Beholder.Ui's TFM. On Windows we transitively pull
-       Beholder.Ui.Windows (Windows TFM); on Linux we don't, so plain
-       net10.0 keeps the build green. -->
+       Microsoft.Toolkit.Uwp.Notifications (declared as a Windows-only
+       conditional PackageReference in Beholder.Ui.csproj per ADR 008);
+       on Linux we don't, so plain net10.0 keeps the build green. -->
   <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
     <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
     <DefineConstants>$(DefineConstants);PLATFORM_WINDOWS</DefineConstants>
@@ -33,10 +34,12 @@
     <PackageReference Include="xunit.v3.mtp-v2" Version="3.2.2" />
   </ItemGroup>
 
-  <!-- Transitive vuln suppressions: walk the project graph (Beholder.Ui →
-       Beholder.Ui.Windows → Microsoft.Toolkit.Uwp.Notifications →
-       System.Drawing.Common 4.7.0). Image-attachment surface is unused;
-       see Beholder.Ui.Windows.csproj for the full rationale. -->
+  <!-- Transitive vuln suppressions: the audit walks the project graph
+       (Beholder.Ui → Microsoft.Toolkit.Uwp.Notifications [Windows-only
+       conditional PackageReference] → System.Drawing.Common 4.7.0). Image-
+       attachment surface is unused; see Beholder.Ui.csproj for the full
+       rationale. The DBus suppression is for Avalonia's Linux-only
+       transitive (safe on Windows). -->
   <ItemGroup>
     <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-xrw6-gwf8-vvr9" />
     <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-rxg9-xrhp-64gj" />

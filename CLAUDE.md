@@ -36,7 +36,7 @@ Beholder.Daemon.Windows    — ETW network provider, WFP/INetFwPolicy2 firewall 
 Beholder.Daemon.Linux      — Netlink/proc provider, nftables firewall controller.
 Beholder.Daemon.GeoIp      — IP-to-country resolution using DB-IP Lite MMDB.
 Beholder.Daemon.Uplink     — Outbound gRPC client, connection state machine, retry logic.
-Beholder.Ui                — Avalonia desktop app, MVVM, all views and controls.
+Beholder.Ui                — Avalonia desktop app, MVVM, all views and controls. Single project; Windows-specific code (OS toast service) lives inline behind `#if PLATFORM_WINDOWS` guards per ADR 008.
 Beholder.Tests             — Unit and integration tests.
 Beholder.Tests.UplinkStub  — Reference gRPC server stub for uplink testing.
 ```
@@ -45,7 +45,7 @@ Beholder.Tests.UplinkStub  — Reference gRPC server stub for uplink testing.
 
 1. **The daemon is the sole authority.** All network data collection, firewall enforcement, GeoIP resolution, and chain hashing happen in the daemon. The UI is a thin display client. Never put business logic in the UI.
 
-2. **Platform code is isolated.** `Beholder.Daemon.Windows` and `Beholder.Daemon.Linux` implement interfaces defined in `Beholder.Core`. They are loaded conditionally at runtime. Never reference Windows-only or Linux-only APIs from any other project.
+2. **Platform code is isolated — with one exception.** `Beholder.Daemon.Windows` and `Beholder.Daemon.Linux` implement interfaces defined in `Beholder.Core`; they are loaded conditionally at runtime. The daemon's platform delta is huge (ETW, WFP, Authenticode on Windows; netlink, nftables on Linux), so the project split earns its keep. **The `Beholder.Ui` UI is the deliberate exception:** Windows-specific UI code (today: one toast-notification service) lives inline behind `#if PLATFORM_WINDOWS` guards because the platform delta is tiny and Avalonia handles most cross-platform UI concerns at the framework level. Never reference Windows-only or Linux-only APIs from any non-platform project **except** `Beholder.Ui`, and within that exception, source-level conditional compilation is mandatory. See [ADR 008](docs/decisions/008-ui-single-project-policy.md).
 
 3. **The UI connects to the local daemon only.** Communication is via gRPC over named pipe (Windows) or Unix domain socket (Linux). The UI never touches the network directly, never reads the MMDB, never writes to SQLite.
 

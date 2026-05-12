@@ -69,6 +69,8 @@ The platform project is loaded at startup based on OS detection,
 registered in DI, and consumed via the interface.
 ```
 
+The same DIP principle governs the UI's platform abstraction, but at smaller scale: `INotificationService` is defined in `Beholder.Core`, `WindowsNotificationService` implements it inside `Beholder.Ui` itself (wrapped in `#if PLATFORM_WINDOWS`), and `App.axaml.cs` selects between it and `NoopNotificationService` at composition time via `OperatingSystem.IsWindows()`. The interface boundary is real; only the project boundary differs from the daemon's shape. [ADR 008](decisions/008-ui-single-project-policy.md) documents the rationale: the UI platform delta is small enough that source-level conditional compilation beats a separate project on overhead. The daemon-side split (`Beholder.Daemon.Windows`, `Beholder.Daemon.Linux`) stays mandatory because that delta is thousands of LOC across multiple OS subsystems.
+
 This is not just a pattern for cross-platform code. It applies everywhere:
 
 - Storage: the daemon depends on `IEventStore`, not on `SqliteEventStore` directly

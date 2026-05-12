@@ -60,6 +60,8 @@ Rules:
 - `Beholder.Core` has ZERO external dependencies (no NuGet packages that aren't part of the base framework)
 - Platform projects (`Daemon.Windows`, `Daemon.Linux`) depend only on Core and their platform-specific NuGet packages
 - The UI depends on Core and Protocol but NEVER on any Daemon project
+- **Daemon platform splits are mandatory** because the per-OS delta (ETW vs netlink for flow capture, WFP vs nftables for firewall, Authenticode vs Linux equivalents for spoof detection) is large enough to warrant separate projects. New Linux daemon work goes in `Beholder.Daemon.Linux`; Windows in `Beholder.Daemon.Windows`.
+- **UI is intentionally one project.** Windows-specific UI code (currently `Beholder.Ui/Services/WindowsNotificationService.cs`, the OS-toast surface) lives inline in `Beholder.Ui` wrapped in `#if PLATFORM_WINDOWS` source guards, with platform-specific NuGet packages declared in `Beholder.Ui.csproj` under MSBuild `Condition="'$(OS)' == 'Windows_NT'"` `ItemGroup`s. The UI's platform delta is small enough (~60 LOC today, expected ≤200 LOC even after a future Linux notification impl) that a separate project would cost more than it saves. See [ADR 008](decisions/008-ui-single-project-policy.md) for the trigger threshold that would justify revisiting.
 
 ## Data Flow
 

@@ -77,8 +77,7 @@ Beholder.Daemon.Windows    — Windows ETW + WFP + Authenticode + PE VersionInfo
 Beholder.Daemon.Linux      — Linux netlink + nftables (stub; no impl yet)
 Beholder.Daemon.GeoIp      — IP geolocation via DB-IP Lite MMDB
 Beholder.Daemon.Uplink     — Optional outbound aggregator connection (stub)
-Beholder.Ui                — Avalonia desktop UI (MVVM)
-Beholder.Ui.Windows        — Windows-only TFM; hosts the toast-notification service
+Beholder.Ui                — Avalonia desktop UI (MVVM). Single project; Windows-only code (OS toast service) lives inline behind `#if PLATFORM_WINDOWS` per ADR 008
 Beholder.Tests             — Unit and integration tests
 Beholder.Tests.UplinkStub  — Reference gRPC server for uplink integration testing
 Beholder.Tools.GeoIpFetcher — Console tool that downloads the DB-IP Lite MMDB

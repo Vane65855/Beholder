@@ -1,8 +1,11 @@
+#if PLATFORM_WINDOWS
+using System;
+using System.Runtime.Versioning;
 using Beholder.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Toolkit.Uwp.Notifications;
 
-namespace Beholder.Ui.Windows;
+namespace Beholder.Ui.Services;
 
 /// <summary>
 /// Windows implementation of <see cref="INotificationService"/>. Uses
@@ -12,7 +15,17 @@ namespace Beholder.Ui.Windows;
 /// persistence work for unpackaged .exe (the alternative is MSIX packaging
 /// or hand-rolled WinRT projection, both heavier than this v1 needs).
 /// </summary>
-public sealed class WindowsNotificationService : INotificationService, IDisposable {
+/// <remarks>
+/// Lives inline in <c>Beholder.Ui</c> behind a <c>#if PLATFORM_WINDOWS</c>
+/// guard rather than in a dedicated <c>Beholder.Ui.Windows</c> project — see
+/// <c>docs/decisions/008-ui-single-project-policy.md</c>. The platform delta
+/// for UI code is small enough (one notification service) that a separate
+/// project would cost more than it saves. The daemon-side split
+/// (<c>Beholder.Daemon.Windows</c>) stays mandatory because that delta is
+/// thousands of LOC across multiple OS subsystems.
+/// </remarks>
+[SupportedOSPlatform("windows")]
+internal sealed class WindowsNotificationService : INotificationService, IDisposable {
     private readonly ILogger<WindowsNotificationService> _logger;
 
     public event Action<long>? AlertActivated;
@@ -58,3 +71,4 @@ public sealed class WindowsNotificationService : INotificationService, IDisposab
         ToastNotificationManagerCompat.OnActivated -= OnToastActivated;
     }
 }
+#endif

@@ -10,5 +10,4 @@
   <Project Path="Beholder.Tests/Beholder.Tests.csproj" />
   <Project Path="Beholder.Tools.GeoIpFetcher/Beholder.Tools.GeoIpFetcher.csproj" />
   <Project Path="Beholder.Ui/Beholder.Ui.csproj" />
-  <Project Path="Beholder.Ui.Windows/Beholder.Ui.Windows.csproj" />
 </Solution>
