@@ -364,11 +364,14 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         var from = request.FromUnixNs.FromUnixTimeNanoseconds();
         var to = request.ToUnixNs.FromUnixTimeNanoseconds();
         // Empty process_path = aggregate across all processes (Phase 6.3
-        // widening for the Traffic tab's COLS view).
+        // widening for the Traffic tab's COLS view). Empty country =
+        // no country filter (Phase 8 polish — the map hover passes a
+        // specific alpha-2 to get per-country top-N).
         var processPath = string.IsNullOrWhiteSpace(request.ProcessPath) ? null : request.ProcessPath;
+        var country = string.IsNullOrWhiteSpace(request.Country) ? null : request.Country;
+        var query = new DestinationsQuery(processPath, from, to, country, request.Limit);
 
-        var destinations = await _trafficStore.GetDestinationsAsync(
-            processPath, from, to, cancellationToken)
+        var destinations = await _trafficStore.GetDestinationsAsync(query, cancellationToken)
             .ConfigureAwait(false);
 
         var response = new Local.GetProcessDestinationsResponse();

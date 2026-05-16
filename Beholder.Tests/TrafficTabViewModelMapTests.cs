@@ -168,4 +168,157 @@ public sealed class TrafficTabViewModelMapTests {
         Assert.True(vm.HasError);
         Assert.Contains("daemon down", vm.ErrorMessage);
     }
+
+    // ---- Phase 8 polish: top-3 destinations per country on hover ----
+
+    private static GetProcessDestinationsResponse MakeDestinations(
+        params (string Address, string? Hostname, long In, long Out)[] rows
+    ) {
+        var resp = new GetProcessDestinationsResponse();
+        foreach (var (addr, host, bin, bout) in rows) {
+            resp.Destinations.Add(new DestinationSummary {
+                RemoteAddress = addr,
+                Hostname = host ?? string.Empty,
+                Country = "US",
+                TotalBytesIn = bin,
+                TotalBytesOut = bout,
+                ConnectionCount = 1,
+            });
+        }
+        return resp;
+    }
+
+    [Fact]
+    public async Task OnHoveredCountryChanged_FirstHover_FetchesAndPopulatesDestinations() {
+        var (vm, client) = CreateVm();
+        client.ProcessDestinationsResponder = req => MakeDestinations(
+            ("1.1.1.1", "github.com", 8_000_000, 200_000),
+            ("2.2.2.2", "microsoft.com", 1_500_000, 500_000));
+
+        vm.HoveredCountry = "US";
+        await Task.Yield();
+
+        Assert.NotNull(vm.HoveredCountryDestinations);
+        Assert.Equal(2, vm.HoveredCountryDestinations!.Count);
+        Assert.Equal("github.com", vm.HoveredCountryDestinations[0].Label);
+        Assert.Equal(8_200_000, vm.HoveredCountryDestinations[0].TotalBytes);
+        Assert.False(vm.HoveredCountryDestinationsLoading);
+        Assert.False(vm.HoveredCountryDestinationsEmpty);
+        Assert.False(vm.HoveredCountryDestinationsFailed);
+    }
+
+    [Fact]
+    public async Task OnHoveredCountryChanged_HostnameMissing_FallsBackToRawIP() {
+        var (vm, client) = CreateVm();
+        client.ProcessDestinationsResponder = req => MakeDestinations(
+            ("52.94.230.45", Hostname: null, 100, 50));
+
+        vm.HoveredCountry = "US";
+        await Task.Yield();
+
+        var only = Assert.Single(vm.HoveredCountryDestinations!);
+        Assert.Equal("52.94.230.45", only.Label);
+    }
+
+    [Fact]
+    public async Task OnHoveredCountryChanged_SecondHoverSameCountry_UsesCache_NoRefetch() {
+        var (vm, client) = CreateVm();
+        var fetchCount = 0;
+        client.ProcessDestinationsResponder = req => {
+            fetchCount++;
+            return MakeDestinations(("1.1.1.1", "example.com", 100, 50));
+        };
+
+        vm.HoveredCountry = "US";
+        await Task.Yield();
+        Assert.Equal(1, fetchCount);
+
+        // Hover away then back to the same country — cache must serve
+        // the second hover with no RPC.
+        vm.HoveredCountry = null;
+        vm.HoveredCountry = "US";
+        await Task.Yield();
+
+        Assert.Equal(1, fetchCount);
+        Assert.NotNull(vm.HoveredCountryDestinations);
+        Assert.Single(vm.HoveredCountryDestinations!);
+    }
+
+    [Fact]
+    public async Task OnHoveredCountryChanged_NullValue_ClearsState() {
+        var (vm, client) = CreateVm();
+        client.ProcessDestinationsResponder = req => MakeDestinations(
+            ("1.1.1.1", "example.com", 100, 50));
+        vm.HoveredCountry = "US";
+        await Task.Yield();
+        Assert.NotNull(vm.HoveredCountryDestinations);
+
+        vm.HoveredCountry = null;
+
+        Assert.Null(vm.HoveredCountryDestinations);
+        Assert.False(vm.HoveredCountryDestinationsLoading);
+        Assert.False(vm.HoveredCountryDestinationsEmpty);
+        Assert.False(vm.HoveredCountryDestinationsFailed);
+    }
+
+    [Fact]
+    public async Task OnHoveredCountryChanged_EmptyResponse_SetsEmptyFlag() {
+        var (vm, client) = CreateVm();
+        client.ProcessDestinationsResponder = req => new GetProcessDestinationsResponse();
+
+        vm.HoveredCountry = "US";
+        await Task.Yield();
+
+        Assert.NotNull(vm.HoveredCountryDestinations);
+        Assert.Empty(vm.HoveredCountryDestinations!);
+        Assert.True(vm.HoveredCountryDestinationsEmpty);
+        Assert.False(vm.HoveredCountryDestinationsLoading);
+        Assert.False(vm.HoveredCountryDestinationsFailed);
+    }
+
+    [Fact]
+    public async Task OnHoveredCountryChanged_RpcFails_SetsFailedFlagAndNoErrorBanner() {
+        // Locks in the silent-degrade design decision: destinations are
+        // opportunistic augmentation, the country name + bytes header is
+        // still useful, so an ErrorBanner that obscures the map is the
+        // wrong response. See plan §"Approach" tooltip-states section
+        // and PRINCIPLES.md §Error Handling.
+        var (vm, client) = CreateVm();
+        client.ProcessDestinationsException = new RpcException(
+            new Status(StatusCode.Unavailable, "daemon down"));
+
+        vm.HoveredCountry = "US";
+        await Task.Yield();
+
+        Assert.True(vm.HoveredCountryDestinationsFailed);
+        Assert.False(vm.HoveredCountryDestinationsLoading);
+        Assert.Null(vm.HoveredCountryDestinations);
+        // Critical: no global ErrorBanner.
+        Assert.False(vm.HasError);
+        Assert.Empty(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task OnSelectedTimeRangeChanged_ClearsTopDestCache_NextHoverRefetches() {
+        var (vm, client) = CreateVm();
+        var fetchCount = 0;
+        client.ProcessDestinationsResponder = req => {
+            fetchCount++;
+            return MakeDestinations(("1.1.1.1", "example.com", 100, 50));
+        };
+
+        // First hover populates the cache.
+        vm.HoveredCountry = "US";
+        await Task.Yield();
+        Assert.Equal(1, fetchCount);
+
+        // Time-range change should invalidate the cache; a fresh hover
+        // to the same country must re-fetch.
+        vm.HoveredCountry = null;
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last1Hour);
+        vm.HoveredCountry = "US";
+        await Task.Yield();
+
+        Assert.Equal(2, fetchCount);
+    }
 }

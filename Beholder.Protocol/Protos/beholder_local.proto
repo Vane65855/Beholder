@@ -229,6 +229,14 @@ message GetProcessDestinationsRequest {
   string process_path = 1;
   int64 from_unix_ns = 2;
   int64 to_unix_ns = 3;
+  // Phase 8 polish: optional alpha-2 country filter. Empty string = no
+  // filter (preserves existing COLS behavior). Used by the map hover
+  // tooltip to fetch top-N destinations within a single country.
+  string country = 4;
+  // Phase 8 polish: optional top-N cap. 0 or negative = unbounded
+  // (preserves existing COLS behavior). Applied after ORDER BY total
+  // bytes DESC, so non-zero limit returns the loudest N destinations.
+  int32 limit = 5;
 }
 
 message GetProcessDestinationsResponse {

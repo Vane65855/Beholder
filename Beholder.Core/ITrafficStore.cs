@@ -57,9 +57,7 @@ public interface ITrafficStore {
     /// parameter).
     /// </summary>
     Task<IReadOnlyList<DestinationSummary>> GetDestinationsAsync(
-        string? processPath,
-        DateTimeOffset from,
-        DateTimeOffset to,
+        DestinationsQuery query,
         CancellationToken cancellationToken);
 
     /// <summary>

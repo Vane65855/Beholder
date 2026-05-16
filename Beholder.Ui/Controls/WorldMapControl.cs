@@ -31,10 +31,40 @@ internal sealed class WorldMapControl : Control {
     public static readonly StyledProperty<long> MaxBytesProperty =
         AvaloniaProperty.Register<WorldMapControl, long>(nameof(MaxBytes));
 
+    /// <summary>
+    /// ISO 3166-1 alpha-2 code of the country the user is hovering, or null
+    /// when the cursor is over the ocean / outside the map. Set by the
+    /// control's <c>PointerMoved</c> handler; the VM binds OneWayToSource
+    /// so it can fire the per-country destinations fetch.
+    /// </summary>
+    public static readonly StyledProperty<string?> HoveredCountryProperty =
+        AvaloniaProperty.Register<WorldMapControl, string?>(
+            nameof(HoveredCountry), defaultBindingMode: Avalonia.Data.BindingMode.OneWayToSource);
+
+    /// <summary>
+    /// Top-N destinations for the currently hovered country, set by the VM
+    /// when its async fetch lands. Null when no fetch has been issued or
+    /// the user is hovering ocean; the tooltip renderer treats null + the
+    /// three loading/empty/failed flags below as distinct visual states.
+    /// </summary>
+    public static readonly StyledProperty<IReadOnlyList<DestinationRow>?> HoveredCountryDestinationsProperty =
+        AvaloniaProperty.Register<WorldMapControl, IReadOnlyList<DestinationRow>?>(nameof(HoveredCountryDestinations));
+
+    public static readonly StyledProperty<bool> HoveredCountryDestinationsLoadingProperty =
+        AvaloniaProperty.Register<WorldMapControl, bool>(nameof(HoveredCountryDestinationsLoading));
+
+    public static readonly StyledProperty<bool> HoveredCountryDestinationsEmptyProperty =
+        AvaloniaProperty.Register<WorldMapControl, bool>(nameof(HoveredCountryDestinationsEmpty));
+
+    public static readonly StyledProperty<bool> HoveredCountryDestinationsFailedProperty =
+        AvaloniaProperty.Register<WorldMapControl, bool>(nameof(HoveredCountryDestinationsFailed));
+
     private string? _hoveredIso2;
     private IBrush? _oceanBrush;
     private IBrush? _tooltipFillBrush;
     private IBrush? _tooltipBorderBrush;
+    private IBrush? _tooltipMutedBrush;
+    private IBrush? _tooltipDividerBrush;
     private IPen? _borderPen;
     private IPen? _tooltipBorderPen;
     private HeatmapPalette? _palette;
@@ -42,7 +72,12 @@ internal sealed class WorldMapControl : Control {
     private IBrush? _tooltipForegroundBrush;
 
     static WorldMapControl() {
-        AffectsRender<WorldMapControl>(CountriesProperty, MaxBytesProperty);
+        AffectsRender<WorldMapControl>(
+            CountriesProperty, MaxBytesProperty,
+            HoveredCountryDestinationsProperty,
+            HoveredCountryDestinationsLoadingProperty,
+            HoveredCountryDestinationsEmptyProperty,
+            HoveredCountryDestinationsFailedProperty);
     }
 
     public WorldMapControl() {
@@ -58,6 +93,31 @@ internal sealed class WorldMapControl : Control {
     public long MaxBytes {
         get => GetValue(MaxBytesProperty);
         set => SetValue(MaxBytesProperty, value);
+    }
+
+    public string? HoveredCountry {
+        get => GetValue(HoveredCountryProperty);
+        set => SetValue(HoveredCountryProperty, value);
+    }
+
+    public IReadOnlyList<DestinationRow>? HoveredCountryDestinations {
+        get => GetValue(HoveredCountryDestinationsProperty);
+        set => SetValue(HoveredCountryDestinationsProperty, value);
+    }
+
+    public bool HoveredCountryDestinationsLoading {
+        get => GetValue(HoveredCountryDestinationsLoadingProperty);
+        set => SetValue(HoveredCountryDestinationsLoadingProperty, value);
+    }
+
+    public bool HoveredCountryDestinationsEmpty {
+        get => GetValue(HoveredCountryDestinationsEmptyProperty);
+        set => SetValue(HoveredCountryDestinationsEmptyProperty, value);
+    }
+
+    public bool HoveredCountryDestinationsFailed {
+        get => GetValue(HoveredCountryDestinationsFailedProperty);
+        set => SetValue(HoveredCountryDestinationsFailedProperty, value);
     }
 
     protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e) {
@@ -87,7 +147,9 @@ internal sealed class WorldMapControl : Control {
         if (shapes.Count == 0) {
             // Asset corrupt or missing — render the empty ocean and a
             // small unavailability caption rather than crashing.
-            DrawCenteredCaption(context, bounds, "World map unavailable");
+            WorldMapTooltipRenderer.DrawCenteredCaption(
+                context, bounds, "World map unavailable",
+                _tooltipForegroundBrush!, _tooltipTypeface!.Value);
             return;
         }
 
@@ -101,7 +163,7 @@ internal sealed class WorldMapControl : Control {
         }
 
         if (_hoveredIso2 is not null) {
-            DrawHoverTooltip(context, bounds, shapes, byIso);
+            RenderHoverTooltip(context, bounds, shapes, byIso);
         }
     }
 
@@ -112,6 +174,11 @@ internal sealed class WorldMapControl : Control {
         _tooltipBorderBrush ??= ResolveBrush("BorderStrong");
         _tooltipBorderPen ??= new Pen(_tooltipBorderBrush, 1.0);
         _tooltipForegroundBrush ??= ResolveBrush("TextPrimary");
+        // Phase 8 polish: muted brush drives the tooltip's Loading / Empty
+        // / Failed captions; divider is the same BorderSubtle as the
+        // country outlines for visual coherence.
+        _tooltipMutedBrush ??= ResolveBrush("TextMuted");
+        _tooltipDividerBrush ??= ResolveBrush("BorderSubtle");
         _tooltipTypeface ??= new Typeface("Inter");
         _palette ??= HeatmapPalette.Resolve();
     }
@@ -123,6 +190,8 @@ internal sealed class WorldMapControl : Control {
         _tooltipBorderBrush = null;
         _tooltipBorderPen = null;
         _tooltipForegroundBrush = null;
+        _tooltipMutedBrush = null;
+        _tooltipDividerBrush = null;
         _palette = null;
     }
 
@@ -150,43 +219,33 @@ internal sealed class WorldMapControl : Control {
         }
     }
 
-    private void DrawHoverTooltip(
+    private void RenderHoverTooltip(
         DrawingContext context, Rect bounds, IReadOnlyList<CountryShape> shapes,
         IReadOnlyDictionary<string, CountryTrafficSummary> byIso
     ) {
+        // Resolve the country's display name from the geometry catalog;
+        // falls back to the ISO2 if no shape matches (shouldn't happen
+        // since _hoveredIso2 is set from a FindCountryAt result on the
+        // same shape list).
         string name = _hoveredIso2!;
         foreach (var s in shapes) {
             if (s.Iso2 == _hoveredIso2) { name = s.Name; break; }
         }
         byIso.TryGetValue(_hoveredIso2!, out var summary);
-        var line2 = summary is null
-            ? "no traffic"
-            : $"▼ {FormatBytes(summary.TotalBytesIn)}   ▲ {FormatBytes(summary.TotalBytesOut)}";
 
-        var ft1 = new FormattedText(name, System.Globalization.CultureInfo.CurrentCulture,
-            FlowDirection.LeftToRight, _tooltipTypeface!.Value, 13, _tooltipForegroundBrush);
-        var ft2 = new FormattedText(line2, System.Globalization.CultureInfo.CurrentCulture,
-            FlowDirection.LeftToRight, _tooltipTypeface!.Value, 11, _tooltipForegroundBrush);
-
-        const double pad = 8;
-        var w = System.Math.Max(ft1.Width, ft2.Width) + pad * 2;
-        var h = ft1.Height + ft2.Height + pad * 2;
-        var origin = new Point(
-            System.Math.Min(bounds.Width - w - 12, 12),
-            12);
-        var box = new Rect(origin.X, origin.Y, w, h);
-        context.FillRectangle(_tooltipFillBrush!, box);
-        context.DrawRectangle(null, _tooltipBorderPen, box);
-        context.DrawText(ft1, new Point(box.X + pad, box.Y + pad));
-        context.DrawText(ft2, new Point(box.X + pad, box.Y + pad + ft1.Height));
-    }
-
-    private void DrawCenteredCaption(DrawingContext context, Rect bounds, string text) {
-        var ft = new FormattedText(text, System.Globalization.CultureInfo.CurrentCulture,
-            FlowDirection.LeftToRight, _tooltipTypeface!.Value, 14, _tooltipForegroundBrush);
-        context.DrawText(ft, new Point(
-            (bounds.Width - ft.Width) / 2,
-            (bounds.Height - ft.Height) / 2));
+        var brushes = new WorldMapTooltipRenderer.TooltipBrushes(
+            Fill: _tooltipFillBrush!,
+            Foreground: _tooltipForegroundBrush!,
+            Muted: _tooltipMutedBrush!,
+            Divider: _tooltipDividerBrush!,
+            BorderPen: _tooltipBorderPen!);
+        WorldMapTooltipRenderer.Draw(
+            context, bounds, name, summary,
+            HoveredCountryDestinations,
+            HoveredCountryDestinationsLoading,
+            HoveredCountryDestinationsEmpty,
+            HoveredCountryDestinationsFailed,
+            brushes, _tooltipTypeface!.Value);
     }
 
     private void OnPointerMoved(object? sender, PointerEventArgs e) {
@@ -197,6 +256,9 @@ internal sealed class WorldMapControl : Control {
         var iso = WorldMapHitTester.FindCountryAt(geo, shapes);
         if (iso != _hoveredIso2) {
             _hoveredIso2 = iso;
+            // Mirror to the StyledProperty so the VM (OneWayToSource
+            // binding) can drive the per-country destinations fetch.
+            HoveredCountry = iso;
             InvalidateVisual();
         }
     }
@@ -204,16 +266,9 @@ internal sealed class WorldMapControl : Control {
     private void OnPointerExited(object? sender, PointerEventArgs e) {
         if (_hoveredIso2 is not null) {
             _hoveredIso2 = null;
+            HoveredCountry = null;
             InvalidateVisual();
         }
-    }
-
-    private static string FormatBytes(long bytes) {
-        const double KB = 1024, MB = KB * 1024, GB = MB * 1024;
-        if (bytes >= GB) return $"{bytes / GB:F2} GB";
-        if (bytes >= MB) return $"{bytes / MB:F2} MB";
-        if (bytes >= KB) return $"{bytes / KB:F1} KB";
-        return $"{bytes} B";
     }
 
     private static IBrush ResolveBrush(string tokenName) {

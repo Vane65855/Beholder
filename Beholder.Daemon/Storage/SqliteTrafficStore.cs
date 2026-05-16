@@ -163,16 +163,24 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
     }
 
     public async Task<IReadOnlyList<DestinationSummary>> GetDestinationsAsync(
-        string? processPath,
-        DateTimeOffset from,
-        DateTimeOffset to,
+        DestinationsQuery query,
         CancellationToken cancellationToken
     ) {
-        if (processPath is not null) ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
-        ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
+        ArgumentNullException.ThrowIfNull(query);
+        if (query.ProcessPath is not null) ArgumentException.ThrowIfNullOrWhiteSpace(query.ProcessPath);
+        if (query.Country is not null) ArgumentException.ThrowIfNullOrWhiteSpace(query.Country);
+        ArgumentOutOfRangeException.ThrowIfLessThan(query.To, query.From);
 
-        var tier = SelectTierForRange(from, to);
-        var processFilter = processPath is null ? string.Empty : "AND process_path = $processPath";
+        var tier = SelectTierForRange(query.From, query.To);
+        var processFilter = query.ProcessPath is null ? string.Empty : "AND process_path = $processPath";
+        // Phase 8 polish: country clause uses the existing
+        // (country, bucket_start_ms) index per tier (ARCHITECTURE.md
+        // §Storage Schema). Cheap exact-equality match — no LIKE / GLOB.
+        var countryFilter = query.Country is null ? string.Empty : "AND country = $country";
+        // Phase 8 polish: LIMIT applied AFTER the ORDER BY total bytes
+        // DESC, so a non-zero limit returns the loudest N destinations.
+        // Zero / negative limit preserves pre-Phase-8 unbounded behavior.
+        var limitClause = query.Limit > 0 ? "LIMIT $limit" : string.Empty;
 
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
@@ -187,12 +195,16 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
             WHERE bucket_start_ms >= $fromMs
               AND bucket_start_ms < $toMs
               {processFilter}
+              {countryFilter}
             GROUP BY remote_address
-            ORDER BY SUM(bytes_in) + SUM(bytes_out) DESC;
+            ORDER BY SUM(bytes_in) + SUM(bytes_out) DESC
+            {limitClause};
             """;
-        if (processPath is not null) command.Parameters.AddWithValue("$processPath", processPath);
-        command.Parameters.AddWithValue("$fromMs", from.ToUnixTimeMilliseconds());
-        command.Parameters.AddWithValue("$toMs", to.ToUnixTimeMilliseconds());
+        if (query.ProcessPath is not null) command.Parameters.AddWithValue("$processPath", query.ProcessPath);
+        if (query.Country is not null) command.Parameters.AddWithValue("$country", query.Country);
+        if (query.Limit > 0) command.Parameters.AddWithValue("$limit", query.Limit);
+        command.Parameters.AddWithValue("$fromMs", query.From.ToUnixTimeMilliseconds());
+        command.Parameters.AddWithValue("$toMs", query.To.ToUnixTimeMilliseconds());
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         var results = new List<DestinationSummary>();
