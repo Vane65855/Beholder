@@ -35,6 +35,22 @@ public class SqliteTrafficStoreTests : IDisposable {
         if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true);
     }
 
+    /// <summary>
+    /// Helper for tests that only care about the by-process / by-range
+    /// shape of <see cref="ITrafficStore.GetDestinationsAsync"/>; Phase 8
+    /// polish added optional country + limit parameters via the
+    /// <see cref="DestinationsQuery"/> record, but the pre-Phase-8 tests
+    /// here all pass <c>country=null, limit=0</c> (preserved behavior).
+    /// New tests that exercise the country filter / LIMIT construct
+    /// <see cref="DestinationsQuery"/> directly.
+    /// </summary>
+    private Task<IReadOnlyList<DestinationSummary>> GetDestinationsByProcessAsync(
+        string? processPath, DateTimeOffset from, DateTimeOffset to,
+        CancellationToken cancellationToken
+    ) => _store.GetDestinationsAsync(
+        new DestinationsQuery(processPath, from, to, Country: null, Limit: 0),
+        cancellationToken);
+
     private static TrafficBucket CreateBucket(
         string processPath = "C:/app/firefox.exe",
         string processName = "firefox.exe",
@@ -91,7 +107,7 @@ public class SqliteTrafficStoreTests : IDisposable {
         };
         await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
 
-        var destinations = await _store.GetDestinationsAsync(
+        var destinations = await GetDestinationsByProcessAsync(
             "C:/app/firefox.exe",
             BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
             CancellationToken.None);
@@ -106,7 +122,7 @@ public class SqliteTrafficStoreTests : IDisposable {
         var bucket = CreateBucket(hostname: null);
         await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
 
-        var destinations = await _store.GetDestinationsAsync(
+        var destinations = await GetDestinationsByProcessAsync(
             "C:/app/firefox.exe",
             BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
             CancellationToken.None);
@@ -191,7 +207,7 @@ public class SqliteTrafficStoreTests : IDisposable {
         };
         await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
 
-        var destinations = await _store.GetDestinationsAsync(
+        var destinations = await GetDestinationsByProcessAsync(
             "C:/app/firefox.exe",
             BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
             CancellationToken.None);
@@ -216,7 +232,7 @@ public class SqliteTrafficStoreTests : IDisposable {
             countryAlpha2: "DE");
         await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
 
-        var destinations = await _store.GetDestinationsAsync(
+        var destinations = await GetDestinationsByProcessAsync(
             "C:/app/firefox.exe",
             BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
             CancellationToken.None);
@@ -403,7 +419,7 @@ public class SqliteTrafficStoreTests : IDisposable {
     [Fact]
     public async Task GetDestinationsAsync_FromAfterTo_Throws() =>
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-            _store.GetDestinationsAsync(
+            GetDestinationsByProcessAsync(
                 "C:/app/firefox.exe", BaseTime.AddHours(1), BaseTime,
                 CancellationToken.None));
 
@@ -456,7 +472,7 @@ public class SqliteTrafficStoreTests : IDisposable {
         var bucket = CreateBucket();
         await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
 
-        var destinations = await _store.GetDestinationsAsync(
+        var destinations = await GetDestinationsByProcessAsync(
             "C:/app/firefox.exe",
             BaseTime, BaseTime,
             CancellationToken.None);
@@ -539,7 +555,7 @@ public class SqliteTrafficStoreTests : IDisposable {
         };
         await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
 
-        var destinations = await _store.GetDestinationsAsync(
+        var destinations = await GetDestinationsByProcessAsync(
             processPath: null,
             BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
             CancellationToken.None);
@@ -560,7 +576,7 @@ public class SqliteTrafficStoreTests : IDisposable {
         };
         await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
 
-        var destinations = await _store.GetDestinationsAsync(
+        var destinations = await GetDestinationsByProcessAsync(
             processPath: "C:/app/firefox.exe",
             BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
             CancellationToken.None);
@@ -1035,5 +1051,89 @@ public class SqliteTrafficStoreTests : IDisposable {
             var hostname = await SelectHostnameAsync(connectionFactory, table, address.ToString());
             Assert.Equal("rdns.example.com", hostname);
         }
+    }
+
+    // ---- Phase 8 polish: country filter + LIMIT on GetDestinationsAsync ----
+
+    [Fact]
+    public async Task GetDestinationsAsync_WithCountryFilter_OnlyReturnsRowsInThatCountry() {
+        // Three destinations spread across three countries; the country
+        // filter should isolate just the one. Verifies the SQL gains the
+        // `AND country = $country` clause and uses the existing
+        // (country, bucket_start_ms) index per tier.
+        var buckets = new[] {
+            CreateBucket(remoteAddress: "1.1.1.1", countryAlpha2: "US", bytesIn: 100, bytesOut: 50),
+            CreateBucket(remoteAddress: "2.2.2.2", countryAlpha2: "DE", bytesIn: 200, bytesOut: 100),
+            CreateBucket(remoteAddress: "3.3.3.3", countryAlpha2: "JP", bytesIn: 300, bytesOut: 150),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var query = new DestinationsQuery(
+            ProcessPath: null,
+            From: BaseTime.AddSeconds(-1),
+            To: BaseTime.AddSeconds(11),
+            Country: "DE",
+            Limit: 0);
+        var destinations = await _store.GetDestinationsAsync(query, CancellationToken.None);
+
+        var only = Assert.Single(destinations);
+        Assert.Equal("2.2.2.2", only.RemoteAddress);
+        Assert.Equal(200, only.TotalBytesIn);
+    }
+
+    [Fact]
+    public async Task GetDestinationsAsync_WithLimit_TruncatesToTopN() {
+        // Five destinations in the same country; LIMIT 3 should return
+        // only the top 3 by total bytes (descending). Verifies the SQL
+        // gains the `LIMIT $limit` clause AFTER the ORDER BY.
+        var buckets = new[] {
+            CreateBucket(remoteAddress: "1.1.1.1", countryAlpha2: "US", bytesIn: 100, bytesOut: 0),
+            CreateBucket(remoteAddress: "2.2.2.2", countryAlpha2: "US", bytesIn: 500, bytesOut: 0),
+            CreateBucket(remoteAddress: "3.3.3.3", countryAlpha2: "US", bytesIn: 300, bytesOut: 0),
+            CreateBucket(remoteAddress: "4.4.4.4", countryAlpha2: "US", bytesIn: 50,  bytesOut: 0),
+            CreateBucket(remoteAddress: "5.5.5.5", countryAlpha2: "US", bytesIn: 400, bytesOut: 0),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var query = new DestinationsQuery(
+            ProcessPath: null,
+            From: BaseTime.AddSeconds(-1),
+            To: BaseTime.AddSeconds(11),
+            Country: "US",
+            Limit: 3);
+        var destinations = await _store.GetDestinationsAsync(query, CancellationToken.None);
+
+        Assert.Equal(3, destinations.Count);
+        // Top 3 by total bytes: 2.2.2.2 (500), 5.5.5.5 (400), 3.3.3.3 (300).
+        Assert.Equal("2.2.2.2", destinations[0].RemoteAddress);
+        Assert.Equal("5.5.5.5", destinations[1].RemoteAddress);
+        Assert.Equal("3.3.3.3", destinations[2].RemoteAddress);
+    }
+
+    [Fact]
+    public async Task GetDestinationsAsync_NoCountryNoLimit_PreservesPreExistingBehavior() {
+        // Regression guard: the new optional fields default to null/0 and
+        // must produce the same output as the pre-Phase-8 signature did
+        // for the COLS view's "all destinations across the range" case.
+        var buckets = new[] {
+            CreateBucket(remoteAddress: "1.1.1.1", countryAlpha2: "US", bytesIn: 100, bytesOut: 0),
+            CreateBucket(remoteAddress: "2.2.2.2", countryAlpha2: "DE", bytesIn: 200, bytesOut: 0),
+            CreateBucket(remoteAddress: "3.3.3.3", countryAlpha2: "JP", bytesIn: 300, bytesOut: 0),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var query = new DestinationsQuery(
+            ProcessPath: null,
+            From: BaseTime.AddSeconds(-1),
+            To: BaseTime.AddSeconds(11),
+            Country: null,
+            Limit: 0);
+        var destinations = await _store.GetDestinationsAsync(query, CancellationToken.None);
+
+        // All 3 returned, descending by total bytes.
+        Assert.Equal(3, destinations.Count);
+        Assert.Equal("3.3.3.3", destinations[0].RemoteAddress);
+        Assert.Equal("2.2.2.2", destinations[1].RemoteAddress);
+        Assert.Equal("1.1.1.1", destinations[2].RemoteAddress);
     }
 }

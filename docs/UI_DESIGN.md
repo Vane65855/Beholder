@@ -373,11 +373,28 @@ Custom `Canvas`-drawn world heatmap rendered by `Beholder.Ui/Controls/WorldMapCo
 
 **Heatmap palette:** 5 stops, picked by `HeatmapPalette.BrushFor(bytes, maxBytes)` with named-constant thresholds (`StopLowFraction = 0.20`, `StopMediumFraction = 0.50`, `StopHighFraction = 0.80`). Cold for 0 bytes, then a teal-amber-red ramp. Tokens are the five new heatmap entries in §2 Data Visualization.
 
-**Hover interactivity:** `PointerMoved` → `WorldMapProjection.Unproject` to lat/lon → `WorldMapHitTester.FindCountryAt` (bounding-box prefilter + point-in-polygon ray-cast) → re-render with a tooltip overlay anchored top-left. Tooltip: country name (large) + `▼ N MB   ▲ M MB` (small). Backed by `BackgroundElevated` fill + `BorderStrong` border, rendered inline in the Render context so it matches the panel tokens exactly. No click handling in Phase 8.
+**Hover interactivity:** `PointerMoved` → `WorldMapProjection.Unproject` to lat/lon → `WorldMapHitTester.FindCountryAt` (bounding-box prefilter + point-in-polygon ray-cast) → re-render with a tooltip overlay anchored top-left. Backed by `BackgroundElevated` fill + `BorderStrong` border, rendered via the dedicated `WorldMapTooltipRenderer` (extracted from `WorldMapControl` to keep the control under the CLAUDE.md ~200 LOC class threshold). No click handling.
+
+**Tooltip layout — header is always shown; the rest depends on the per-country top-N fetch state:**
+
+| Section | When shown | Content |
+|---|---|---|
+| Header (large, `TextPrimary`) | Always when hovering a country | Country name |
+| Bytes line (small, `TextPrimary`) | Always | `▼ {bytesIn}   ▲ {bytesOut}` or `no traffic` |
+| `BorderSubtle` divider | When any of the rows-section states below applies | 1-pixel horizontal line |
+| Destination rows (small, `TextPrimary`) | **Populated state** (fetch returned ≥ 1 row) | Up to 3 rows of `{label}    {bytes}`. Label = hostname when resolved (Phase 5.4.4 ladder), raw IP otherwise. Truncated with ellipsis at 28 chars to bound tooltip width. Right-aligned bytes column. |
+| `loading…` (small, `TextMuted`) | **Loading state** (fetch in flight) | Visually distinct from Empty per UI_QUALITY_STANDARDS §3.1 |
+| `no resolved destinations` (small, `TextMuted`) | **Empty state** (fetch returned 0 rows) | |
+| `destinations unavailable` (small, `TextMuted`) | **Failed state** (RPC failure) | **Silent-degrade** per design: destinations are opportunistic, no ErrorBanner — the header + bytes are still useful, and the user can switch to COLS for the authoritative list. |
+| *(rows section omitted)* | **No-fetch-yet state** (no hover yet on this country) | Tooltip stays at its pre-rows height |
+
+**Per-country top-N fetch (Phase 8 polish):** hovering a country triggers a lazy fetch via the existing `GetProcessDestinations` RPC scoped to `country = iso2, limit = 3`, with `process_path` from the Traffic tab's left-panel selection and the range from the time-range dropdown. Results are cached in the VM per `(country, range, process)` key — re-hovering the same country instantly populates from cache (no RPC). The cache is invalidated whenever the time range or process selection changes. Rapid hover between countries cancels in-flight fetches via a single-flight CTS so only the final hover's data lands in the tooltip.
 
 **Caption strip below the map:** the LAN ("--") and Unknown ("??") sentinel countries have no geographic location to plot at, so they surface in a caption strip rendered below the map: `LAN: ▼ X / ▲ Y   ·   Unknown: ▼ X / ▲ Y`. Always shown (even at zero) so the caption strip's height stays stable across data updates.
 
-**States implemented:** Loading (parent VM's spinner overlay), Empty (caption "No foreign traffic" + LAN/Unknown caption still shown), Populated (heat-mapped countries + hover), Error (ErrorBanner Danger variant), Asset-unavailable (centered "World map unavailable" caption — protects against corrupt builds without crashing the Traffic tab).
+**Font sizes are named constants in `WorldMapTooltipRenderer`** (`HeaderFontSize = 13`, `RowFontSize = 11`) rather than inline literals — per UI_QUALITY_STANDARDS §5 #2 banned-pattern guidance. Canvas-drawn `FormattedText` can't bind to `DynamicResource` theme tokens at draw time, so constants are the right granularity (same pattern as `TrafficChartControl`'s stroke widths).
+
+**States implemented:** Loading (parent VM's spinner overlay for the whole map; the in-tooltip `loading…` for the per-country top-N fetch), Empty (caption "No foreign traffic" + LAN/Unknown caption still shown; in-tooltip "no resolved destinations" for the per-country case), Populated (heat-mapped countries + hover + up-to-3 destination rows), Error (ErrorBanner Danger variant for the map; silent-degrade in-tooltip "destinations unavailable" for the per-country case), Asset-unavailable (centered "World map unavailable" caption — protects against corrupt builds without crashing the Traffic tab).
 
 Distinct from `TrafficChartControl` (§4 chart area) which renders a time-series area chart. The two share a common pattern — custom `Control` subclass, lazy token resolution, reusable geometry buffers, theme-swap invalidation — but render disjoint visual languages.
 
@@ -399,6 +416,7 @@ When the MAP toggle is active, the right pane renders the world-heatmap surface 
 - **Time-range from the dropdown.** The heatmap respects the same range presets the chart does. Switching range while MAP is active re-fetches the breakdown.
 - **Cancellation.** A second concurrent fetch (rapid view-mode flip, range change, or process change) cancels the prior one via a single-flight CTS — no stacked RPCs.
 - **LAN + Unknown caption.** Sentinel country codes "--" (private/reserved IPs) and "??" (resolved to no country) have no geographic location to plot at, so they surface in the caption strip below the map per §5.11 — never on the map itself.
+- **Top-3 destinations on hover** (Phase 8 polish). Hovering a country fetches its top-3 destinations (by total bytes) via the existing `GetProcessDestinations` RPC, extended with `country = iso2, limit = 3` filters. Hostname (or fallback to raw IP) + total bytes shown in the tooltip below the country header. Lazy fetch, cached per `(country, range, process)`. Failed fetch silently degrades to "destinations unavailable" rather than raising an ErrorBanner that would obscure the map — see §5.11.
 
 ### Firewall
 

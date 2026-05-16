@@ -48,6 +48,28 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     /// </summary>
     private CancellationTokenSource? _mapCts;
 
+    /// <summary>
+    /// Owned CTS for the Phase 8 polish per-country-top-N hover fetch.
+    /// Cancelled when the user hovers a different country or leaves the
+    /// map; mirrors the <see cref="_mapCts"/> single-flight pattern.
+    /// </summary>
+    private CancellationTokenSource? _topDestCts;
+
+    /// <summary>
+    /// In-memory cache for the per-country top-N destinations fetched on
+    /// hover. Keyed by <see cref="TopDestCacheKey"/> so the same country
+    /// + range + process tuple resolves instantly on re-hover. Cleared
+    /// whenever the time range or process selection changes (the cached
+    /// rows would be stale against the new query).
+    /// </summary>
+    private readonly Dictionary<TopDestCacheKey, IReadOnlyList<DestinationRow>> _topDestCache = new();
+
+    /// <summary>
+    /// Cache key for the Phase 8 polish per-country destinations fetch.
+    /// Nested in the parent file per CODING_STANDARDS.md §File Naming.
+    /// </summary>
+    private sealed record TopDestCacheKey(string Iso2, TimeRangeSelection Range, string? ProcessPath);
+
     [ObservableProperty]
     private bool _isLoading = true;
 
@@ -118,6 +140,50 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     [ObservableProperty]
     private string _localAndUnknownCaption = string.Empty;
 
+    /// <summary>
+    /// Alpha-2 ISO code of the country the user is currently hovering on
+    /// the world map, or null when hovering ocean / outside. Bound
+    /// <c>OneWayToSource</c> from <c>WorldMapControl.HoveredCountry</c>;
+    /// drives <see cref="OnHoveredCountryChanged"/> which fetches the
+    /// per-country top-N destinations.
+    /// </summary>
+    [ObservableProperty]
+    private string? _hoveredCountry;
+
+    /// <summary>
+    /// Top-N destinations for the currently hovered country, fetched
+    /// lazily via <see cref="FetchTopDestinationsAsync"/>. Null when no
+    /// fetch has completed for the current hover. Drives the world-map
+    /// tooltip's Populated state per UI_QUALITY_STANDARDS §3.3.
+    /// </summary>
+    [ObservableProperty]
+    private IReadOnlyList<DestinationRow>? _hoveredCountryDestinations;
+
+    /// <summary>
+    /// True while a hover-driven destination fetch is in flight; drives
+    /// the tooltip's Loading-distinct-from-Empty-distinct-from-Populated
+    /// state per UI_QUALITY_STANDARDS §3.1.
+    /// </summary>
+    [ObservableProperty]
+    private bool _hoveredCountryDestinationsLoading;
+
+    /// <summary>
+    /// True when the most recent hover-driven fetch returned zero rows.
+    /// Drives the tooltip's Empty state per §3.2 ("no resolved destinations").
+    /// </summary>
+    [ObservableProperty]
+    private bool _hoveredCountryDestinationsEmpty;
+
+    /// <summary>
+    /// True when the most recent hover-driven fetch failed (RPC error or
+    /// unexpected exception). Drives the tooltip's Failed state — silent
+    /// degrade per the design discussion in the plan: destinations are
+    /// opportunistic data, so the country name + total bytes header is
+    /// still useful and no ErrorBanner is raised.
+    /// </summary>
+    [ObservableProperty]
+    private bool _hoveredCountryDestinationsFailed;
+
     public ObservableCollection<ProcessListItem> ProcessList => _processList.List;
 
     /// <summary>
@@ -155,6 +221,8 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         _colsVm?.Dispose();
         _mapCts?.Cancel();
         _mapCts?.Dispose();
+        _topDestCts?.Cancel();
+        _topDestCts?.Dispose();
     }
 
     [RelayCommand]
@@ -271,6 +339,10 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         if (ViewMode == TrafficViewMode.Map) {
             _ = RefreshMapAsync();
         }
+
+        // Phase 8 polish: range change invalidates the per-country
+        // destinations cache (rows would be against the old window).
+        _topDestCache.Clear();
     }
 
     internal void UpdateFromStates(IReadOnlyDictionary<string, ProcessState> states) {
@@ -351,6 +423,10 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         if (ViewMode == TrafficViewMode.Map) {
             _ = RefreshMapAsync();
         }
+
+        // Phase 8 polish: process change invalidates the per-country
+        // destinations cache (rows would be against the old process filter).
+        _topDestCache.Clear();
     }
 
     private async Task LoadHistoricalChartForProcessAsync(
@@ -462,6 +538,82 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         if (bytes >= MB) return $"{bytes / MB:F1} MB";
         if (bytes >= KB) return $"{bytes / KB:F0} KB";
         return $"{bytes} B";
+    }
+
+    /// <summary>
+    /// Phase 8 polish: drives the world-map hover tooltip's top-N
+    /// destinations rows. Clears any prior state immediately so the
+    /// previous country's tooltip can't bleed into the new one, then
+    /// either hits the cache or fires a fresh fetch.
+    /// </summary>
+    partial void OnHoveredCountryChanged(string? value) {
+        // Clear all four state flags + the rows themselves immediately so
+        // the previous country's tooltip can't appear stale during the
+        // brief moment between hover-change and fetch-land.
+        HoveredCountryDestinations = null;
+        HoveredCountryDestinationsLoading = false;
+        HoveredCountryDestinationsEmpty = false;
+        HoveredCountryDestinationsFailed = false;
+
+        if (value is null) return;   // hover left the map
+
+        var processPath = SelectedProcess is null || SelectedProcess.IsAll
+            ? null
+            : SelectedProcess.ProcessPath;
+        var key = new TopDestCacheKey(value, SelectedTimeRange, processPath);
+        if (_topDestCache.TryGetValue(key, out var cached)) {
+            HoveredCountryDestinations = cached;
+            HoveredCountryDestinationsEmpty = cached.Count == 0;
+            return;
+        }
+
+        _topDestCts?.Cancel();
+        _topDestCts?.Dispose();
+        _topDestCts = new CancellationTokenSource();
+        HoveredCountryDestinationsLoading = true;
+        _ = FetchTopDestinationsAsync(value, key, _topDestCts.Token);
+    }
+
+    private async Task FetchTopDestinationsAsync(string iso2, TopDestCacheKey key, CancellationToken ct) {
+        try {
+            var range = SelectedTimeRange.Resolve();
+            var request = new GetProcessDestinationsRequest {
+                ProcessPath = key.ProcessPath ?? string.Empty,
+                FromUnixNs = range.From.ToUnixTimeMilliseconds() * 1_000_000L,
+                ToUnixNs = range.To.ToUnixTimeMilliseconds() * 1_000_000L,
+                Country = iso2,
+                Limit = WorldMapTooltipRenderer.Top3DestinationsLimit,
+            };
+            var response = await _daemonClient.GetProcessDestinationsAsync(request, ct);
+            if (ct.IsCancellationRequested) return;
+
+            var rows = new List<DestinationRow>(response.Destinations.Count);
+            foreach (var d in response.Destinations) {
+                // Hostname fallback to raw IP per the COLS view's pattern.
+                var label = string.IsNullOrEmpty(d.Hostname) ? d.RemoteAddress : d.Hostname;
+                rows.Add(new DestinationRow(label, d.TotalBytesIn + d.TotalBytesOut));
+            }
+
+            // Only apply if the user is still hovering this country; the
+            // cache always gets written so a back-hover hits it instantly.
+            _topDestCache[key] = rows;
+            if (HoveredCountry == iso2) {
+                HoveredCountryDestinationsLoading = false;
+                HoveredCountryDestinations = rows;
+                HoveredCountryDestinationsEmpty = rows.Count == 0;
+            }
+        } catch (OperationCanceledException) {
+            // Superseded by a later hover; the new fetch owns the UI state.
+        } catch (Exception) {
+            // Silent-degrade per design: destinations are opportunistic
+            // augmentation, the country name + bytes header is still useful,
+            // and an ErrorBanner would obscure the map. Only flip the
+            // Failed flag if the user is still hovering this country.
+            if (HoveredCountry == iso2) {
+                HoveredCountryDestinationsLoading = false;
+                HoveredCountryDestinationsFailed = true;
+            }
+        }
     }
 
     private void RebuildChartData(IReadOnlyDictionary<string, ProcessState> states) {

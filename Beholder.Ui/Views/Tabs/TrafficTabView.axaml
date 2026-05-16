@@ -255,6 +255,11 @@
                                    Margin="12,4" />
                         <controls:WorldMapControl Countries="{Binding MapCountries}"
                                                   MaxBytes="{Binding MaxMapBytes}"
+                                                  HoveredCountry="{Binding HoveredCountry, Mode=OneWayToSource}"
+                                                  HoveredCountryDestinations="{Binding HoveredCountryDestinations}"
+                                                  HoveredCountryDestinationsLoading="{Binding HoveredCountryDestinationsLoading}"
+                                                  HoveredCountryDestinationsEmpty="{Binding HoveredCountryDestinationsEmpty}"
+                                                  HoveredCountryDestinationsFailed="{Binding HoveredCountryDestinationsFailed}"
                                                   HorizontalAlignment="Stretch"
                                                   VerticalAlignment="Stretch"
                                                   Margin="8,0,8,0" />
