@@ -171,14 +171,15 @@
                             Command="{Binding SetColsViewCommand}" />
                     <Button Content="MAP"
                             Classes="toolbarPill"
-                            IsEnabled="False"
-                            ToolTip.Tip="Geographic map — coming soon" />
+                            Classes.active="{Binding IsMapActive}"
+                            Command="{Binding SetMapViewCommand}"
+                            ToolTip.Tip="Geographic heatmap — per-country byte totals" />
                 </StackPanel>
             </Grid>
 
-            <!-- Chart / COLS area. Graph and COLS views share the same
-                 pane — only one renders at a time based on ViewMode. MAP is
-                 deferred until Phase 8 and the pill stays disabled. -->
+            <!-- GRAPH / COLS / MAP area. All three views share the same
+                 pane — only one renders at a time based on ViewMode. See
+                 UI_DESIGN.md §6 Traffic for the MAP sub-view spec. -->
             <Grid>
                 <!-- GRAPH view: chart + state overlays -->
                 <Grid IsVisible="{Binding IsGraphActive}">
@@ -233,6 +234,32 @@
                 <Panel IsVisible="{Binding IsColsActive}">
                     <tabs:TrafficColsView DataContext="{Binding ColsVm}" />
                 </Panel>
+
+                <!-- MAP view: world heatmap of per-country traffic. Heatmap
+                     fills 5 stops from HeatmapCold → HeatmapPeak; LAN
+                     (alpha2 dashdash) and Unknown (alpha2 question marks)
+                     get the caption strip since they have no geographic
+                     location. See UI_DESIGN.md §5.11 + §6 Traffic→Map. -->
+                <Grid IsVisible="{Binding IsMapActive}">
+                    <DockPanel>
+                        <controls:ErrorBanner DockPanel.Dock="Top"
+                                              Margin="0,8,0,0"
+                                              Severity="Danger"
+                                              Message="{Binding ErrorMessage}"
+                                              IsVisible="{Binding HasError}"
+                                              DismissCommand="{Binding DismissErrorCommand}" />
+                        <TextBlock DockPanel.Dock="Bottom"
+                                   Text="{Binding LocalAndUnknownCaption}"
+                                   Foreground="{DynamicResource TextMuted}"
+                                   FontSize="{DynamicResource FontSizeCaption}"
+                                   Margin="12,4" />
+                        <controls:WorldMapControl Countries="{Binding MapCountries}"
+                                                  MaxBytes="{Binding MaxMapBytes}"
+                                                  HorizontalAlignment="Stretch"
+                                                  VerticalAlignment="Stretch"
+                                                  Margin="8,0,8,0" />
+                    </DockPanel>
+                </Grid>
             </Grid>
         </DockPanel>
     </Grid>
