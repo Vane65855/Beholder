@@ -1,9 +1,17 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media;
 using Beholder.Protocol.Local;
+// Aliased imports for the two Beholder.Core types the MAP sub-view needs.
+// A wildcard `using Beholder.Core;` would clash with Protocol.Local's
+// TrafficTimePoint and CountryTrafficSummary — these proto types share
+// names with the Core records by design (the protocol mirrors Core's
+// shape) but live in different namespaces.
+using CountryCode = Beholder.Core.CountryCode;
+using CoreCountryTrafficSummary = Beholder.Core.CountryTrafficSummary;
 using Beholder.Ui.Controls;
 using Beholder.Ui.Helpers;
 using Beholder.Ui.Models;
@@ -31,6 +39,14 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     // partial buffer state. Null until the first live tick.
     private long[]? _cachedDownloadBuffer;
     private long[]? _cachedUploadBuffer;
+
+    /// <summary>
+    /// Owned CTS for the Phase 8 MAP sub-view's single-flight country-
+    /// breakdown query. A second concurrent invocation (rapid view-mode
+    /// flip, time-range change, or process selection change while MAP is
+    /// active) cancels the prior fetch. Disposed in <see cref="Dispose"/>.
+    /// </summary>
+    private CancellationTokenSource? _mapCts;
 
     [ObservableProperty]
     private bool _isLoading = true;
@@ -76,6 +92,32 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     public bool IsColsActive => ViewMode == TrafficViewMode.Cols;
     public bool IsMapActive => ViewMode == TrafficViewMode.Map;
 
+    /// <summary>
+    /// Per-country byte totals for the MAP sub-view, filtered to real
+    /// (non-sentinel) country codes — "--" (Local) and "??" (Unknown)
+    /// surface in <see cref="LocalAndUnknownCaption"/> instead of on the
+    /// map (no geographic location to plot them at). Null until the first
+    /// successful fetch.
+    /// </summary>
+    [ObservableProperty]
+    private IReadOnlyList<CoreCountryTrafficSummary>? _mapCountries;
+
+    /// <summary>
+    /// Normalization ceiling for the heatmap ramp — the highest single-
+    /// country total across <see cref="MapCountries"/>. Drives
+    /// <c>HeatmapPalette.BrushFor</c>'s 5-stop selection.
+    /// </summary>
+    [ObservableProperty]
+    private long _maxMapBytes;
+
+    /// <summary>
+    /// Caption strip rendered below the map showing the LAN (private-range)
+    /// and Unknown-country byte totals that are excluded from the heatmap
+    /// because they have no geographic location to plot at.
+    /// </summary>
+    [ObservableProperty]
+    private string _localAndUnknownCaption = string.Empty;
+
     public ObservableCollection<ProcessListItem> ProcessList => _processList.List;
 
     /// <summary>
@@ -111,6 +153,8 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         _daemonClient.StateChanged -= OnDaemonStateChanged;
         _historicalQueries.Dispose();
         _colsVm?.Dispose();
+        _mapCts?.Cancel();
+        _mapCts?.Dispose();
     }
 
     [RelayCommand]
@@ -118,6 +162,9 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
 
     [RelayCommand]
     private void SetColsView() => ViewMode = TrafficViewMode.Cols;
+
+    [RelayCommand]
+    private void SetMapView() => ViewMode = TrafficViewMode.Map;
 
     partial void OnViewModeChanged(TrafficViewMode value) {
         if (value == TrafficViewMode.Cols) {
@@ -127,6 +174,8 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             // on large ones since the user deliberately requested a view
             // change.
             _ = RefreshColsAsync();
+        } else if (value == TrafficViewMode.Map) {
+            _ = RefreshMapAsync();
         }
     }
 
@@ -216,6 +265,12 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         if (ViewMode == TrafficViewMode.Cols) {
             _ = RefreshColsAsync();
         }
+
+        // MAP heatmap follows the range too; the GetCountryBreakdown RPC
+        // takes the same (from, to) shape as the COLS queries.
+        if (ViewMode == TrafficViewMode.Map) {
+            _ = RefreshMapAsync();
+        }
     }
 
     internal void UpdateFromStates(IReadOnlyDictionary<string, ProcessState> states) {
@@ -292,6 +347,10 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         if (ViewMode == TrafficViewMode.Cols) {
             _ = RefreshColsAsync();
         }
+
+        if (ViewMode == TrafficViewMode.Map) {
+            _ = RefreshMapAsync();
+        }
     }
 
     private async Task LoadHistoricalChartForProcessAsync(
@@ -313,6 +372,96 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         } catch (RpcException) {
             // Per-process chart query failed — chart stays on previous state.
         }
+    }
+
+    /// <summary>
+    /// Phase 8 MAP sub-view: fetches the per-country byte breakdown from the
+    /// daemon and splits it into (a) real countries that go on the heatmap
+    /// and (b) the LAN / Unknown sentinels that surface in the caption
+    /// below the map. Single-flight: a second concurrent invocation cancels
+    /// the prior one via the owned CTS so rapid view-mode / range / process
+    /// changes don't stack RPCs.
+    /// </summary>
+    private async Task RefreshMapAsync() {
+        // Cancel any in-flight country breakdown; replace the CTS for the
+        // new attempt. Mirrors ProcessListCoordinator's per-VM CTS pattern.
+        _mapCts?.Cancel();
+        _mapCts?.Dispose();
+        _mapCts = new CancellationTokenSource();
+        var ct = _mapCts.Token;
+
+        var processPath = SelectedProcess is null || SelectedProcess.IsAll
+            ? null
+            : SelectedProcess.ProcessPath;
+        var range = SelectedTimeRange.Resolve();
+
+        ClearError();   // see UI_DESIGN.md §5.10 auto-clear
+        try {
+            var request = new GetCountryBreakdownRequest {
+                FromUnixNs = range.From.ToUnixTimeMilliseconds() * 1_000_000L,
+                ToUnixNs = range.To.ToUnixTimeMilliseconds() * 1_000_000L,
+                ProcessPath = processPath ?? string.Empty,
+            };
+            var response = await _daemonClient.GetCountryBreakdownAsync(request, ct);
+            if (ct.IsCancellationRequested) return;
+            ApplyMapBreakdown(response);
+        } catch (OperationCanceledException) {
+            // Superseded — newer call owns the UI state. Don't re-throw;
+            // returning lets the next call's await proceed normally.
+        } catch (RpcException ex) {
+            HasError = true;
+            ErrorMessage = $"Failed to load country breakdown: {ex.Status.Detail}";
+        }
+    }
+
+    private void ApplyMapBreakdown(GetCountryBreakdownResponse response) {
+        var real = new List<CoreCountryTrafficSummary>(response.Countries.Count);
+        long localIn = 0, localOut = 0, unknownIn = 0, unknownOut = 0;
+        long maxBytes = 0;
+
+        foreach (var c in response.Countries) {
+            // CountryCode.Local = "--" (private/reserved IPs);
+            // CountryCode.Unknown = "??" (resolved to no country).
+            // Both have no geographic location so they go in the caption.
+            switch (c.Country) {
+                case "--":
+                    localIn += c.TotalBytesIn;
+                    localOut += c.TotalBytesOut;
+                    break;
+                case "??":
+                    unknownIn += c.TotalBytesIn;
+                    unknownOut += c.TotalBytesOut;
+                    break;
+                default:
+                    real.Add(new CoreCountryTrafficSummary(
+                        CountryCode.FromAlpha2(c.Country), c.TotalBytesIn, c.TotalBytesOut));
+                    var total = c.TotalBytesIn + c.TotalBytesOut;
+                    if (total > maxBytes) maxBytes = total;
+                    break;
+            }
+        }
+
+        MapCountries = real;
+        MaxMapBytes = maxBytes;
+        LocalAndUnknownCaption = FormatLocalAndUnknownCaption(localIn, localOut, unknownIn, unknownOut);
+    }
+
+    private static string FormatLocalAndUnknownCaption(
+        long localIn, long localOut, long unknownIn, long unknownOut
+    ) {
+        // Show both pairs even at zero so the caption strip's height stays
+        // stable across data updates (no layout jitter in the surrounding
+        // DockPanel).
+        return $"LAN: ▼ {FormatBytesShort(localIn)} / ▲ {FormatBytesShort(localOut)}"
+            + $"   ·   Unknown: ▼ {FormatBytesShort(unknownIn)} / ▲ {FormatBytesShort(unknownOut)}";
+    }
+
+    private static string FormatBytesShort(long bytes) {
+        const double KB = 1024, MB = KB * 1024, GB = MB * 1024;
+        if (bytes >= GB) return $"{bytes / GB:F2} GB";
+        if (bytes >= MB) return $"{bytes / MB:F1} MB";
+        if (bytes >= KB) return $"{bytes / KB:F0} KB";
+        return $"{bytes} B";
     }
 
     private void RebuildChartData(IReadOnlyDictionary<string, ProcessState> states) {

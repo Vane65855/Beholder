@@ -109,6 +109,13 @@ Distinct from severity. These tokens represent daemon connection state, which ma
 | `ChartAxisLabel` | `#5A6370` | TBD | Axis tick labels (time, byte values) |
 | `ChartSparklineFill` | `#00BCD4` at 20% opacity | TBD | WAN throughput bar fill in bottom status strip. Currently matches `AccentPrimary` but tokenized independently for future flexibility. |
 | `ChartSparklineStroke` | `#00BCD4` | TBD | WAN throughput bar stroke. Same independence note as fill. |
+| `HeatmapCold` | `#1C2530` | TBD | Phase 8 world map: country with 0 bytes; outline-only fill against the ocean. |
+| `HeatmapLow` | `#00BCD4` at 25% opacity | TBD | Phase 8 world map: 1–20% of MaxBytes. |
+| `HeatmapMedium` | `#00BCD4` at 60% opacity | TBD | Phase 8 world map: 20–50% of MaxBytes. |
+| `HeatmapHigh` | `#D4A017` at 80% opacity | TBD | Phase 8 world map: 50–80% of MaxBytes. |
+| `HeatmapPeak` | `#DA3633` | TBD | Phase 8 world map: 80–100% of MaxBytes — the loudest country. |
+
+*Heatmap stops are five **deliberate** colors, not opacity overlays of a single base, so a future light-theme reviewer must contrast-balance five new values rather than copy one opacity ramp. The dark-theme alphas are baked into the token's color value (`#4000BCD4` etc.) so the resolved on-screen color always comes from a single token lookup per §10's "every effective color is a token" rule.*
 
 ### Traffic Direction Color Semantics
 
@@ -356,6 +363,24 @@ Inline error/warning banner shown above the affected view's content area. Two se
 
 Distinct from in-app toasts (none defined yet) and OS notification toasts (§5.9).
 
+### 5.11 World Map (Phase 8)
+
+Custom `Canvas`-drawn world heatmap rendered by `Beholder.Ui/Controls/WorldMapControl.cs`. Mirrors `TrafficChartControl`'s shape: data flows in via `StyledProperty<IReadOnlyList<CountryTrafficSummary>?> Countries` + `StyledProperty<long> MaxBytes`; theme brushes resolved lazily and cached; `Render(DrawingContext)` override; resource invalidation on theme swap. No LiveCharts2 / Mapsui / XAML.MapControl dependency (all three either don't support Avalonia 12 or require external map-tile servers).
+
+**Geometry source:** `Beholder.Ui/Assets/world-countries-110m.geojson` — Natural Earth 110m Admin 0 Countries (public domain / CC0), trimmed to `{iso_a2, name, geometry}` per feature with 2-decimal coordinate precision (~170 KB asset, 177 countries). Parsed once at first render via `Beholder.Ui/Services/WorldGeometryLoader.cs` (`Lazy<>`-wrapped, thread-safe one-shot init, returns empty list on malformed JSON for graceful degradation).
+
+**Projection:** equirectangular (plate carrée). `WorldMapProjection.Project(GeoPoint, Rect)` is `(lon + 180) / 360 × width`, `(90 − lat) / 180 × height`. No trigonometry. Polar distortion is mild and irrelevant (polar traffic ≈ 0). Mercator / Equal Earth are projection-agnostic at the data layer; future polish can swap by replacing the single helper.
+
+**Heatmap palette:** 5 stops, picked by `HeatmapPalette.BrushFor(bytes, maxBytes)` with named-constant thresholds (`StopLowFraction = 0.20`, `StopMediumFraction = 0.50`, `StopHighFraction = 0.80`). Cold for 0 bytes, then a teal-amber-red ramp. Tokens are the five new heatmap entries in §2 Data Visualization.
+
+**Hover interactivity:** `PointerMoved` → `WorldMapProjection.Unproject` to lat/lon → `WorldMapHitTester.FindCountryAt` (bounding-box prefilter + point-in-polygon ray-cast) → re-render with a tooltip overlay anchored top-left. Tooltip: country name (large) + `▼ N MB   ▲ M MB` (small). Backed by `BackgroundElevated` fill + `BorderStrong` border, rendered inline in the Render context so it matches the panel tokens exactly. No click handling in Phase 8.
+
+**Caption strip below the map:** the LAN ("--") and Unknown ("??") sentinel countries have no geographic location to plot at, so they surface in a caption strip rendered below the map: `LAN: ▼ X / ▲ Y   ·   Unknown: ▼ X / ▲ Y`. Always shown (even at zero) so the caption strip's height stays stable across data updates.
+
+**States implemented:** Loading (parent VM's spinner overlay), Empty (caption "No foreign traffic" + LAN/Unknown caption still shown), Populated (heat-mapped countries + hover), Error (ErrorBanner Danger variant), Asset-unavailable (centered "World map unavailable" caption — protects against corrupt builds without crashing the Traffic tab).
+
+Distinct from `TrafficChartControl` (§4 chart area) which renders a time-series area chart. The two share a common pattern — custom `Control` subclass, lazy token resolution, reusable geometry buffers, theme-swap invalidation — but render disjoint visual languages.
+
 ---
 
 ## 6. Tab-Specific Notes
@@ -364,7 +389,16 @@ Distinct from in-app toasts (none defined yet) and OS notification toasts (§5.9
 
 - **Left panel:** Scrollable process list. Each row: colored series square (legend marker), process name, cumulative OUT value (right-aligned, tabular figures). First row is "All processes" aggregate using `Series01`. Selected row uses `BackgroundSelected`.
 - **Right panel:** Time-series area chart with chart/cols/map view toggle buttons in the top-right corner. Chart shows stacked area plots (outbound dominant, inbound as secondary overlay). Event pins (NEW, ALERT) appear at meaningful moments. X-axis: timestamps. Y-axis: byte rates with SI suffixes (K, M, G).
-- **View toggles:** GRAPH (area chart), COLS (columnar table of per-host connections), MAP (placeholder for per-process geo view). Active toggle uses `AccentPrimary`.
+- **View toggles:** GRAPH (area chart), COLS (columnar table of per-host connections), MAP (world heatmap — see Map sub-view below). Active toggle uses `AccentPrimary`.
+
+#### Traffic → Map sub-view (Phase 8)
+
+When the MAP toggle is active, the right pane renders the world-heatmap surface defined in §5.11 (`WorldMapControl`). Behavior shared with GRAPH and COLS:
+
+- **Per-process filter from the left panel.** Selecting "All processes" calls `GetCountryBreakdown(processPath=null)` for the aggregate; selecting a specific process scopes the heatmap to that process's per-country traffic.
+- **Time-range from the dropdown.** The heatmap respects the same range presets the chart does. Switching range while MAP is active re-fetches the breakdown.
+- **Cancellation.** A second concurrent fetch (rapid view-mode flip, range change, or process change) cancels the prior one via a single-flight CTS — no stacked RPCs.
+- **LAN + Unknown caption.** Sentinel country codes "--" (private/reserved IPs) and "??" (resolved to no country) have no geographic location to plot at, so they surface in the caption strip below the map per §5.11 — never on the map itself.
 
 ### Firewall
 
@@ -379,9 +413,11 @@ Distinct from in-app toasts (none defined yet) and OS notification toasts (§5.9
 - **Detail pane (right):** Shows selected alert's full context. Subsections: header with type and timestamp, description, PROCESS (name, path, hash status badge), REMOTE (hostname, IP, country, ASN), CONNECTION (first seen, bytes, status), ACTIONS (button row).
 - **Detail pane footer (orphaned binary):** When the alert's binary no longer exists on disk, both action buttons (ADD RULE and BLOCK / UNBLOCK PROCESS OUT) disable (default Avalonia opacity reduction) and an `EXECUTABLE NOT FOUND` caption in `SeverityWarn` appears next to them. Mirrors the Firewall tab's orphaned-row treatment so users get the same affordance for "this binary is gone" across both tabs. Existing button tooltips remain readable on the disabled buttons via `ToolTip.ShowOnDisabled="True"`.
 
-### Map and Scanner
+### Scanner
 
-No mockups exist for these tabs. When their phases arrive, they should inherit the design language from this document and add their tab-specific subsections here.
+No mockups exist for this tab. When its phase arrives, it should inherit the design language from this document and add a tab-specific subsection here.
+
+*(Map is no longer silent — see §5.11 + the Traffic→Map sub-view subsection above.)*
 
 ---
 
@@ -451,3 +487,4 @@ A light theme is planned for a later phase (likely Phase 12 polish, or earlier i
 - When the light theme is designed, its values will be filled into the "Light Theme" column of the same token tables in section 2. No view code changes will be needed.
 - The current dark palette values are NOT automatically invertible. A proper light theme requires deliberate color selection, not mechanical inversion. Contrast ratios, readability, and visual hierarchy must be reviewed independently.
 - Light theme TBD values are explicitly left blank rather than filled with guesses. Fabricated placeholder values would need revisiting and create false confidence.
+- **Phase 8 heatmap tokens** (`HeatmapCold` / `HeatmapLow` / `HeatmapMedium` / `HeatmapHigh` / `HeatmapPeak`) are five deliberately-chosen colors, not opacity overlays of a single base. A mechanical inversion will NOT yield a usable light-theme palette — the reviewer must pick five light-theme counterparts that maintain perceptual ordering (Cold→Low→Medium→High→Peak should still read as a low→high intensity ramp) and adequate contrast against the light-theme `BackgroundPanel` ocean fill.

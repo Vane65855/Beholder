@@ -107,6 +107,25 @@
     <Color x:Key="ChartSparklineStrokeColor">#00BCD4</Color>
     <SolidColorBrush x:Key="ChartSparklineStroke" Color="{StaticResource ChartSparklineStrokeColor}" />
 
+    <!-- ── Heatmap Ramp (Phase 8 world map) ────────────────────────── -->
+    <!-- 5 deliberate colors, not opacity-derived from a single base, so a
+         future light-theme reviewer must pick 5 contrast-balanced light
+         counterparts. Per UI_DESIGN.md §5.11 + §10. -->
+    <Color x:Key="HeatmapColdColor">#1C2530</Color>
+    <SolidColorBrush x:Key="HeatmapCold" Color="{StaticResource HeatmapColdColor}" />
+
+    <Color x:Key="HeatmapLowColor">#4000BCD4</Color>
+    <SolidColorBrush x:Key="HeatmapLow" Color="{StaticResource HeatmapLowColor}" />
+
+    <Color x:Key="HeatmapMediumColor">#9900BCD4</Color>
+    <SolidColorBrush x:Key="HeatmapMedium" Color="{StaticResource HeatmapMediumColor}" />
+
+    <Color x:Key="HeatmapHighColor">#CCD4A017</Color>
+    <SolidColorBrush x:Key="HeatmapHigh" Color="{StaticResource HeatmapHighColor}" />
+
+    <Color x:Key="HeatmapPeakColor">#DA3633</Color>
+    <SolidColorBrush x:Key="HeatmapPeak" Color="{StaticResource HeatmapPeakColor}" />
+
     <!-- ── Per-Process Series ──────────────────────────────────────── -->
     <Color x:Key="Series01Color">#00BCD4</Color>
     <SolidColorBrush x:Key="Series01" Color="{StaticResource Series01Color}" />

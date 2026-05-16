@@ -4,7 +4,7 @@
 
 Beholder NMT is an open-source network monitoring and firewall management application for Windows (Linux planned). It provides real-time per-process traffic visibility, a simple application firewall, alert detection for new processes and binary tampering, and a tamper-evident audit log of all network activity.
 
-**Status:** Pre-release / under active development. Currently on Phases 6.4 → 7.5 (Alerts surface + Authenticode spoof detection shipped); next up Phase 8 (Map tab). **848 tests** pass deterministically. See [`docs/phases.md`](docs/phases.md) for the current state, lessons learned, and the full roadmap.
+**Status:** Pre-release / under active development. All core tabs shipped end-to-end: Traffic (with the Phase 8 world heatmap MAP sub-view), Firewall (ALLOW/BLOCK/DEFAULT pills + master toggle + activity strip), Alerts (master-detail + OS toasts + spoof detection). **879 tests** pass deterministically. Next up: Phase 9 (Scanner, unscoped — needs a scoping ADR), Phase 10 (Uplink client), or a Phase 12 polish pull-forward. See [`docs/phases.md`](docs/phases.md) for the current state, lessons learned, and the full roadmap.
 
 ## Features
 
@@ -16,10 +16,9 @@ Beholder NMT is an open-source network monitoring and firewall management applic
 - **Tamper-evident audit log** — every state-changing event is stored as a SHA-256 hash-chained row in SQLite. Chain integrity is verified periodically and on startup; failures surface as `ChainError` alerts.
 - **OS-native notifications** — Windows toasts via the unpackaged-exe path (Microsoft.Toolkit.Uwp.Notifications), with click-activation that restores the window and selects the matched alert in the Alerts tab.
 - **Comprehensive hostname capture** — four-layer ladder: (1) Windows DNS resolver-cache preload at startup, (2) live `Microsoft-Windows-DNS-Client` ETW capture, (3) reverse-DNS PTR fallback for direct-IP destinations, (4) SNI extraction from TCP/443 ClientHello packets via `Microsoft-Windows-PktMon` ETW. See ADRs [004](docs/decisions/004-dns-cache-preload-undocumented-api.md), [005](docs/decisions/005-reverse-dns-fallback.md), [006](docs/decisions/006-sni-capture.md).
+- **Geographic traffic map** — world heatmap of per-country traffic, accessible from the Traffic tab's MAP sub-view toggle. Custom Canvas-rendered Natural Earth 110m country polygons (CC0 public domain, embedded as a ~170 KB asset, zero external network for tiles), equirectangular projection, 5-stop heatmap ramp. Hover any country for a tooltip with byte totals; respects the active time-range and per-process filter from the Traffic tab's left panel. LAN ("--") and Unknown ("??") traffic surface in a caption strip below the map since they have no geographic location.
 
 ### Planned
-
-- **Geographic traffic map** (Phase 8) — world heat map showing which countries your machine is communicating with, powered by DB-IP Lite (already wired into the daemon's GeoIP layer; UI surface not yet built).
 - **Uplink to remote aggregator** (Phase 10) — optional outbound TLS gRPC to a centralized aggregator for fleet monitoring. Off by default; the daemon and UI are fully functional standalone.
 - **Signed checkpoints + chain export** (Phase 11) — Ed25519 signed checkpoints over the audit chain; signed JSON export of filtered events.
 - **Linux platform** — `Beholder.Daemon.Linux` (netlink + nftables) and Linux UI port. Project stubs exist; Windows is the primary platform today.
