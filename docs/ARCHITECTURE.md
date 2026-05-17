@@ -164,7 +164,10 @@ CREATE TABLE event_log (
     ts_unix_ns  INTEGER NOT NULL,
     kind        TEXT    NOT NULL,   -- 'Counter', 'NewProcess', 'HashChanged',
                                    -- 'ChainError', 'FirewallRuleCreated',
-                                   -- 'FirewallRuleChanged', 'FirewallRuleRemoved'
+                                   -- 'FirewallRuleChanged', 'FirewallRuleRemoved',
+                                   -- 'LanDeviceFirstSeen', 'LanDeviceMacChanged'
+                                   -- (LAN device kinds are chain-audit-only,
+                                   -- NOT Alert-tab alerts — see ADR 009)
     payload     BLOB    NOT NULL,  -- canonical serialized event
     prev_hash   BLOB    NOT NULL,  -- SHA-256 of previous row's row_hash (32 bytes)
     row_hash    BLOB    NOT NULL   -- SHA-256(seq || ts || kind || payload || prev_hash)
@@ -210,6 +213,22 @@ CREATE TABLE process_registry (
     last_hash_at INTEGER
 );
 ```
+
+### lan_device (Phase 9 LAN scanner discovered devices)
+
+```sql
+CREATE TABLE lan_device (
+    mac                TEXT    PRIMARY KEY,    -- lowercase hex with colons (aa:bb:cc:dd:ee:ff)
+    ip                 TEXT    NOT NULL,
+    vendor             TEXT    NULL,           -- NULL if MAC's OUI prefix not in IEEE table
+    hostname           TEXT    NULL,           -- NULL if mDNS/NetBIOS/PTR ladder all failed
+    first_seen_unix_ns INTEGER NOT NULL,
+    last_seen_unix_ns  INTEGER NOT NULL
+);
+-- Indexes: (ip), (last_seen_unix_ns)
+```
+
+Identity is keyed on `mac` per [ADR 009](decisions/009-scanner-as-lan-device-discovery.md). IP is mutable (DHCP renewals); the scanner uses `idx_lan_device_ip` to find the device currently associated with a given IP, compares its MAC to the just-observed MAC, and writes a `LanDeviceMacChanged` chain event when they differ (potential ARP-spoof signal in the simplest case, more commonly just DHCP reassignment). `idx_lan_device_last_seen` supports the `ListLanDevices` RPC's `seen_since` filter.
 
 ### traffic_buckets_10s (first tier of rollup cascade)
 

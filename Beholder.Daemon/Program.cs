@@ -2,6 +2,7 @@ using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.GeoIp;
 using Beholder.Daemon.Pipeline;
+using Beholder.Daemon.Scanner;
 using Beholder.Daemon.Storage;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
@@ -92,6 +93,14 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<IDnsHostnameBackfill>(sp => sp.GetRequiredService<SqliteTrafficStore>());
     builder.Services.AddSingleton<SqliteDnsCacheStore>();
     builder.Services.AddSingleton<IDnsCacheStore>(sp => sp.GetRequiredService<SqliteDnsCacheStore>());
+
+    // Phase 9.1 (ADR 009): LAN device storage. Scanner, probe, RPC, and UI
+    // land in 9.2-9.5; this commit ships the storage + OUI plumbing only.
+    builder.Services.AddSingleton<SqliteLanDeviceStore>();
+    builder.Services.AddSingleton<ILanDeviceStore>(sp => sp.GetRequiredService<SqliteLanDeviceStore>());
+    var ouiPath = Path.Combine(AppContext.BaseDirectory, "data", "oui.csv");
+    builder.Services.AddSingleton<IOuiVendorLookup>(sp => new OuiVendorLookup(
+        ouiPath, sp.GetRequiredService<ILogger<OuiVendorLookup>>()));
     builder.Services.Configure<TrafficStorageOptions>(
         builder.Configuration.GetSection("TrafficStorage"));
     builder.Services.Configure<RecordingOptions>(

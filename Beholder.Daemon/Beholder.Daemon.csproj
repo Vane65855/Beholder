@@ -54,5 +54,14 @@
              Link="data\ATTRIBUTION.md"
              CopyToOutputDirectory="PreserveNewest"
              Condition="Exists('..\data\ATTRIBUTION.md')" />
+    <!-- IEEE OUI vendor registry, downloaded by Beholder.Tools.OuiFetcher.
+         Same conditional pattern as the GeoIP MMDB: if present, copied to
+         bin/.../data/ where Program.cs expects it. If missing, OuiVendorLookup
+         logs a warning and every lookup returns null — daemon stays
+         functional, LAN devices just don't get vendor names. -->
+    <Content Include="..\data\oui.csv"
+             Link="data\oui.csv"
+             CopyToOutputDirectory="PreserveNewest"
+             Condition="Exists('..\data\oui.csv')" />
   </ItemGroup>
 </Project>
