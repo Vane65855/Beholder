@@ -31,4 +31,19 @@ public enum EventKind {
 
     /// <summary>The Beholder firewall enforcement master toggle was flipped on or off.</summary>
     FirewallEnforcementToggled = 8,
+
+    /// <summary>
+    /// A new LAN device was discovered for the first time (Phase 9.2; see ADR 009).
+    /// Chain-audit kind only — NOT an alert (ADR 002 preserved). Surfaced in the
+    /// Scanner tab's activity strip when 9.4 ships.
+    /// </summary>
+    LanDeviceFirstSeen = 9,
+
+    /// <summary>
+    /// A LAN IP previously associated with one MAC is now responding from a different
+    /// MAC (Phase 9.2; see ADR 009). Most commonly a DHCP reassignment between two
+    /// devices; in adversarial settings a potential ARP-spoof signal. Chain-audit
+    /// kind only.
+    /// </summary>
+    LanDeviceMacChanged = 10,
 }

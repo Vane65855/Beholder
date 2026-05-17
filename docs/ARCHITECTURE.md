@@ -140,6 +140,36 @@ The filter is bound via `IOptionsMonitor<RecordingOptions>` so a live reload tak
 
 The v1 filter is deliberately one switch. Future phases may add granular controls (per-path exclusion lists, localhost-only, port ranges) behind the same `Recording` config section.
 
+### LAN Discovery (cold-path)
+
+The Phase 9 LAN scanner runs as a periodic background pass — not a hot-path stream. Every `ScannerOptions.ScanIntervalSeconds` (default 300; floor 30) the cross-platform `LanScannerService` (`Beholder.Daemon/Scanner/`) asks `ILanDeviceProbe.ScanAsync` for one batched scan of the local subnet, then processes the results:
+
+```
+PeriodicTimer (every ScanIntervalSeconds, default 300)
+  → LanScannerService.RunOnceAsync
+    → WindowsLanDeviceProbe.ScanAsync (Linux: probe is null, scanner inactive)
+      → NetworkInterface.GetAllNetworkInterfaces() picks the primary IPv4
+        NIC (Up + non-empty GatewayAddresses + IPv4 mask present)
+      → ArpScanProbe.ScanSubnetAsync iterates the /24 (or whatever prefix the
+        NIC reports, capped at /20 = 4094 hosts) with 5 ms inter-probe spacing
+        → IphlpapiInterop.TrySendArp per IP via iphlpapi.dll SendARP
+          → returns (MAC, IP) for each responder
+    → LanScannerService.ProcessObservationAsync per observation:
+      → vendor = IOuiVendorLookup.GetVendor(mac)        // Phase 9.1
+      → existingByMac = ILanDeviceStore.GetByMacAsync   // Phase 9.1
+      → if new MAC and known IP with different MAC:
+          IEventStore.AppendAsync(EventKind.LanDeviceMacChanged, payload)
+        else if new MAC:
+          IEventStore.AppendAsync(EventKind.LanDeviceFirstSeen, payload)
+      → ILanDeviceStore.UpsertAsync(LanDevice) preserves first_seen, updates rest
+```
+
+Cold-path discipline applies: rate-limited to ~one probe per 5 ms (so a /24 takes ~1.3 s end-to-end, leaving 99.6% idle headroom on the default 5-minute cadence). No `Channel<T>` backpressure machinery — the work is naturally rate-limited and per-observation processing is bounded by `LanDeviceStore.UpsertAsync` latency (~ms). Failures at any layer log and continue: chain-write failure still upserts the store row; per-observation processing failure still processes the rest of the batch; probe-level failure logs and retries on the next tick.
+
+Mac-as-identity per [ADR 009](decisions/009-scanner-as-lan-device-discovery.md): IP is mutable (DHCP renewal), MAC is the durable layer-2 identifier. A known IP showing up with a different MAC is the only condition that fires `LanDeviceMacChanged` — usually a benign DHCP reassignment, occasionally a potential ARP-spoof signal.
+
+LAN-discovery events are **chain-audit-only** — they go to `event_log` (auditable, chain-hashed, never deleted) but are **NOT** alerts in the [ADR 002](decisions/002-three-alert-types.md) sense (no Alerts-tab row, no toast notification, no read/unread state). The Scanner-tab activity strip (Phase 9.4) will surface them in a Firewall-tab-style recent-changes view.
+
 ### Alert Generation
 
 Only three alert types exist:

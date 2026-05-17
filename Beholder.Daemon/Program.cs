@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 #if PLATFORM_WINDOWS
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Windows;
+using Beholder.Daemon.Windows.Scanner;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 #endif
@@ -94,13 +95,31 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<SqliteDnsCacheStore>();
     builder.Services.AddSingleton<IDnsCacheStore>(sp => sp.GetRequiredService<SqliteDnsCacheStore>());
 
-    // Phase 9.1 (ADR 009): LAN device storage. Scanner, probe, RPC, and UI
-    // land in 9.2-9.5; this commit ships the storage + OUI plumbing only.
+    // Phase 9.1 (ADR 009): LAN device storage.
     builder.Services.AddSingleton<SqliteLanDeviceStore>();
     builder.Services.AddSingleton<ILanDeviceStore>(sp => sp.GetRequiredService<SqliteLanDeviceStore>());
     var ouiPath = Path.Combine(AppContext.BaseDirectory, "data", "oui.csv");
     builder.Services.AddSingleton<IOuiVendorLookup>(sp => new OuiVendorLookup(
         ouiPath, sp.GetRequiredService<ILogger<OuiVendorLookup>>()));
+
+    // Phase 9.2 (ADR 009): Windows ARP-based LAN device probe. Linux daemon
+    // will register no ILanDeviceProbe — LanScannerService takes a nullable
+    // probe per ADR 007's pattern and skips scanning when the dependency is
+    // unresolved. Until the Linux daemon exists, the scanner registration
+    // below lives in the same #if PLATFORM_WINDOWS block as its
+    // dependencies (ILanDeviceStore, IOuiVendorLookup, IEventStore are all
+    // Windows-only today); when the Linux daemon stabilizes, both the
+    // 9.1 storage block and this 9.2 scheduler block can be hoisted outside
+    // the #if since they are platform-agnostic.
+    builder.Services.AddSingleton<ArpScanProbe>();
+    builder.Services.AddSingleton<ILanDeviceProbe>(sp => new WindowsLanDeviceProbe(
+        sp.GetRequiredService<ArpScanProbe>(),
+        sp.GetRequiredService<TimeProvider>(),
+        sp.GetRequiredService<ILogger<WindowsLanDeviceProbe>>()));
+
+    builder.Services.Configure<ScannerOptions>(builder.Configuration.GetSection("Scanner"));
+    builder.Services.AddSingleton<LanScannerService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<LanScannerService>());
     builder.Services.Configure<TrafficStorageOptions>(
         builder.Configuration.GetSection("TrafficStorage"));
     builder.Services.Configure<RecordingOptions>(
