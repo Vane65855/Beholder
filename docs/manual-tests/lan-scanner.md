@@ -50,8 +50,9 @@ this runbook covers the Windows probe stack.
    info: Beholder.Daemon.Scanner.LanScannerService[0]
          LAN scanner started (interval 300 s)
    ```
-   followed within ~2-3 seconds (or up to ~1.3 s after subnet discovery for a /24)
-   by the first scan result:
+   followed within **~5 seconds** (steady-state — Windows' ARP cache covers
+   most devices already) or **~30 seconds** (cold-cache — parallel SendARP
+   sweeps the full subnet) by the first scan result:
    ```
    info: Beholder.Daemon.Scanner.LanScannerService[0]
          LAN scanner: N devices observed, M first-seen, 0 mac-changed
@@ -59,6 +60,11 @@ this runbook covers the Windows probe stack.
    On the first run M should equal N (every device is being seen for the first
    time). N typically ranges from 2 (gateway + this machine) to ~20 (home/SMB
    LAN with a few devices and IoT) to ~50+ (busy office network).
+
+   **If the daemon has been running for more than ~30 seconds with no scan-result
+   log line**, something is wrong with the Phase 9.2.1 cache-walk + parallel-probe
+   path — Phase 9.2's sequential implementation could legitimately take 4+ minutes
+   but the 9.2.1 fix should keep wall-clock under 30 s even on a cold cache.
 
 5. From a separate terminal (any privilege level), query the SQLite database:
    ```
@@ -126,7 +132,8 @@ this runbook covers the Windows probe stack.
 - **`N devices observed` doesn't include the local machine if it doesn't answer its own ARP**: expected. Windows often answers ARP for its own IP via the loopback path that `SendARP` bypasses. Devices with manual static ARP entries also won't reply.
 - **`hostname` column is NULL for every row in 9.2**: expected. Hostname-resolution sub-probes (mDNS via `DnsServiceBrowse`, NetBIOS via `NbtStatRemote`) ship in Phase 9.2.5. Until then the Scanner tab (Phase 9.4) displays devices by MAC + vendor + IP.
 - **MAC randomization causes "new device" churn on modern phones**: expected per ADR 009. Modern iOS / Android / Windows 11 randomize MACs per-SSID; reconnecting devices appear as a new entry with each randomization. This accurately reflects what's observable on the wire.
-- **Scan duration scales with subnet size**: expected. ~1.3 s for /24, ~5 s for /22, ~20 s for /20 (the defensive ceiling). The 5-minute default interval means even a /20 spends < 7% of wall-clock on scanning.
+- **Scan duration scales with subnet size and ARP cache warmth**: expected. Steady-state (cache populated): ~5 s for /24, ~10 s for /22, ~30 s for /20. Cold cache (first run after a fresh boot): roughly double. The 5-minute default interval means even a /20 spends < 10% of wall-clock on scanning.
+- **`ARP cache walk skipped: ...` warning at startup**: expected only on pre-Win10 or where `iphlpapi.dll` is stripped — in that degraded mode the scanner falls back to parallel SendARP for the entire subnet (still bounded by the 60 s per-scan deadline). Should not appear on normal Win10 / Win11 installs.
 - **`LanDeviceMacChanged` log rare or never seen**: expected. The event only fires when a known IP responds from a different MAC — typically a DHCP reassignment between two devices, occasionally a potential ARP-spoof scenario. On a stable LAN with fixed DHCP leases it can be zero indefinitely.
 
 ## Related

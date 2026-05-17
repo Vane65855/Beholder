@@ -150,10 +150,16 @@ PeriodicTimer (every ScanIntervalSeconds, default 300)
     → WindowsLanDeviceProbe.ScanAsync (Linux: probe is null, scanner inactive)
       → NetworkInterface.GetAllNetworkInterfaces() picks the primary IPv4
         NIC (Up + non-empty GatewayAddresses + IPv4 mask present)
-      → ArpScanProbe.ScanSubnetAsync iterates the /24 (or whatever prefix the
-        NIC reports, capped at /20 = 4094 hosts) with 5 ms inter-probe spacing
-        → IphlpapiInterop.TrySendArp per IP via iphlpapi.dll SendARP
-          → returns (MAC, IP) for each responder
+      → Fast pass: IphlpapiInterop.TryEnumerateIpv4ArpCache via GetIpNetTable2
+        → yields (IP, MAC) from Windows' existing ARP/neighbor cache
+          (Reachable / Stale / Permanent states only)
+        → filter to entries inside the primary NIC's subnet → cachedEntries
+      → Slow pass: ArpScanProbe.ProbeIpsAsync over (subnet hosts MINUS cachedIps)
+        → Parallel.ForEachAsync(MaxDegreeOfParallelism=64) calls SendARP per IP
+        → 60 s per-scan deadline returns partial results on expiry rather than
+          blocking the scheduler
+          → returns (IP, MAC) for each cache-miss responder → probedResults
+      → merge cachedEntries + probedResults (cache wins on IP collisions)
     → LanScannerService.ProcessObservationAsync per observation:
       → vendor = IOuiVendorLookup.GetVendor(mac)        // Phase 9.1
       → existingByMac = ILanDeviceStore.GetByMacAsync   // Phase 9.1
@@ -164,7 +170,7 @@ PeriodicTimer (every ScanIntervalSeconds, default 300)
       → ILanDeviceStore.UpsertAsync(LanDevice) preserves first_seen, updates rest
 ```
 
-Cold-path discipline applies: rate-limited to ~one probe per 5 ms (so a /24 takes ~1.3 s end-to-end, leaving 99.6% idle headroom on the default 5-minute cadence). No `Channel<T>` backpressure machinery — the work is naturally rate-limited and per-observation processing is bounded by `LanDeviceStore.UpsertAsync` latency (~ms). Failures at any layer log and continue: chain-write failure still upserts the store row; per-observation processing failure still processes the rest of the batch; probe-level failure logs and retries on the next tick.
+Cold-path discipline applies. The two-pass shape (added in Phase 9.2.1; see commit message + `phases.md` §3) is the practical fix for `SendARP`'s ~1 s per-unresponsive-IP cost: the cache walk catches the dominant case (devices Windows has recently seen) in microseconds with zero packets sent, and the parallel `SendARP` backstop covers the residue (recently-disconnected / freshly-joined-silent devices). Wall-clock on a typical /24: ~5 s steady-state (cache dominates), ~30 s cold-cache. Active probing per ADR 009 is preserved — `SendARP` still runs for cache misses; the cache walk just makes us not pay its cost for IPs we already know about. Failures at any layer log and continue: chain-write failure still upserts the store row; per-observation processing failure still processes the rest of the batch; probe-level failure logs and retries on the next tick.
 
 Mac-as-identity per [ADR 009](decisions/009-scanner-as-lan-device-discovery.md): IP is mutable (DHCP renewal), MAC is the durable layer-2 identifier. A known IP showing up with a different MAC is the only condition that fires `LanDeviceMacChanged` — usually a benign DHCP reassignment, occasionally a potential ARP-spoof signal.
 
