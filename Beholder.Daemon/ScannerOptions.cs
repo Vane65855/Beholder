@@ -16,4 +16,16 @@ internal sealed class ScannerOptions {
     /// comfortable headroom.
     /// </summary>
     public int ScanIntervalSeconds { get; set; } = 300;
+
+    /// <summary>
+    /// When true (default), the scanner runs an mDNS + NetBIOS hostname
+    /// resolution pass after ARP discovery, sending a small amount of
+    /// link-local multicast / unicast traffic on each scan (mDNS to
+    /// 224.0.0.251:5353 with TTL=1; NetBIOS unicast to each device's
+    /// port 137). Set to false to limit the scanner to passive cache
+    /// reads + ARP probes only — hostnames will stay NULL on every
+    /// device. Snapshot at startup; not hot-reloadable (matches
+    /// <c>DnsOptions.EnableReverseDnsFallback</c> per ADR 005).
+    /// </summary>
+    public bool EnableHostnameResolution { get; set; } = true;
 }

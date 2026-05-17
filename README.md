@@ -4,7 +4,7 @@
 
 Beholder NMT is an open-source network monitoring and firewall management application for Windows (Linux planned). It provides real-time per-process traffic visibility, a simple application firewall, alert detection for new processes and binary tampering, and a tamper-evident audit log of all network activity.
 
-**Status:** Pre-release / under active development. All core tabs shipped end-to-end: Traffic (with the Phase 8 world heatmap MAP sub-view + top-3 destinations per country on hover), Firewall (ALLOW/BLOCK/DEFAULT pills + master toggle + activity strip), Alerts (master-detail + OS toasts + spoof detection). **Phase 9.2** shipped the Windows LAN scanner — ARP probe every 5 minutes (configurable) populates `lan_device` with MAC + IP + OUI vendor name, chain-audit logs each new device or MAC-vs-IP change. mDNS + NetBIOS hostname resolution lands in 9.2.5; RPCs in 9.3; Scanner tab UI in 9.4; cross-link with Traffic in 9.5. Per [ADR 009](docs/decisions/009-scanner-as-lan-device-discovery.md). **943 tests** pass deterministically. Next up: Phase 9.2.5 (hostname resolution), then 9.3–9.6, then Phase 10 (Uplink client) or a Phase 12 polish pull-forward. See [`docs/phases.md`](docs/phases.md) for the current state, lessons learned, and the full roadmap.
+**Status:** Pre-release / under active development. All core tabs shipped end-to-end: Traffic (with the Phase 8 world heatmap MAP sub-view + top-3 destinations per country on hover), Firewall (ALLOW/BLOCK/DEFAULT pills + master toggle + activity strip), Alerts (master-detail + OS toasts + spoof detection). **Phase 9.2.5** completes the Windows LAN scanner's three-layer discovery: ARP cache walk + parallel SendARP for device discovery (9.2 / 9.2.1), plus mDNS + NetBIOS hostname resolution via raw UDP (9.2.5) — `lan_device` table now populates with MAC + IP + OUI vendor + hostname for any device that responds to either protocol. Chain-audit logs each new device or MAC-vs-IP change. Per [ADR 009](docs/decisions/009-scanner-as-lan-device-discovery.md). **996 tests** pass deterministically. Next up: Phase 9.3 (RPCs: `ListLanDevices`, `TriggerScan`), 9.4 (Scanner tab UI), 9.5 (cross-link with Traffic), 9.6 (verification), then Phase 10 (Uplink client). See [`docs/phases.md`](docs/phases.md) for the current state, lessons learned, and the full roadmap.
 
 ## Features
 
@@ -115,7 +115,8 @@ The daemon reads configuration from `appsettings.json` in its working directory 
     "EnableEnforcement": true
   },
   "Scanner": {
-    "ScanIntervalSeconds": 300
+    "ScanIntervalSeconds": 300,
+    "EnableHostnameResolution": true
   }
 }
 ```

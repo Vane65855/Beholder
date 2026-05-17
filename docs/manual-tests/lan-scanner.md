@@ -55,11 +55,14 @@ this runbook covers the Windows probe stack.
    sweeps the full subnet) by the first scan result:
    ```
    info: Beholder.Daemon.Scanner.LanScannerService[0]
-         LAN scanner: N devices observed, M first-seen, 0 mac-changed
+         LAN scanner: N devices observed, M first-seen, 0 mac-changed (K with hostname)
    ```
    On the first run M should equal N (every device is being seen for the first
    time). N typically ranges from 2 (gateway + this machine) to ~20 (home/SMB
-   LAN with a few devices and IoT) to ~50+ (busy office network).
+   LAN with a few devices and IoT) to ~50+ (busy office network). K (devices
+   with a resolved hostname) varies widely by LAN — see the Known non-issues
+   section below. K may legitimately be zero on LANs where no device responds
+   to mDNS-PTR or NetBIOS NBSTAT (verify with `nbtstat -A <ip>` if in doubt).
 
    **If the daemon has been running for more than ~30 seconds with no scan-result
    log line**, something is wrong with the Phase 9.2.1 cache-walk + parallel-probe
@@ -75,8 +78,10 @@ this runbook covers the Windows probe stack.
    local machine. Vendor column should be populated for devices whose OUI is
    in the IEEE registry; phones/laptops/IoT typically resolve to recognizable
    names (Apple, Inc. / Intel Corporate / Raspberry Pi Trading /
-   TP-LINK TECHNOLOGIES). Hostname column will be NULL for all rows in 9.2
-   (populated in Phase 9.2.5 once mDNS + NetBIOS sub-probes ship).
+   TP-LINK TECHNOLOGIES). Hostname column (Phase 9.2.5+) is populated for
+   devices that respond to mDNS PTR queries (Apple, Linux/Avahi, Chromecast/
+   Sonos/Hue, recent IoT) or NetBIOS NBSTAT queries (Windows machines, NAS).
+   Random-MAC phones and minimal home routers typically leave hostname NULL.
 
 6. Query the event log for the new chain event kinds:
    ```
@@ -134,6 +139,9 @@ this runbook covers the Windows probe stack.
 - **MAC randomization causes "new device" churn on modern phones**: expected per ADR 009. Modern iOS / Android / Windows 11 randomize MACs per-SSID; reconnecting devices appear as a new entry with each randomization. This accurately reflects what's observable on the wire.
 - **Scan duration scales with subnet size and ARP cache warmth**: expected. Steady-state (cache populated): ~5 s for /24, ~10 s for /22, ~30 s for /20. Cold cache (first run after a fresh boot): roughly double. The 5-minute default interval means even a /20 spends < 10% of wall-clock on scanning.
 - **`ARP cache walk skipped: ...` warning at startup**: expected only on pre-Win10 or where `iphlpapi.dll` is stripped — in that degraded mode the scanner falls back to parallel SendARP for the entire subnet (still bounded by the 60 s per-scan deadline). Should not appear on normal Win10 / Win11 installs.
+- **K (hostname count) is often less than N (device count), and may be zero on some LANs**: expected. Not every LAN device speaks mDNS or NetBIOS — modern phones with MAC randomization typically advertise neither; minimal home routers respond to neither; many Windows installs have NetBIOS-over-TCP/IP disabled (`TcpipNetbiosOptions=0` on the active NIC, the modern default); many mDNS responders don't answer reverse-IP PTR queries (they advertise services via `_workstation._tcp.local` etc. instead — service-discovery browsing is a deferred 9.2.6 enhancement). To sanity-check whether your LAN has responders: run `nbtstat -A <some-ip>` (NetBIOS) or use a Bonjour tool (`dns-sd -B _services._dns-sd._udp` on macOS, `avahi-browse -a` on Linux); if neither returns names, Beholder's K=0 result is correct behavior. Useful hits typically include the local Windows machine (NetBIOS, when enabled), Apple devices (mDNS, especially with Bonjour-aware peers), Linux/Avahi machines, Chromecast/Sonos/Hue/Roku/network printers (mDNS).
+- **mDNS-bonjour port conflict not an issue**: even on machines where the Bonjour service (bundled with iTunes / Adobe Acrobat) has bound UDP port 5353, the scanner uses an ephemeral source port and sets the QU bit per RFC 6762 §5.4 so responders unicast replies to the ephemeral port instead of multicasting to 5353. No port competition.
+- **To disable hostname resolution entirely**: set `Scanner:EnableHostnameResolution = false` in `appsettings.json` (or `Scanner__EnableHostnameResolution=false` env var) and restart the daemon. The scanner falls back to ARP-only behavior; the scan-result log line drops the `(K with hostname)` suffix to `(0 with hostname)` and new device rows have NULL hostname.
 - **`LanDeviceMacChanged` log rare or never seen**: expected. The event only fires when a known IP responds from a different MAC — typically a DHCP reassignment between two devices, occasionally a potential ARP-spoof scenario. On a stable LAN with fixed DHCP leases it can be zero indefinitely.
 
 ## Related
