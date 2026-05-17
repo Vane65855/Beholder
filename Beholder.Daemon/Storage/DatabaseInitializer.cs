@@ -195,6 +195,17 @@ public sealed class DatabaseInitializer {
                 first_viewed_at_ns INTEGER NOT NULL
             );
             """);
+
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS lan_device (
+                mac                TEXT    PRIMARY KEY,
+                ip                 TEXT    NOT NULL,
+                vendor             TEXT    NULL,
+                hostname           TEXT    NULL,
+                first_seen_unix_ns INTEGER NOT NULL,
+                last_seen_unix_ns  INTEGER NOT NULL
+            );
+            """);
     }
 
     /// <summary>
@@ -262,6 +273,14 @@ public sealed class DatabaseInitializer {
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1h_process_time ON traffic_buckets_1h(process_path, bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1h_time ON traffic_buckets_1h(bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1h_country_time ON traffic_buckets_1h(country, bucket_start_ms);");
+
+        // Phase 9.1 (ADR 009): LAN device discovery storage.
+        // idx_lan_device_ip supports 9.2's MAC-change detection (find existing
+        // device by IP, compare its MAC to the just-observed one).
+        // idx_lan_device_last_seen supports 9.3's ListLanDevices RPC "seen since"
+        // filter — ORDER BY last_seen_unix_ns DESC + range scan via this index.
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_lan_device_ip ON lan_device(ip);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_lan_device_last_seen ON lan_device(last_seen_unix_ns);");
     }
 
     private static void Execute(SqliteConnection connection, string sql) {

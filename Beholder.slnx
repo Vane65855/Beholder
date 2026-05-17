@@ -9,5 +9,6 @@
   <Project Path="Beholder.Tests.UplinkStub/Beholder.Tests.UplinkStub.csproj" />
   <Project Path="Beholder.Tests/Beholder.Tests.csproj" />
   <Project Path="Beholder.Tools.GeoIpFetcher/Beholder.Tools.GeoIpFetcher.csproj" />
+  <Project Path="Beholder.Tools.OuiFetcher/Beholder.Tools.OuiFetcher.csproj" />
   <Project Path="Beholder.Ui/Beholder.Ui.csproj" />
 </Solution>

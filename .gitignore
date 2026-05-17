@@ -17,6 +17,10 @@ beholder-debug.log
 /data/*.mmdb
 /data/ATTRIBUTION.md
 
+# IEEE OUI registry CSV (downloaded by Beholder.Tools.OuiFetcher, ~3.7 MB
+# plain text, refreshed when IEEE registers new prefixes — do not commit).
+/data/oui.csv
+
 # User-specific files
 *.rsuser
 *.suo

@@ -4,7 +4,7 @@
 
 Beholder NMT is an open-source network monitoring and firewall management application for Windows (Linux planned). It provides real-time per-process traffic visibility, a simple application firewall, alert detection for new processes and binary tampering, and a tamper-evident audit log of all network activity.
 
-**Status:** Pre-release / under active development. All core tabs shipped end-to-end: Traffic (with the Phase 8 world heatmap MAP sub-view + top-3 destinations per country on hover), Firewall (ALLOW/BLOCK/DEFAULT pills + master toggle + activity strip), Alerts (master-detail + OS toasts + spoof detection). **890 tests** pass deterministically. Next up: Phase 9 (Scanner, unscoped — needs a scoping ADR), Phase 10 (Uplink client), or a Phase 12 polish pull-forward. See [`docs/phases.md`](docs/phases.md) for the current state, lessons learned, and the full roadmap.
+**Status:** Pre-release / under active development. All core tabs shipped end-to-end: Traffic (with the Phase 8 world heatmap MAP sub-view + top-3 destinations per country on hover), Firewall (ALLOW/BLOCK/DEFAULT pills + master toggle + activity strip), Alerts (master-detail + OS toasts + spoof detection). **Phase 9.1** shipped the LAN-scanner foundation (storage + IEEE OUI vendor lookup + fetcher tool); the scanner, probe, RPC, UI, and cross-link with Traffic land in 9.2–9.5 per [ADR 009](docs/decisions/009-scanner-as-lan-device-discovery.md). **919 tests** pass deterministically. Next up: Phase 9.2 (Windows LAN device probe + scanner service), then 9.3–9.6, then Phase 10 (Uplink client) or a Phase 12 polish pull-forward. See [`docs/phases.md`](docs/phases.md) for the current state, lessons learned, and the full roadmap.
 
 ## Features
 
