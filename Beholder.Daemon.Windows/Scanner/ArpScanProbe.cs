@@ -1,58 +1,126 @@
+using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Sockets;
 
 namespace Beholder.Daemon.Windows.Scanner;
 
 /// <summary>
-/// Sweeps a single IPv4 subnet by issuing a sequential ARP request for every
-/// host address. One probe at a time with a small inter-probe delay — bounded
-/// total scan time (~1.3 s on a /24) and no bursty pattern that an IDS might
-/// flag as a port-scanner heuristic.
+/// Probes a set of IPv4 addresses by issuing parallel ARP requests via
+/// <see cref="IphlpapiInterop.TrySendArp"/>. The caller (typically
+/// <see cref="WindowsLanDeviceProbe"/>) decides which IPs to probe — usually
+/// just the addresses missing from the OS's existing ARP cache, since the
+/// cache walk is faster.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Why parallel: <c>SendARP</c> is documented as "waits for a response."
+/// Windows internally holds the call for ~1 s per unresponsive IP before
+/// giving up. Single-threaded across a /24 with mostly-unresponsive hosts
+/// took ~4 minutes in Phase 9.2 smoke testing; parallel with
+/// <see cref="MaxParallelProbes"/> = 64 reduces wall-clock to ~5 s. The
+/// per-scan <see cref="PerScanDeadline"/> caps wall-clock for pathological
+/// subnets and returns partial results on expiry.
+/// </para>
+/// <para>
+/// Subnet math (<see cref="EnumerateHostAddresses"/>, <see cref="IsInSubnet"/>)
+/// lives on this class as static helpers because they're tightly coupled to
+/// the probe's input shape — both deal in (network, mask) and IP-set
+/// arithmetic.
+/// </para>
+/// </remarks>
 public sealed class ArpScanProbe {
-    /// <summary>Delay between consecutive SendARP calls; ~1.3 s for a /24.</summary>
-    private const int ArpProbeDelayMs = 5;
-
-    /// <summary>
-    /// Per-IP timeout for <see cref="IphlpapiInterop.TrySendArp"/>. Reserved
-    /// for the API surface; Windows internally bounds SendARP at ~3 s.
-    /// </summary>
+    /// <summary>Per-call timeout — Windows ignores it for SendARP, kept for API symmetry.</summary>
     private const int ArpResponseTimeoutMs = 1000;
 
-    public async Task<IReadOnlyList<ArpResult>> ScanSubnetAsync(
-        IPAddress networkAddress,
-        IPAddress subnetMask,
+    /// <summary>
+    /// Concurrent <c>SendARP</c> calls. 64 chosen empirically: SendARP is
+    /// I/O-bound (the thread blocks for ~1 s on unresponsive IPs), so the
+    /// thread-pool can comfortably handle this many concurrent blocks.
+    /// Wall-clock for a /24 with all-unresponsive cache-miss IPs:
+    /// 254/64 × ~1 s ≈ 4 s.
+    /// </summary>
+    private const int MaxParallelProbes = 64;
+
+    /// <summary>
+    /// Defensive ceiling on a single <see cref="ProbeIpsAsync"/> wall-clock.
+    /// A pathological subnet (e.g. /16 with no responsive devices) would
+    /// otherwise tie up the scheduler indefinitely. On deadline, return
+    /// whatever partial results came in.
+    /// </summary>
+    private static readonly TimeSpan DefaultPerScanDeadline = TimeSpan.FromSeconds(60);
+
+    private const long MaxHostsPerScan = 4094;  // /20 ceiling — defensive
+
+    private readonly Func<IPAddress, int, string?> _probeFunc;
+    private readonly TimeSpan _perScanDeadline;
+
+    /// <summary>Production constructor: routes probes through <see cref="IphlpapiInterop.TrySendArp"/>.</summary>
+    public ArpScanProbe() : this(IphlpapiInterop.TrySendArp, DefaultPerScanDeadline) { }
+
+    /// <summary>
+    /// Test-only constructor allowing injection of a fake probe delegate and
+    /// a shorter deadline for deterministic parallelism + deadline-expiry
+    /// tests. Mirrors the test-injection pattern from Phase 8's
+    /// <c>HeatmapPalette</c> internal constructor.
+    /// </summary>
+    internal ArpScanProbe(Func<IPAddress, int, string?> probeFunc, TimeSpan perScanDeadline) {
+        ArgumentNullException.ThrowIfNull(probeFunc);
+        _probeFunc = probeFunc;
+        _perScanDeadline = perScanDeadline;
+    }
+
+    /// <summary>
+    /// Issues parallel ARP probes for each IP in <paramref name="targetIps"/>
+    /// and returns the responders. Honors <paramref name="cancellationToken"/>;
+    /// also enforces an internal deadline (default 60 s) that produces partial
+    /// results on expiry rather than throwing.
+    /// </summary>
+    public async Task<IReadOnlyList<ArpResult>> ProbeIpsAsync(
+        IEnumerable<IPAddress> targetIps,
         CancellationToken cancellationToken
     ) {
-        ArgumentNullException.ThrowIfNull(networkAddress);
-        ArgumentNullException.ThrowIfNull(subnetMask);
+        ArgumentNullException.ThrowIfNull(targetIps);
 
-        var hostAddresses = EnumerateHostAddresses(networkAddress, subnetMask);
-        var results = new List<ArpResult>(capacity: 32);
+        using var deadlineCts = new CancellationTokenSource(_perScanDeadline);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, deadlineCts.Token);
 
-        foreach (var ip in hostAddresses) {
-            cancellationToken.ThrowIfCancellationRequested();
-            var mac = IphlpapiInterop.TrySendArp(ip, ArpResponseTimeoutMs);
-            if (mac is not null) results.Add(new ArpResult(ip, mac));
-            await Task.Delay(ArpProbeDelayMs, cancellationToken).ConfigureAwait(false);
+        var results = new ConcurrentBag<ArpResult>();
+        try {
+            await Parallel.ForEachAsync(targetIps, new ParallelOptions {
+                MaxDegreeOfParallelism = MaxParallelProbes,
+                CancellationToken = linkedCts.Token,
+            }, (ip, ct) => {
+                ct.ThrowIfCancellationRequested();
+                var mac = _probeFunc(ip, ArpResponseTimeoutMs);
+                if (mac is not null) results.Add(new ArpResult(ip, mac));
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+        } catch (OperationCanceledException) when (deadlineCts.IsCancellationRequested
+                                                && !cancellationToken.IsCancellationRequested) {
+            // Deadline expired before the caller cancelled — return whatever
+            // we collected so far. If the OUTER cancellation token fired, the
+            // exception propagates (the caller asked us to stop).
         }
-        return results;
+        return results.ToList();
     }
 
     /// <summary>
     /// Enumerates all usable host addresses inside the subnet defined by
     /// <paramref name="networkAddress"/> + <paramref name="subnetMask"/>,
-    /// skipping the network and broadcast addresses. Caps the enumeration at
-    /// 4096 hosts as a defensive ceiling: a /20 has 4094 hosts (the largest
-    /// practical home/SMB subnet); anything larger would imply a corporate
-    /// LAN where ARP-sweeping every host is impolite and the user should
-    /// configure a more targeted scope (deferred to a future ScannerOptions
-    /// hook).
+    /// skipping the network and broadcast addresses. Caps at 4094 hosts
+    /// (a /20 — the largest practical home/SMB subnet); anything larger
+    /// would imply a corporate LAN where exhaustive ARP-sweeping is
+    /// impolite and a more targeted scope should be configured (deferred
+    /// to a future ScannerOptions hook).
     /// </summary>
     public static IEnumerable<IPAddress> EnumerateHostAddresses(
         IPAddress networkAddress, IPAddress subnetMask
     ) {
-        if (networkAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) yield break;
-        if (subnetMask.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) yield break;
+        ArgumentNullException.ThrowIfNull(networkAddress);
+        ArgumentNullException.ThrowIfNull(subnetMask);
+        if (networkAddress.AddressFamily != AddressFamily.InterNetwork) yield break;
+        if (subnetMask.AddressFamily != AddressFamily.InterNetwork) yield break;
 
         var networkInt = ToUInt32BigEndian(networkAddress.GetAddressBytes());
         var maskInt = ToUInt32BigEndian(subnetMask.GetAddressBytes());
@@ -61,14 +129,38 @@ public sealed class ArpScanProbe {
 
         var hostCount = (long)broadcast - network - 1;  // exclude network + broadcast
         if (hostCount <= 0) yield break;
-
-        const long MaxHostsPerScan = 4094;  // /20 ceiling — defensive
         if (hostCount > MaxHostsPerScan) hostCount = MaxHostsPerScan;
 
         for (long i = 1; i <= hostCount; i++) {
             var hostInt = network + (uint)i;
             yield return new IPAddress(FromUInt32BigEndian(hostInt));
         }
+    }
+
+    /// <summary>
+    /// True when <paramref name="ip"/> falls inside the subnet defined by
+    /// <paramref name="networkAddress"/> + <paramref name="subnetMask"/>.
+    /// Used to filter the ARP-cache walk's results down to our primary NIC's
+    /// subnet (the cache may contain entries for other interfaces, VPN
+    /// remotes, etc.). Returns <see langword="false"/> for any non-IPv4
+    /// input rather than throwing (function-style — matches the
+    /// <c>yield break</c> pattern in <see cref="EnumerateHostAddresses"/>).
+    /// </summary>
+    public static bool IsInSubnet(IPAddress ip, IPAddress networkAddress, IPAddress subnetMask) {
+        ArgumentNullException.ThrowIfNull(ip);
+        ArgumentNullException.ThrowIfNull(networkAddress);
+        ArgumentNullException.ThrowIfNull(subnetMask);
+        if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
+        if (networkAddress.AddressFamily != AddressFamily.InterNetwork) return false;
+        if (subnetMask.AddressFamily != AddressFamily.InterNetwork) return false;
+
+        var ipBytes = ip.GetAddressBytes();
+        var netBytes = networkAddress.GetAddressBytes();
+        var maskBytes = subnetMask.GetAddressBytes();
+        for (var i = 0; i < 4; i++) {
+            if ((ipBytes[i] & maskBytes[i]) != (netBytes[i] & maskBytes[i])) return false;
+        }
+        return true;
     }
 
     private static uint ToUInt32BigEndian(byte[] bytes) =>
