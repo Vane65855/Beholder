@@ -34,18 +34,21 @@ namespace Beholder.Daemon.Windows.Scanner;
 /// </remarks>
 public sealed class WindowsLanDeviceProbe : ILanDeviceProbe {
     private readonly ArpScanProbe _arpProbe;
+    private readonly HostnameResolutionLadder? _hostnameResolutionLadder;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<WindowsLanDeviceProbe> _logger;
 
     public WindowsLanDeviceProbe(
         ArpScanProbe arpProbe,
         TimeProvider timeProvider,
-        ILogger<WindowsLanDeviceProbe> logger
+        ILogger<WindowsLanDeviceProbe> logger,
+        HostnameResolutionLadder? hostnameResolutionLadder = null
     ) {
         ArgumentNullException.ThrowIfNull(arpProbe);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _arpProbe = arpProbe;
+        _hostnameResolutionLadder = hostnameResolutionLadder;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -87,9 +90,29 @@ public sealed class WindowsLanDeviceProbe : ILanDeviceProbe {
                 Mac: cached.Mac, Ip: cached.Ip.ToString(), Hostname: null, ObservedAt: now);
         }
 
+        // Hostname resolution pass (Phase 9.2.5). Runs the mDNS + NetBIOS
+        // ladder over the merged observation IPs and patches each
+        // observation's Hostname from the resulting dictionary. Skipped
+        // entirely when the kill-switch is disabled — see Program.cs DI
+        // registration, which passes null for the ladder in that case.
+        var hostnamesResolved = 0;
+        if (_hostnameResolutionLadder is not null && merged.Count > 0) {
+            var hostnames = await _hostnameResolutionLadder
+                .ResolveAllAsync(
+                    merged.Values.Select(o => IPAddress.Parse(o.Ip)),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            foreach (var ip in merged.Keys.ToList()) {
+                if (hostnames.TryGetValue(ip, out var name)) {
+                    merged[ip] = merged[ip] with { Hostname = name };
+                    hostnamesResolved++;
+                }
+            }
+        }
+
         _logger.LogDebug(
-            "LAN scan pass: cache hits {CacheHits}, parallel probes {ProbedCount}, merged {TotalObservations}",
-            cacheEntries.Count, probedResults.Count, merged.Count);
+            "LAN scan pass: cache hits {CacheHits}, parallel probes {ProbedCount}, merged {TotalObservations}, hostnames {HostnameCount}",
+            cacheEntries.Count, probedResults.Count, merged.Count, hostnamesResolved);
 
         return merged.Values.ToList();
     }

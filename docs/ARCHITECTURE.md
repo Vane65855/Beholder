@@ -160,6 +160,20 @@ PeriodicTimer (every ScanIntervalSeconds, default 300)
           blocking the scheduler
           → returns (IP, MAC) for each cache-miss responder → probedResults
       → merge cachedEntries + probedResults (cache wins on IP collisions)
+      → IF ScannerOptions.EnableHostnameResolution (default true):
+          HostnameResolutionLadder.ResolveAllAsync over merged IPs:
+            → Parallel.ForEachAsync(MaxDegreeOfParallelism=32) per IP:
+                → MdnsHostnameProbe (RFC 6762): UDP multicast PTR query to
+                  224.0.0.251:5353 (TTL=1, link-local) with the QU bit set
+                  so responders unicast the reply to our ephemeral source
+                  port. 1 s per-probe timeout.
+                → fallback NetbiosHostnameProbe (RFC 1002): UDP NBSTAT
+                  unicast to <ip>:137; parser extracts the workstation
+                  name (suffix 0x00, unique-type). 1 s per-probe timeout.
+            → 60 s per-ladder deadline mirrors ArpScanProbe; first non-null
+              wins per IP.
+            → returns Dictionary<ip, hostname>
+          → patch each observation.Hostname from the dictionary
     → LanScannerService.ProcessObservationAsync per observation:
       → vendor = IOuiVendorLookup.GetVendor(mac)        // Phase 9.1
       → existingByMac = ILanDeviceStore.GetByMacAsync   // Phase 9.1
@@ -171,6 +185,8 @@ PeriodicTimer (every ScanIntervalSeconds, default 300)
 ```
 
 Cold-path discipline applies. The two-pass shape (added in Phase 9.2.1; see commit message + `phases.md` §3) is the practical fix for `SendARP`'s ~1 s per-unresponsive-IP cost: the cache walk catches the dominant case (devices Windows has recently seen) in microseconds with zero packets sent, and the parallel `SendARP` backstop covers the residue (recently-disconnected / freshly-joined-silent devices). Wall-clock on a typical /24: ~5 s steady-state (cache dominates), ~30 s cold-cache. Active probing per ADR 009 is preserved — `SendARP` still runs for cache misses; the cache walk just makes us not pay its cost for IPs we already know about. Failures at any layer log and continue: chain-write failure still upserts the store row; per-observation processing failure still processes the rest of the batch; probe-level failure logs and retries on the next tick.
+
+The hostname-resolution pass (added in Phase 9.2.5; ADR 009's third design layer) is link-local-only: mDNS multicast TTL=1 (RFC 6762 requirement); NetBIOS unicast goes to subnet-local IPs only. Neither leaves the LAN. Implemented as pure managed C# via `System.Net.Sockets.UdpClient` — no new P/Invoke surface beyond the iphlpapi.dll work from 9.2/9.2.1. The packet builders and parsers (in `Beholder.Core/Discovery/`) mirror `Beholder.Core/Tls/TlsClientHelloParser` per ADR 006: `public static bool TryExtractX(ReadOnlySpan<byte>, out string?)` with exhaustive bounds checks and `false`-on-malformed-no-exception. The kill-switch `ScannerOptions.EnableHostnameResolution = true` matches ADR 005's `DnsOptions.EnableReverseDnsFallback` pattern: default-on, opt-out for users who want strict "no extra traffic" mode.
 
 Mac-as-identity per [ADR 009](decisions/009-scanner-as-lan-device-discovery.md): IP is mutable (DHCP renewal), MAC is the durable layer-2 identifier. A known IP showing up with a different MAC is the only condition that fires `LanDeviceMacChanged` — usually a benign DHCP reassignment, occasionally a potential ARP-spoof signal.
 

@@ -161,9 +161,10 @@ internal sealed class LanScannerService : IHostedService, IAsyncDisposable {
         Interlocked.Add(ref _totalFirstSeen, firstSeenThisTick);
         Interlocked.Add(ref _totalMacChanged, macChangedThisTick);
 
+        var hostnamesResolved = observations.Count(o => !string.IsNullOrEmpty(o.Hostname));
         _logger.LogInformation(
-            "LAN scanner: {Observations} devices observed, {FirstSeen} first-seen, {MacChanged} mac-changed",
-            observations.Count, firstSeenThisTick, macChangedThisTick);
+            "LAN scanner: {Observations} devices observed, {FirstSeen} first-seen, {MacChanged} mac-changed ({Hostnames} with hostname)",
+            observations.Count, firstSeenThisTick, macChangedThisTick, hostnamesResolved);
     }
 
     private async Task<ObservationResult> ProcessObservationAsync(

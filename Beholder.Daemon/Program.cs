@@ -112,10 +112,33 @@ if (OperatingSystem.IsWindows()) {
     // 9.1 storage block and this 9.2 scheduler block can be hoisted outside
     // the #if since they are platform-agnostic.
     builder.Services.AddSingleton<ArpScanProbe>();
-    builder.Services.AddSingleton<ILanDeviceProbe>(sp => new WindowsLanDeviceProbe(
-        sp.GetRequiredService<ArpScanProbe>(),
-        sp.GetRequiredService<TimeProvider>(),
-        sp.GetRequiredService<ILogger<WindowsLanDeviceProbe>>()));
+
+    // Phase 9.2.5 (ADR 009): mDNS + NetBIOS hostname-resolution probes.
+    // Registered unconditionally; the kill-switch is honored at the
+    // WindowsLanDeviceProbe registration below, which passes a null ladder
+    // when ScannerOptions.EnableHostnameResolution is false. This keeps
+    // WindowsLanDeviceProbe free of any ScannerOptions dependency
+    // (Beholder.Daemon.Windows can't reference Beholder.Daemon — circular).
+    builder.Services.AddSingleton<MdnsHostnameProbe>();
+    builder.Services.AddSingleton<NetbiosHostnameProbe>();
+    builder.Services.AddSingleton<HostnameResolutionLadder>(sp => new HostnameResolutionLadder(
+        probes: [
+            sp.GetRequiredService<MdnsHostnameProbe>(),
+            sp.GetRequiredService<NetbiosHostnameProbe>(),
+        ],
+        logger: sp.GetRequiredService<ILogger<HostnameResolutionLadder>>()));
+
+    builder.Services.AddSingleton<ILanDeviceProbe>(sp => {
+        var enableHostnameResolution = sp.GetRequiredService<IOptionsMonitor<ScannerOptions>>()
+            .CurrentValue.EnableHostnameResolution;
+        return new WindowsLanDeviceProbe(
+            arpProbe: sp.GetRequiredService<ArpScanProbe>(),
+            timeProvider: sp.GetRequiredService<TimeProvider>(),
+            logger: sp.GetRequiredService<ILogger<WindowsLanDeviceProbe>>(),
+            hostnameResolutionLadder: enableHostnameResolution
+                ? sp.GetRequiredService<HostnameResolutionLadder>()
+                : null);
+    });
 
     builder.Services.Configure<ScannerOptions>(builder.Configuration.GetSection("Scanner"));
     builder.Services.AddSingleton<LanScannerService>();
