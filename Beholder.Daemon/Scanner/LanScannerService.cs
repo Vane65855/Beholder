@@ -1,4 +1,5 @@
 using Beholder.Core;
+using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Storage;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -28,9 +29,18 @@ internal sealed class LanScannerService : IHostedService, IAsyncDisposable {
     private readonly ILanDeviceStore _store;
     private readonly IOuiVendorLookup _vendorLookup;
     private readonly IEventStore _eventStore;
+    private readonly BroadcastService _broadcaster;
     private readonly IOptionsMonitor<ScannerOptions> _options;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<LanScannerService> _logger;
+
+    /// <summary>
+    /// Serialises the timer-driven <see cref="SafeRunOnceAsync"/> and the
+    /// RPC-driven <see cref="RunOnceManuallyAsync"/>. A <see cref="TriggerScan"/>
+    /// call that arrives during an in-flight tick queues here rather than
+    /// racing the timer — at most one scan executes at a time.
+    /// </summary>
+    private readonly SemaphoreSlim _scanGate = new(1, 1);
 
     private CancellationTokenSource? _cts;
     private Task? _scanLoop;
@@ -50,6 +60,7 @@ internal sealed class LanScannerService : IHostedService, IAsyncDisposable {
         ILanDeviceStore store,
         IOuiVendorLookup vendorLookup,
         IEventStore eventStore,
+        BroadcastService broadcaster,
         IOptionsMonitor<ScannerOptions> options,
         TimeProvider timeProvider,
         ILogger<LanScannerService> logger,
@@ -58,12 +69,14 @@ internal sealed class LanScannerService : IHostedService, IAsyncDisposable {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vendorLookup);
         ArgumentNullException.ThrowIfNull(eventStore);
+        ArgumentNullException.ThrowIfNull(broadcaster);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _store = store;
         _vendorLookup = vendorLookup;
         _eventStore = eventStore;
+        _broadcaster = broadcaster;
         _options = options;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -134,16 +147,47 @@ internal sealed class LanScannerService : IHostedService, IAsyncDisposable {
     }
 
     private async Task SafeRunOnceAsync(CancellationToken cancellationToken) {
+        await _scanGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try {
             await RunOnceAsync(cancellationToken).ConfigureAwait(false);
         } catch (OperationCanceledException) {
             throw;
         } catch (Exception ex) {
             _logger.LogError(ex, "LAN scan tick failed; will retry on next interval");
+        } finally {
+            _scanGate.Release();
         }
     }
 
-    private async Task RunOnceAsync(CancellationToken cancellationToken) {
+    /// <summary>
+    /// Runs one scan synchronously on the caller's task and returns the
+    /// number of device observations the probe yielded. Acquires the same
+    /// <see cref="_scanGate"/> the timer loop uses, so concurrent
+    /// <see cref="TriggerScan"/> RPC calls and in-flight timer scans
+    /// serialise cleanly rather than racing.
+    /// </summary>
+    /// <remarks>
+    /// Exceptions propagate (unlike <see cref="SafeRunOnceAsync"/> which
+    /// swallows them) so the RPC handler can map them to a structured
+    /// <c>TriggerScanResponse</c>. When the probe is null (Linux daemon),
+    /// throws <see cref="InvalidOperationException"/> so the RPC reports
+    /// scanner-inactive rather than success=true with 0 devices.
+    /// </remarks>
+    public async Task<int> RunOnceManuallyAsync(CancellationToken cancellationToken) {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_probe is null) {
+            throw new InvalidOperationException(
+                "LAN scanner is inactive — no probe is registered (Linux daemon or disabled platform)");
+        }
+        await _scanGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try {
+            return await RunOnceAsync(cancellationToken).ConfigureAwait(false);
+        } finally {
+            _scanGate.Release();
+        }
+    }
+
+    private async Task<int> RunOnceAsync(CancellationToken cancellationToken) {
         var observations = await _probe!.ScanAsync(cancellationToken).ConfigureAwait(false);
 
         var firstSeenThisTick = 0;
@@ -165,6 +209,7 @@ internal sealed class LanScannerService : IHostedService, IAsyncDisposable {
         _logger.LogInformation(
             "LAN scanner: {Observations} devices observed, {FirstSeen} first-seen, {MacChanged} mac-changed ({Hostnames} with hostname)",
             observations.Count, firstSeenThisTick, macChangedThisTick, hostnamesResolved);
+        return observations.Count;
     }
 
     private async Task<ObservationResult> ProcessObservationAsync(
@@ -174,6 +219,7 @@ internal sealed class LanScannerService : IHostedService, IAsyncDisposable {
             var vendor = _vendorLookup.GetVendor(obs.Mac);
             var existingByMac = await _store.GetByMacAsync(obs.Mac, cancellationToken).ConfigureAwait(false);
             var result = ObservationResult.KnownDevice;
+            string? previousMacForBroadcast = null;
 
             if (existingByMac is null) {
                 var existingByIp = await _store.GetByIpAsync(obs.Ip, cancellationToken).ConfigureAwait(false);
@@ -184,6 +230,7 @@ internal sealed class LanScannerService : IHostedService, IAsyncDisposable {
                             obs.Ip, existingByIp.Mac, obs.Mac, existingByIp.FirstSeen),
                         cancellationToken).ConfigureAwait(false);
                     result = ObservationResult.MacChanged;
+                    previousMacForBroadcast = existingByIp.Mac;
                 } else {
                     await TryEmitChainEventAsync(
                         EventKind.LanDeviceFirstSeen,
@@ -193,13 +240,25 @@ internal sealed class LanScannerService : IHostedService, IAsyncDisposable {
                 }
             }
 
-            await _store.UpsertAsync(new LanDevice(
+            var device = new LanDevice(
                 Mac: obs.Mac,
                 Ip: obs.Ip,
                 Vendor: vendor,
                 Hostname: obs.Hostname,
                 FirstSeen: existingByMac?.FirstSeen ?? obs.ObservedAt,
-                LastSeen: obs.ObservedAt), cancellationToken).ConfigureAwait(false);
+                LastSeen: obs.ObservedAt);
+            await _store.UpsertAsync(device, cancellationToken).ConfigureAwait(false);
+
+            // Mirror the chain-write leg with a best-effort broadcast leg —
+            // every mutable-event kind now goes to both chain (durable) and
+            // broadcast (live UI). Broadcast failures log and continue so the
+            // upstream store + chain state remains authoritative even if a
+            // subscriber's channel is in a weird state.
+            if (result == ObservationResult.FirstSeen) {
+                TryBroadcastLanDeviceFirstSeen(device);
+            } else if (result == ObservationResult.MacChanged && previousMacForBroadcast is not null) {
+                TryBroadcastLanDeviceMacChanged(previousMacForBroadcast, device);
+            }
 
             return result;
         } catch (OperationCanceledException) {
@@ -209,6 +268,25 @@ internal sealed class LanScannerService : IHostedService, IAsyncDisposable {
                 "LAN scanner failed to process observation mac={Mac} ip={Ip}; continuing",
                 obs.Mac, obs.Ip);
             return ObservationResult.Failed;
+        }
+    }
+
+    private void TryBroadcastLanDeviceFirstSeen(LanDevice device) {
+        try {
+            _broadcaster.BroadcastLanDeviceFirstSeen(device);
+        } catch (Exception ex) {
+            _logger.LogError(ex, "LAN scanner broadcast failed (kind=FirstSeen mac={Mac}); continuing", device.Mac);
+        }
+    }
+
+    private void TryBroadcastLanDeviceMacChanged(string previousMac, LanDevice device) {
+        try {
+            _broadcaster.BroadcastLanDeviceMacChanged(previousMac, device);
+        } catch (Exception ex) {
+            _logger.LogError(
+                ex,
+                "LAN scanner broadcast failed (kind=MacChanged previousMac={PreviousMac} mac={Mac}); continuing",
+                previousMac, device.Mac);
         }
     }
 
@@ -236,6 +314,7 @@ internal sealed class LanScannerService : IHostedService, IAsyncDisposable {
         _disposed = true;
         await StopAsync(CancellationToken.None).ConfigureAwait(false);
         _cts?.Dispose();
+        _scanGate.Dispose();
     }
 
     private enum ObservationResult {

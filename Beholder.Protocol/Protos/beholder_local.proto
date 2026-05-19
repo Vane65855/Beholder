@@ -86,6 +86,8 @@ message DaemonEvent {
     CounterBatch counter_batch = 1;
     FirewallRuleChange rule_change = 2;
     AlertEvent alert = 3;
+    LanDeviceFirstSeenEvent lan_device_first_seen = 4;
+    LanDeviceMacChangedEvent lan_device_mac_changed = 5;
   }
 }
 
@@ -332,6 +334,64 @@ message GetFirewallActivityResponse {
   repeated FirewallActivityEvent events = 1;
 }
 
+// ---- LAN scanner (Phase 9.3) ----
+
+// Mirrors Beholder.Core.LanDevice. Vendor and hostname are empty-string when
+// unknown (proto3 string default) rather than wrapped in a StringValue — keeps
+// the wire format flat to match the Alert.summary precedent. Timestamps are
+// Unix nanoseconds, mirroring every other timestamp on this surface.
+message LanDevice {
+  string mac = 1;                       // lowercase hex with colons, e.g. aa:bb:cc:dd:ee:ff
+  string ip = 2;
+  string vendor = 3;                    // "" when OUI prefix not in the IEEE registry
+  string hostname = 4;                  // "" when mDNS-SD / mDNS-PTR / NetBIOS all failed
+  int64 first_seen_unix_ns = 5;
+  int64 last_seen_unix_ns = 6;
+}
+
+message ListLanDevicesRequest {
+  // 0 = no time filter (return all). Non-zero filters via the
+  // idx_lan_device_last_seen index per ARCHITECTURE.md.
+  int64 seen_since_unix_ns = 1;
+  // 0 = use the server default (200). Clamped to a max of 1000 on the server
+  // to keep response size bounded — any LAN with > 1000 devices is well past
+  // the v1 product target.
+  int32 limit = 2;
+}
+
+message ListLanDevicesResponse {
+  // Ordered last_seen_unix_ns DESC (most-recently-seen first).
+  repeated LanDevice devices = 1;
+}
+
+// Empty request — the scanner has no per-call options today. Future per-IP
+// targeted rescans would need a separate RPC rather than expanding this one.
+message TriggerScanRequest {}
+
+message TriggerScanResponse {
+  // Recoverable failures (scanner disabled, no LAN attached, etc.) return
+  // success=false with a human-readable message rather than throwing an
+  // RpcException so the UI can render the reason inline. Input-validation
+  // failures still throw InvalidArgument; cancellation propagates as
+  // Cancelled. Mirrors the ApplyFirewallRule "soft-failure" precedent.
+  bool success = 1;
+  string message = 2;
+  int32 devices_observed = 3;
+}
+
+// Stream event: a never-before-seen MAC was observed.
+message LanDeviceFirstSeenEvent {
+  LanDevice device = 1;
+}
+
+// Stream event: a known IP was observed with a different MAC than the one
+// previously associated with it. previous_mac is the MAC that used to claim
+// this IP; device carries the new MAC + the rest of the observation.
+message LanDeviceMacChangedEvent {
+  string previous_mac = 1;
+  LanDevice device = 2;
+}
+
 // ---- Service ----
 
 service BeholderLocal {
@@ -350,4 +410,7 @@ service BeholderLocal {
   rpc GetProtocolBreakdown(GetProtocolBreakdownRequest) returns (GetProtocolBreakdownResponse);
   rpc GetProcessSummaries(GetProcessSummariesRequest) returns (GetProcessSummariesResponse);
   rpc GetFirewallActivity(GetFirewallActivityRequest) returns (GetFirewallActivityResponse);
+  // Phase 9.3 — LAN scanner IPC
+  rpc ListLanDevices(ListLanDevicesRequest) returns (ListLanDevicesResponse);
+  rpc TriggerScan(TriggerScanRequest) returns (TriggerScanResponse);
 }

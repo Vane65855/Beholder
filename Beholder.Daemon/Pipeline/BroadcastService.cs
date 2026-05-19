@@ -123,10 +123,7 @@ internal sealed class BroadcastService : IHostedService, IDisposable {
             Change = kind,
             Rule = rule.ToProto(),
         };
-        var daemonEvent = new Local.DaemonEvent { RuleChange = change };
-        foreach (var (_, channel) in _subscribers) {
-            channel.Writer.TryWrite(daemonEvent);
-        }
+        FanOut(new Local.DaemonEvent { RuleChange = change });
     }
 
     /// <summary>
@@ -137,18 +134,40 @@ internal sealed class BroadcastService : IHostedService, IDisposable {
     /// chain row via <see cref="IEventStore.AppendAsync"/>. The chain row
     /// is the durable record; the broadcast is best-effort live UI update.
     /// </summary>
-    /// <remarks>
-    /// Method is wired but currently has no caller — Phase 7 supplies the
-    /// caller. Adding the API in Phase 6.6 lets that later phase focus on
-    /// detector logic without also touching broadcast wiring.
-    /// </remarks>
     public void BroadcastAlert(Alert alert) {
         ArgumentNullException.ThrowIfNull(alert);
         var alertEvent = new Local.AlertEvent { Alert = alert.ToProto() };
-        var daemonEvent = new Local.DaemonEvent { Alert = alertEvent };
-        foreach (var (_, channel) in _subscribers) {
-            channel.Writer.TryWrite(daemonEvent);
-        }
+        FanOut(new Local.DaemonEvent { Alert = alertEvent });
+    }
+
+    /// <summary>
+    /// Broadcasts a Phase 9.2 LAN scanner "new device" observation. Called by
+    /// <c>LanScannerService.ProcessObservationAsync</c> after the matching
+    /// <see cref="EventKind.LanDeviceFirstSeen"/> chain row is appended via
+    /// <see cref="IEventStore.AppendAsync"/>. The chain row is the durable
+    /// record; the broadcast is the best-effort live Scanner-tab update.
+    /// </summary>
+    public void BroadcastLanDeviceFirstSeen(LanDevice device) {
+        ArgumentNullException.ThrowIfNull(device);
+        var ev = new Local.LanDeviceFirstSeenEvent { Device = device.ToProto() };
+        FanOut(new Local.DaemonEvent { LanDeviceFirstSeen = ev });
+    }
+
+    /// <summary>
+    /// Broadcasts a Phase 9.2 LAN scanner "MAC changed for a known IP"
+    /// observation. <paramref name="previousMac"/> is the MAC that used to
+    /// claim <paramref name="device"/>.<see cref="LanDevice.Ip"/>;
+    /// <paramref name="device"/> carries the new MAC + the rest of the
+    /// observation (vendor, hostname, timestamps).
+    /// </summary>
+    public void BroadcastLanDeviceMacChanged(string previousMac, LanDevice device) {
+        ArgumentException.ThrowIfNullOrEmpty(previousMac);
+        ArgumentNullException.ThrowIfNull(device);
+        var ev = new Local.LanDeviceMacChangedEvent {
+            PreviousMac = previousMac,
+            Device = device.ToProto(),
+        };
+        FanOut(new Local.DaemonEvent { LanDeviceMacChanged = ev });
     }
 
     private void OnSnapshotBatch(IReadOnlyList<CounterSnapshot> snapshots) {
@@ -158,11 +177,18 @@ internal sealed class BroadcastService : IHostedService, IDisposable {
         foreach (var snapshot in snapshots) {
             batch.Snapshots.Add(snapshot.ToProto());
         }
-        var daemonEvent = new Local.DaemonEvent { CounterBatch = batch };
+        FanOut(new Local.DaemonEvent { CounterBatch = batch });
+    }
+
+    /// <summary>
+    /// Writes <paramref name="daemonEvent"/> to every subscriber's bounded
+    /// channel. <see cref="BoundedChannelFullMode.DropOldest"/> means
+    /// <see cref="ChannelWriter{T}.TryWrite"/> only returns false on a
+    /// completed writer (subscriber disconnected between the dictionary
+    /// snapshot and this call — benign, just skip).
+    /// </summary>
+    private void FanOut(Local.DaemonEvent daemonEvent) {
         foreach (var (_, channel) in _subscribers) {
-            // DropOldest means TryWrite always succeeds on an open writer; the only
-            // false return is a completed writer (subscriber disconnected between
-            // the snapshot of the dictionary and this call — benign, just skip).
             channel.Writer.TryWrite(daemonEvent);
         }
     }

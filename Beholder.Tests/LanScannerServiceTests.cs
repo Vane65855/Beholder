@@ -1,5 +1,6 @@
 using Beholder.Core;
 using Beholder.Daemon;
+using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Scanner;
 using Beholder.Daemon.Storage;
 using Beholder.Tests.TestDoubles;
@@ -35,10 +36,15 @@ public sealed class LanScannerServiceTests : IDisposable {
 
     [Fact]
     public void Constructor_NullStore_ThrowsArgumentNullException() {
+        using var broadcaster = new BroadcastService(
+            new FakeSnapshotBatchSource(),
+            new FakeTimeProvider(),
+            NullLogger<BroadcastService>.Instance);
         Assert.Throws<ArgumentNullException>(() => new LanScannerService(
             store: null!,
             vendorLookup: new FakeOuiVendorLookup(),
             eventStore: new FakeEventStore(),
+            broadcaster: broadcaster,
             options: new FakeOptionsMonitor<ScannerOptions>(new ScannerOptions()),
             timeProvider: new FakeTimeProvider(),
             logger: NullLogger<LanScannerService>.Instance));
@@ -267,6 +273,188 @@ public sealed class LanScannerServiceTests : IDisposable {
         await service.StopAsync(CancellationToken.None);  // must not throw
     }
 
+    // --- Phase 9.3: broadcast leg + RunOnceManuallyAsync ---
+
+    [Fact]
+    public async Task Scan_NewMac_BroadcastsLanDeviceFirstSeenEvent() {
+        var observation = new LanDeviceObservation(
+            Mac: "aa:bb:cc:dd:ee:01",
+            Ip: "192.168.1.10",
+            Hostname: "kitchen-tv",
+            ObservedAt: BaseTime);
+        var probe = new FakeLanDeviceProbe { Responder = _ => OneObservation(observation) };
+        using var broadcaster = new BroadcastService(
+            new FakeSnapshotBatchSource(),
+            new FakeTimeProvider(BaseTime),
+            NullLogger<BroadcastService>.Instance);
+        await broadcaster.StartAsync(CancellationToken.None);
+
+        var receivedEvents = new List<Beholder.Protocol.Local.DaemonEvent>();
+        using var subscriberCts = new CancellationTokenSource();
+        var consumer = Task.Run(async () => {
+            await foreach (var ev in broadcaster.SubscribeAsync(subscriberCts.Token)) {
+                receivedEvents.Add(ev);
+            }
+        });
+        await WaitForAsync(() => broadcaster.ActiveSubscriberCount == 1);
+
+        await using var service = CreateService(probe, broadcaster: broadcaster);
+        await service.StartAsync(CancellationToken.None);
+        await WaitForScansCompletedAsync(service, target: 1);
+        await service.StopAsync(CancellationToken.None);
+
+        await WaitForAsync(() => receivedEvents.Any(e =>
+            e.PayloadCase == Beholder.Protocol.Local.DaemonEvent.PayloadOneofCase.LanDeviceFirstSeen));
+        await subscriberCts.CancelAsync();
+        try { await consumer; } catch (OperationCanceledException) { }
+
+        var firstSeenEvent = receivedEvents.Single(e =>
+            e.PayloadCase == Beholder.Protocol.Local.DaemonEvent.PayloadOneofCase.LanDeviceFirstSeen);
+        Assert.Equal("aa:bb:cc:dd:ee:01", firstSeenEvent.LanDeviceFirstSeen.Device.Mac);
+        Assert.Equal("192.168.1.10", firstSeenEvent.LanDeviceFirstSeen.Device.Ip);
+        Assert.Equal("kitchen-tv", firstSeenEvent.LanDeviceFirstSeen.Device.Hostname);
+    }
+
+    [Fact]
+    public async Task Scan_KnownIpNewMac_BroadcastsLanDeviceMacChangedEventWithPreviousMac() {
+        // Seed an existing device on the IP first.
+        await _store.UpsertAsync(new LanDevice(
+            Mac: "11:11:11:11:11:11",
+            Ip: "192.168.1.50",
+            Vendor: "OldVendor",
+            Hostname: null,
+            FirstSeen: BaseTime.AddDays(-1),
+            LastSeen: BaseTime.AddHours(-1)), CancellationToken.None);
+
+        var observation = new LanDeviceObservation(
+            Mac: "22:22:22:22:22:22",  // new MAC at the same IP
+            Ip: "192.168.1.50",
+            Hostname: null,
+            ObservedAt: BaseTime);
+        var probe = new FakeLanDeviceProbe { Responder = _ => OneObservation(observation) };
+        using var broadcaster = new BroadcastService(
+            new FakeSnapshotBatchSource(),
+            new FakeTimeProvider(BaseTime),
+            NullLogger<BroadcastService>.Instance);
+        await broadcaster.StartAsync(CancellationToken.None);
+
+        var receivedEvents = new List<Beholder.Protocol.Local.DaemonEvent>();
+        using var subscriberCts = new CancellationTokenSource();
+        var consumer = Task.Run(async () => {
+            await foreach (var ev in broadcaster.SubscribeAsync(subscriberCts.Token)) {
+                receivedEvents.Add(ev);
+            }
+        });
+        await WaitForAsync(() => broadcaster.ActiveSubscriberCount == 1);
+
+        await using var service = CreateService(probe, broadcaster: broadcaster);
+        await service.StartAsync(CancellationToken.None);
+        await WaitForScansCompletedAsync(service, target: 1);
+        await service.StopAsync(CancellationToken.None);
+
+        await WaitForAsync(() => receivedEvents.Any(e =>
+            e.PayloadCase == Beholder.Protocol.Local.DaemonEvent.PayloadOneofCase.LanDeviceMacChanged));
+        await subscriberCts.CancelAsync();
+        try { await consumer; } catch (OperationCanceledException) { }
+
+        var macChangedEvent = receivedEvents.Single(e =>
+            e.PayloadCase == Beholder.Protocol.Local.DaemonEvent.PayloadOneofCase.LanDeviceMacChanged);
+        Assert.Equal("11:11:11:11:11:11", macChangedEvent.LanDeviceMacChanged.PreviousMac);
+        Assert.Equal("22:22:22:22:22:22", macChangedEvent.LanDeviceMacChanged.Device.Mac);
+        Assert.Equal("192.168.1.50", macChangedEvent.LanDeviceMacChanged.Device.Ip);
+    }
+
+    [Fact]
+    public async Task Scan_KnownMacSameIp_DoesNotBroadcast() {
+        // Seed a known MAC; second observation of the same MAC at same IP is a
+        // silent upsert — no chain write, no broadcast.
+        await _store.UpsertAsync(new LanDevice(
+            Mac: "33:33:33:33:33:33",
+            Ip: "192.168.1.99",
+            Vendor: null,
+            Hostname: null,
+            FirstSeen: BaseTime.AddDays(-1),
+            LastSeen: BaseTime.AddHours(-1)), CancellationToken.None);
+
+        var observation = new LanDeviceObservation(
+            Mac: "33:33:33:33:33:33",
+            Ip: "192.168.1.99",
+            Hostname: null,
+            ObservedAt: BaseTime);
+        var probe = new FakeLanDeviceProbe { Responder = _ => OneObservation(observation) };
+        using var broadcaster = new BroadcastService(
+            new FakeSnapshotBatchSource(),
+            new FakeTimeProvider(BaseTime),
+            NullLogger<BroadcastService>.Instance);
+        await broadcaster.StartAsync(CancellationToken.None);
+
+        var receivedEvents = new List<Beholder.Protocol.Local.DaemonEvent>();
+        using var subscriberCts = new CancellationTokenSource();
+        var consumer = Task.Run(async () => {
+            await foreach (var ev in broadcaster.SubscribeAsync(subscriberCts.Token)) {
+                receivedEvents.Add(ev);
+            }
+        });
+        await WaitForAsync(() => broadcaster.ActiveSubscriberCount == 1);
+
+        await using var service = CreateService(probe, broadcaster: broadcaster);
+        await service.StartAsync(CancellationToken.None);
+        await WaitForScansCompletedAsync(service, target: 1);
+        await service.StopAsync(CancellationToken.None);
+
+        // Give any in-flight broadcast a brief chance to land before asserting.
+        await Task.Delay(50);
+        await subscriberCts.CancelAsync();
+        try { await consumer; } catch (OperationCanceledException) { }
+
+        Assert.DoesNotContain(receivedEvents, e =>
+            e.PayloadCase == Beholder.Protocol.Local.DaemonEvent.PayloadOneofCase.LanDeviceFirstSeen
+            || e.PayloadCase == Beholder.Protocol.Local.DaemonEvent.PayloadOneofCase.LanDeviceMacChanged);
+    }
+
+    [Fact]
+    public async Task Scan_BroadcastWithNoSubscribers_StillPersistsChainAndStore() {
+        // BroadcastService.FanOut over zero subscribers is a no-op; the
+        // observation must still chain-write + store-upsert. Mirrors the
+        // existing chain-write resilience test pattern but for the broadcast
+        // leg specifically.
+        var observation = new LanDeviceObservation(
+            Mac: "ee:ee:ee:ee:ee:ee",
+            Ip: "10.10.10.10",
+            Hostname: null,
+            ObservedAt: BaseTime);
+        var probe = new FakeLanDeviceProbe { Responder = _ => OneObservation(observation) };
+        var eventStore = new FakeEventStore();
+        // No subscriber on the broadcaster — FanOut iterates an empty set.
+        await using var service = CreateService(probe, eventStore: eventStore);
+
+        await service.StartAsync(CancellationToken.None);
+        await WaitForScansCompletedAsync(service, target: 1);
+        await service.StopAsync(CancellationToken.None);
+
+        var stored = await _store.GetByMacAsync("ee:ee:ee:ee:ee:ee", CancellationToken.None);
+        Assert.NotNull(stored);
+        Assert.Single(eventStore.Appended);
+        Assert.Equal(EventKind.LanDeviceFirstSeen, eventStore.Appended[0].Kind);
+    }
+
+    [Fact]
+    public async Task RunOnceManuallyAsync_NoProbe_ThrowsInvalidOperationException() {
+        await using var service = CreateService(probe: null);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.RunOnceManuallyAsync(CancellationToken.None));
+    }
+
+    private static async Task WaitForAsync(Func<bool> predicate, int timeoutSeconds = 5) {
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline) {
+            if (predicate()) return;
+            await Task.Delay(10);
+        }
+        Assert.Fail($"Predicate did not become true within {timeoutSeconds} s");
+    }
+
     // --- Test helpers ---
 
     private LanScannerService CreateService(
@@ -274,14 +462,23 @@ public sealed class LanScannerServiceTests : IDisposable {
         FakeOuiVendorLookup? vendorLookup = null,
         IEventStore? eventStore = null,
         FakeTimeProvider? timeProvider = null,
-        int scanIntervalSeconds = TestIntervalSeconds
+        int scanIntervalSeconds = TestIntervalSeconds,
+        BroadcastService? broadcaster = null
     ) {
         var options = new FakeOptionsMonitor<ScannerOptions>(
             new ScannerOptions { ScanIntervalSeconds = scanIntervalSeconds });
+        // Broadcaster owned by the test when explicitly passed; otherwise we
+        // construct a throwaway one. It's IDisposable but the existing test
+        // class doesn't dispose individual ones — they're all tiny.
+        var ownedBroadcaster = broadcaster ?? new BroadcastService(
+            new FakeSnapshotBatchSource(),
+            (TimeProvider?)timeProvider ?? new FakeTimeProvider(BaseTime),
+            NullLogger<BroadcastService>.Instance);
         return new LanScannerService(
             store: _store,
             vendorLookup: vendorLookup ?? new FakeOuiVendorLookup(),
             eventStore: eventStore ?? new FakeEventStore(),
+            broadcaster: ownedBroadcaster,
             options: options,
             timeProvider: (TimeProvider?)timeProvider ?? new FakeTimeProvider(BaseTime),
             logger: NullLogger<LanScannerService>.Instance,

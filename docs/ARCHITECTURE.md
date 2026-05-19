@@ -453,29 +453,44 @@ The UI is a gRPC client. The daemon is a gRPC server. The primary RPC is a serve
 
 ```protobuf
 service BeholderLocal {
-    // Live streaming
+    // Live streaming — DaemonEvent has 5 oneof variants:
+    //   CounterBatch / FirewallRuleChange / Alert (Phases 2-7)
+    //   LanDeviceFirstSeenEvent / LanDeviceMacChangedEvent (Phase 9.3)
     rpc Subscribe (SubscribeRequest) returns (stream DaemonEvent);
     // Current state
     rpc GetSnapshot (GetSnapshotRequest) returns (GetSnapshotResponse);
     // Firewall management
     rpc ApplyFirewallRule (ApplyFirewallRuleRequest) returns (ApplyFirewallRuleResponse);
+    rpc RemoveFirewallRule (RemoveFirewallRuleRequest) returns (RemoveFirewallRuleResponse);
+    rpc ListFirewallRules (ListFirewallRulesRequest) returns (ListFirewallRulesResponse);
+    rpc SetFirewallEnabled (SetFirewallEnabledRequest) returns (SetFirewallEnabledResponse);
     // Alert management
     rpc MarkAlertRead (MarkAlertReadRequest) returns (MarkAlertReadResponse);
     // Chain integrity
     rpc VerifyChain (VerifyChainRequest) returns (VerifyChainResponse);
-    // Historical traffic queries (Phase 4.6a)
+    // Historical traffic queries (Phase 4.6a / 6.5 / 8)
     rpc GetProcessTimeline (GetProcessTimelineRequest) returns (GetProcessTimelineResponse);
     rpc GetProcessDestinations (GetProcessDestinationsRequest) returns (GetProcessDestinationsResponse);
     rpc GetAggregateTimeline (GetAggregateTimelineRequest) returns (GetAggregateTimelineResponse);
     rpc GetCountryBreakdown (GetCountryBreakdownRequest) returns (GetCountryBreakdownResponse);
+    rpc GetProtocolBreakdown (GetProtocolBreakdownRequest) returns (GetProtocolBreakdownResponse);
+    rpc GetProcessSummaries (GetProcessSummariesRequest) returns (GetProcessSummariesResponse);
+    rpc GetFirewallActivity (GetFirewallActivityRequest) returns (GetFirewallActivityResponse);
+    // LAN scanner (Phase 9.3)
+    rpc ListLanDevices (ListLanDevicesRequest) returns (ListLanDevicesResponse);
+    rpc TriggerScan (TriggerScanRequest) returns (TriggerScanResponse);
 }
 ```
 
-`Subscribe` is the main channel: the UI calls it once on connect and receives a stream of events (counter batches, alerts, rule changes) for the lifetime of the connection.
+`Subscribe` is the main channel: the UI calls it once on connect and receives a stream of events (counter batches, alerts, rule changes, LAN device first-seen / MAC-changed) for the lifetime of the connection.
 
 `GetSnapshot` returns the current state (all active processes, their cumulative counters, firewall rules, recent alerts) so the UI can populate its views immediately on connect without waiting for the next counter tick.
 
-The four `Get*` RPCs query SQLite directly for historical traffic data. They accept time ranges and (for timelines) a resolution parameter that controls bucket aggregation granularity.
+The historical `Get*` RPCs query SQLite directly for traffic data. They accept time ranges and (for timelines) a resolution parameter that controls bucket aggregation granularity.
+
+`ListLanDevices` returns a paged read of the `lan_device` table (Phase 9.3). Supports a `seen_since` filter against `idx_lan_device_last_seen` and a server-clamped `limit` (default 200, cap 1000). `TriggerScan` runs one immediate scan, returning a structured response with the observation count — recoverable failures (scanner inactive, probe threw) surface as `success=false` with a human-readable message rather than `RpcException`, mirroring the `ApplyFirewallRule` soft-failure precedent. Both RPCs are gated by the same DI registration that wires up the scanner; on Linux (no probe) `ListLanDevices` returns an empty list and `TriggerScan` reports the scanner-inactive condition.
+
+LAN scanner chain events (`LanDeviceFirstSeen` / `LanDeviceMacChanged`) are pushed to subscribed UIs via `BroadcastService` as part of the same fan-out mechanism that ships counter batches, alerts, and rule changes — Phase 9.3 closed the previously-implicit gap where the LAN scanner wrote to the chain but never broadcast (every other event kind already did both). The pattern is now invariant: every mutable event goes to both chain (durable audit) and broadcast (live UI).
 
 ## Uplink Protocol (Daemon → Aggregator)
 

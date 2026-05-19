@@ -52,6 +52,7 @@ public sealed class GetProcessDestinationsRpcTests : IDisposable {
             _broadcaster, pipeline, firewallStore, alertStore,
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             eventStore, trafficStore,
+            new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
