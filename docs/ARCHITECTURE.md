@@ -161,7 +161,27 @@ PeriodicTimer (every ScanIntervalSeconds, default 300)
           → returns (IP, MAC) for each cache-miss responder → probedResults
       → merge cachedEntries + probedResults (cache wins on IP collisions)
       → IF ScannerOptions.EnableHostnameResolution (default true):
-          HostnameResolutionLadder.ResolveAllAsync over merged IPs:
+          MdnsServiceDiscoveryProbe.BrowseAsync (one-shot, ~3 s):
+            → fresh UdpClient bound to an ephemeral source port (avoids
+              competing with the Bonjour service that may already own
+              UDP/5353 on the host)
+            → multicast 12 well-known service-type PTR queries to
+              224.0.0.251:5353 with the QU bit (RFC 6762 §5.4) asking
+              responders to unicast back. Service types: _airplay,
+              _googlecast, _smb, _workstation, _printer, _ipp, _raop,
+              _hap, _spotify-connect, _hue, _ssh, _companion-link —
+              all ._tcp.local
+            → 3 s receive loop; per reply, MdnsServiceDiscoveryParser
+              walks PTR + SRV + A records across answer + authority +
+              additional sections. Hostname priority per device:
+              SRV-target → A-record owner-name → PTR-instance leftmost
+              label (printable-ASCII so "Living Room TV" decodes fine).
+              Trailing .local stripped.
+            → returns Dictionary<source-ip, hostname>; first non-empty
+              hostname per source IP wins
+          → patch each observation.Hostname from the SD result
+          HostnameResolutionLadder.ResolveAllAsync over IPs STILL without
+          a hostname (those the SD browse didn't cover):
             → Parallel.ForEachAsync(MaxDegreeOfParallelism=32) per IP:
                 → MdnsHostnameProbe (RFC 6762): UDP multicast PTR query to
                   224.0.0.251:5353 (TTL=1, link-local) with the QU bit set
@@ -173,7 +193,7 @@ PeriodicTimer (every ScanIntervalSeconds, default 300)
             → 60 s per-ladder deadline mirrors ArpScanProbe; first non-null
               wins per IP.
             → returns Dictionary<ip, hostname>
-          → patch each observation.Hostname from the dictionary
+          → patch each remaining observation.Hostname from the ladder result
     → LanScannerService.ProcessObservationAsync per observation:
       → vendor = IOuiVendorLookup.GetVendor(mac)        // Phase 9.1
       → existingByMac = ILanDeviceStore.GetByMacAsync   // Phase 9.1
@@ -187,6 +207,8 @@ PeriodicTimer (every ScanIntervalSeconds, default 300)
 Cold-path discipline applies. The two-pass shape (added in Phase 9.2.1; see commit message + `phases.md` §3) is the practical fix for `SendARP`'s ~1 s per-unresponsive-IP cost: the cache walk catches the dominant case (devices Windows has recently seen) in microseconds with zero packets sent, and the parallel `SendARP` backstop covers the residue (recently-disconnected / freshly-joined-silent devices). Wall-clock on a typical /24: ~5 s steady-state (cache dominates), ~30 s cold-cache. Active probing per ADR 009 is preserved — `SendARP` still runs for cache misses; the cache walk just makes us not pay its cost for IPs we already know about. Failures at any layer log and continue: chain-write failure still upserts the store row; per-observation processing failure still processes the rest of the batch; probe-level failure logs and retries on the next tick.
 
 The hostname-resolution pass (added in Phase 9.2.5; ADR 009's third design layer) is link-local-only: mDNS multicast TTL=1 (RFC 6762 requirement); NetBIOS unicast goes to subnet-local IPs only. Neither leaves the LAN. Implemented as pure managed C# via `System.Net.Sockets.UdpClient` — no new P/Invoke surface beyond the iphlpapi.dll work from 9.2/9.2.1. The packet builders and parsers (in `Beholder.Core/Discovery/`) mirror `Beholder.Core/Tls/TlsClientHelloParser` per ADR 006: `public static bool TryExtractX(ReadOnlySpan<byte>, out string?)` with exhaustive bounds checks and `false`-on-malformed-no-exception. The kill-switch `ScannerOptions.EnableHostnameResolution = true` matches ADR 005's `DnsOptions.EnableReverseDnsFallback` pattern: default-on, opt-out for users who want strict "no extra traffic" mode.
+
+Phase 9.2.6 added DNS-Based Service Discovery (RFC 6763) as the **primary** hostname-resolution path, with the per-IP mDNS-PTR + NetBIOS ladder demoted to fallback. Diagnostic root cause: most Bonjour-style responders (Apple TVs, AirPlay speakers, Chromecasts, network printers, NAS, IoT bridges) advertise *services* via PTR records keyed on `_<service>._<proto>.local` and ignore reverse-IP PTR queries. The 9.2.6 SD-browse pattern — one multicast PTR per service-type from one socket, batched once per scan — matches what real-world tools (Fing, GlassWire Things tab, `dns-sd -B`, `avahi-browse`) use and lifts hit rate from "0 / N typical" to "most LAN devices visible." Same trust posture: pure managed UDP, no new P/Invoke, defensive bounds-checked parser, the same `EnableHostnameResolution` kill-switch gates the whole pass. DNS name compression / SRV + A correlation logic lives in the shared `DnsNameDecoder` helper (extracted in 9.2.6) so both `MdnsPacketParser` and `MdnsServiceDiscoveryParser` reuse the same loop-guarded pointer-following code.
 
 Mac-as-identity per [ADR 009](decisions/009-scanner-as-lan-device-discovery.md): IP is mutable (DHCP renewal), MAC is the durable layer-2 identifier. A known IP showing up with a different MAC is the only condition that fires `LanDeviceMacChanged` — usually a benign DHCP reassignment, occasionally a potential ARP-spoof signal.
 

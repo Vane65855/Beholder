@@ -35,6 +35,7 @@ namespace Beholder.Daemon.Windows.Scanner;
 public sealed class WindowsLanDeviceProbe : ILanDeviceProbe {
     private readonly ArpScanProbe _arpProbe;
     private readonly HostnameResolutionLadder? _hostnameResolutionLadder;
+    private readonly MdnsServiceDiscoveryProbe? _mdnsServiceDiscoveryProbe;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<WindowsLanDeviceProbe> _logger;
 
@@ -42,13 +43,15 @@ public sealed class WindowsLanDeviceProbe : ILanDeviceProbe {
         ArpScanProbe arpProbe,
         TimeProvider timeProvider,
         ILogger<WindowsLanDeviceProbe> logger,
-        HostnameResolutionLadder? hostnameResolutionLadder = null
+        HostnameResolutionLadder? hostnameResolutionLadder = null,
+        MdnsServiceDiscoveryProbe? mdnsServiceDiscoveryProbe = null
     ) {
         ArgumentNullException.ThrowIfNull(arpProbe);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _arpProbe = arpProbe;
         _hostnameResolutionLadder = hostnameResolutionLadder;
+        _mdnsServiceDiscoveryProbe = mdnsServiceDiscoveryProbe;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -90,29 +93,54 @@ public sealed class WindowsLanDeviceProbe : ILanDeviceProbe {
                 Mac: cached.Mac, Ip: cached.Ip.ToString(), Hostname: null, ObservedAt: now);
         }
 
-        // Hostname resolution pass (Phase 9.2.5). Runs the mDNS + NetBIOS
-        // ladder over the merged observation IPs and patches each
-        // observation's Hostname from the resulting dictionary. Skipped
-        // entirely when the kill-switch is disabled — see Program.cs DI
-        // registration, which passes null for the ladder in that case.
-        var hostnamesResolved = 0;
-        if (_hostnameResolutionLadder is not null && merged.Count > 0) {
-            var hostnames = await _hostnameResolutionLadder
-                .ResolveAllAsync(
-                    merged.Values.Select(o => IPAddress.Parse(o.Ip)),
-                    cancellationToken)
+        // Phase 9.2.6: mDNS service-discovery browse pass. One batched
+        // multicast browse covers the whole subnet — devices that
+        // advertise any of the curated well-known service types reply
+        // with PTR + SRV + A records the parser correlates into a
+        // (source-IP → hostname) pair. Runs first because (a) it's a
+        // single multicast send-and-wait rather than per-IP and (b) it
+        // catches the modern majority of Bonjour-style LAN devices.
+        // Skipped entirely when the kill-switch is disabled.
+        var sdHits = 0;
+        if (_mdnsServiceDiscoveryProbe is not null && merged.Count > 0) {
+            var sdHostnames = await _mdnsServiceDiscoveryProbe.BrowseAsync(cancellationToken)
                 .ConfigureAwait(false);
             foreach (var ip in merged.Keys.ToList()) {
-                if (hostnames.TryGetValue(ip, out var name)) {
+                if (sdHostnames.TryGetValue(ip, out var name)) {
                     merged[ip] = merged[ip] with { Hostname = name };
-                    hostnamesResolved++;
+                    sdHits++;
+                }
+            }
+        }
+
+        // Phase 9.2.5: per-IP mDNS-PTR + NetBIOS ladder. Now restricted
+        // to observations the SD browse couldn't resolve — devices that
+        // don't advertise any of the queried services (often Windows
+        // machines with NetBIOS still enabled, plus residual NAT/minimal
+        // home routers). Same dictionary patch as the SD pass.
+        var ladderHits = 0;
+        if (_hostnameResolutionLadder is not null) {
+            var ipsNeedingLadder = merged.Values
+                .Where(o => string.IsNullOrEmpty(o.Hostname))
+                .Select(o => IPAddress.Parse(o.Ip))
+                .ToList();
+            if (ipsNeedingLadder.Count > 0) {
+                var ladderHostnames = await _hostnameResolutionLadder
+                    .ResolveAllAsync(ipsNeedingLadder, cancellationToken)
+                    .ConfigureAwait(false);
+                foreach (var ip in merged.Keys.ToList()) {
+                    if (string.IsNullOrEmpty(merged[ip].Hostname)
+                        && ladderHostnames.TryGetValue(ip, out var name)) {
+                        merged[ip] = merged[ip] with { Hostname = name };
+                        ladderHits++;
+                    }
                 }
             }
         }
 
         _logger.LogDebug(
-            "LAN scan pass: cache hits {CacheHits}, parallel probes {ProbedCount}, merged {TotalObservations}, hostnames {HostnameCount}",
-            cacheEntries.Count, probedResults.Count, merged.Count, hostnamesResolved);
+            "LAN scan pass: cache hits {CacheHits}, parallel probes {ProbedCount}, merged {TotalObservations}, hostnames-via-SD {SdHits}, hostnames-via-ladder {LadderHits}",
+            cacheEntries.Count, probedResults.Count, merged.Count, sdHits, ladderHits);
 
         return merged.Values.ToList();
     }
