@@ -114,13 +114,15 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<ArpScanProbe>();
 
     // Phase 9.2.5 (ADR 009): mDNS + NetBIOS hostname-resolution probes.
-    // Registered unconditionally; the kill-switch is honored at the
-    // WindowsLanDeviceProbe registration below, which passes a null ladder
-    // when ScannerOptions.EnableHostnameResolution is false. This keeps
+    // Phase 9.2.6 (ADR 009): mDNS service-discovery (DNS-SD) browse probe.
+    // All registered unconditionally; the kill-switch is honored at the
+    // WindowsLanDeviceProbe registration below, which passes nulls when
+    // ScannerOptions.EnableHostnameResolution is false. This keeps
     // WindowsLanDeviceProbe free of any ScannerOptions dependency
     // (Beholder.Daemon.Windows can't reference Beholder.Daemon — circular).
     builder.Services.AddSingleton<MdnsHostnameProbe>();
     builder.Services.AddSingleton<NetbiosHostnameProbe>();
+    builder.Services.AddSingleton<MdnsServiceDiscoveryProbe>();
     builder.Services.AddSingleton<HostnameResolutionLadder>(sp => new HostnameResolutionLadder(
         probes: [
             sp.GetRequiredService<MdnsHostnameProbe>(),
@@ -137,6 +139,9 @@ if (OperatingSystem.IsWindows()) {
             logger: sp.GetRequiredService<ILogger<WindowsLanDeviceProbe>>(),
             hostnameResolutionLadder: enableHostnameResolution
                 ? sp.GetRequiredService<HostnameResolutionLadder>()
+                : null,
+            mdnsServiceDiscoveryProbe: enableHostnameResolution
+                ? sp.GetRequiredService<MdnsServiceDiscoveryProbe>()
                 : null);
     });
 
