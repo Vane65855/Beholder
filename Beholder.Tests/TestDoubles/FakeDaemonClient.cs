@@ -31,6 +31,8 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? SetFirewallEnabledException { get; set; }
     public Exception? FirewallActivityException { get; set; }
     public Exception? MarkAlertReadException { get; set; }
+    public Exception? ListLanDevicesException { get; set; }
+    public Exception? TriggerScanException { get; set; }
 
     // Optional canned snapshot/response bodies so tests can drive real data
     // through the seeding path. Existing callers that don't set these get the
@@ -58,12 +60,17 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Func<SetFirewallEnabledRequest, SetFirewallEnabledResponse>? SetFirewallEnabledResponder { get; set; }
     public Func<GetFirewallActivityRequest, GetFirewallActivityResponse>? FirewallActivityResponder { get; set; }
     public GetFirewallActivityResponse? FirewallActivityResponse { get; set; }
+    public Func<ListLanDevicesRequest, ListLanDevicesResponse>? ListLanDevicesResponder { get; set; }
+    public ListLanDevicesResponse? ListLanDevicesResponse { get; set; }
+    public Func<TriggerScanRequest, TriggerScanResponse>? TriggerScanResponder { get; set; }
 
     // Captured invocations for assertions.
     public List<ApplyFirewallRuleRequest> ApplyFirewallRuleCalls { get; } = new();
     public List<RemoveFirewallRuleRequest> RemoveFirewallRuleCalls { get; } = new();
     public List<SetFirewallEnabledRequest> SetFirewallEnabledCalls { get; } = new();
     public List<MarkAlertReadRequest> MarkAlertReadCalls { get; } = new();
+    public List<ListLanDevicesRequest> ListLanDevicesCalls { get; } = new();
+    public List<TriggerScanRequest> TriggerScanCalls { get; } = new();
     // Responder variant for tests that need the CancellationToken the VM
     // passed (e.g., cancellation-plumbing tests). Takes precedence over
     // AggregateTimelineResponse when set.
@@ -185,6 +192,21 @@ internal sealed class FakeDaemonClient : IDaemonClient {
         if (FirewallActivityException is not null) throw FirewallActivityException;
         return Task.FromResult(FirewallActivityResponder?.Invoke(request)
             ?? FirewallActivityResponse ?? new GetFirewallActivityResponse());
+    }
+
+    public Task<ListLanDevicesResponse> ListLanDevicesAsync(
+        ListLanDevicesRequest request, CancellationToken cancellationToken) {
+        ListLanDevicesCalls.Add(request);
+        if (ListLanDevicesException is not null) throw ListLanDevicesException;
+        return Task.FromResult(ListLanDevicesResponder?.Invoke(request)
+            ?? ListLanDevicesResponse ?? new ListLanDevicesResponse());
+    }
+
+    public Task<TriggerScanResponse> TriggerScanAsync(
+        TriggerScanRequest request, CancellationToken cancellationToken) {
+        TriggerScanCalls.Add(request);
+        if (TriggerScanException is not null) throw TriggerScanException;
+        return Task.FromResult(TriggerScanResponder?.Invoke(request) ?? new TriggerScanResponse());
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

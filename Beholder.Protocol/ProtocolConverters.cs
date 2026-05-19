@@ -99,6 +99,43 @@ internal static class ProtocolConverters {
     }
 
     /// <summary>
+    /// Maps a LAN device onto its wire equivalent. Null
+    /// <see cref="Core.LanDevice.Vendor"/> / <see cref="Core.LanDevice.Hostname"/>
+    /// become the empty string on the wire — proto3 has no nullable string
+    /// primitive and the precedent (<see cref="Core.Alert.Summary"/> /
+    /// <see cref="Core.DestinationSummary.Hostname"/>) is empty-string-as-null.
+    /// Timestamps are emitted at millisecond precision via the shared
+    /// <see cref="ToUnixTimeNanoseconds(DateTimeOffset)"/> helper.
+    /// </summary>
+    public static Local.LanDevice ToProto(this Core.LanDevice source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Local.LanDevice {
+            Mac = source.Mac,
+            Ip = source.Ip,
+            Vendor = source.Vendor ?? "",
+            Hostname = source.Hostname ?? "",
+            FirstSeenUnixNs = source.FirstSeen.ToUnixTimeNanoseconds(),
+            LastSeenUnixNs = source.LastSeen.ToUnixTimeNanoseconds(),
+        };
+    }
+
+    /// <summary>
+    /// Maps a wire LAN device to its domain equivalent. Empty-string
+    /// <c>vendor</c> / <c>hostname</c> become null per the inverse of
+    /// <see cref="ToProto(Core.LanDevice)"/>.
+    /// </summary>
+    public static Core.LanDevice ToDomain(this Local.LanDevice source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Core.LanDevice(
+            Mac: source.Mac,
+            Ip: source.Ip,
+            Vendor: string.IsNullOrEmpty(source.Vendor) ? null : source.Vendor,
+            Hostname: string.IsNullOrEmpty(source.Hostname) ? null : source.Hostname,
+            FirstSeen: source.FirstSeenUnixNs.FromUnixTimeNanoseconds(),
+            LastSeen: source.LastSeenUnixNs.FromUnixTimeNanoseconds());
+    }
+
+    /// <summary>
     /// Maps a chain verification result onto its wire equivalent. A null
     /// <see cref="Core.ChainVerificationResult.FailedAtSeq"/> becomes the
     /// sentinel 0, and a null <see cref="Core.ChainVerificationResult.ErrorMessage"/>

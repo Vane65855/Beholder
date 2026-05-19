@@ -48,6 +48,7 @@ public sealed class VerifyChainTests : IDisposable {
             _broadcaster, pipeline, firewallStore, alertStore,
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             _eventStore, new FakeTrafficStore(),
+            new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
@@ -151,6 +152,7 @@ public sealed class VerifyChainTests : IDisposable {
             _broadcaster, pipeline, firewallStore, alertStore,
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             throwingStore, new FakeTrafficStore(),
+            new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);

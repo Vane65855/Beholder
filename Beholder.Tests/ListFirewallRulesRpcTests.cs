@@ -42,6 +42,7 @@ public sealed class ListFirewallRulesRpcTests : IDisposable {
             _broadcaster, pipeline, _firewallStore, alertStore,
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             eventStore, new FakeTrafficStore(),
+            new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 

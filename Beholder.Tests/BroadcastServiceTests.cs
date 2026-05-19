@@ -250,6 +250,114 @@ public class BroadcastServiceTests {
         broadcaster.Dispose();
     }
 
+    // --- Phase 9.3: LAN device broadcast methods ---
+
+    [Fact]
+    public void BroadcastLanDeviceFirstSeen_NullDevice_ThrowsArgumentNullException() {
+        using var broadcaster = new BroadcastService(
+            new FakeSnapshotBatchSource(),
+            new FakeTimeProvider(FixedTimestamp),
+            NullLogger<BroadcastService>.Instance);
+        Assert.Throws<ArgumentNullException>(() => broadcaster.BroadcastLanDeviceFirstSeen(null!));
+    }
+
+    [Fact]
+    public async Task BroadcastLanDeviceFirstSeen_AllSubscribersReceiveEvent() {
+        var ct = TestContext.Current.CancellationToken;
+        var source = new FakeSnapshotBatchSource();
+        var broadcaster = new BroadcastService(
+            source, new FakeTimeProvider(FixedTimestamp), NullLogger<BroadcastService>.Instance);
+        await broadcaster.StartAsync(ct);
+
+        await using var e1 = broadcaster.SubscribeAsync(ct).GetAsyncEnumerator(ct);
+        await using var e2 = broadcaster.SubscribeAsync(ct).GetAsyncEnumerator(ct);
+        var m1 = e1.MoveNextAsync().AsTask();
+        var m2 = e2.MoveNextAsync().AsTask();
+        await WaitForAsync(() => broadcaster.ActiveSubscriberCount == 2, "two subscribers registered", ct);
+
+        var device = new LanDevice(
+            Mac: "aa:bb:cc:dd:ee:01",
+            Ip: "192.168.1.20",
+            Vendor: "TestVendor",
+            Hostname: "test-host",
+            FirstSeen: FixedTimestamp,
+            LastSeen: FixedTimestamp);
+        broadcaster.BroadcastLanDeviceFirstSeen(device);
+
+        Assert.True(await m1.WaitAsync(WaitTimeout, ct));
+        Assert.True(await m2.WaitAsync(WaitTimeout, ct));
+        Assert.Equal(Local.DaemonEvent.PayloadOneofCase.LanDeviceFirstSeen, e1.Current.PayloadCase);
+        Assert.Equal("aa:bb:cc:dd:ee:01", e1.Current.LanDeviceFirstSeen.Device.Mac);
+        Assert.Equal("aa:bb:cc:dd:ee:01", e2.Current.LanDeviceFirstSeen.Device.Mac);
+
+        await broadcaster.StopAsync(ct);
+        broadcaster.Dispose();
+    }
+
+    [Fact]
+    public void BroadcastLanDeviceMacChanged_NullDevice_ThrowsArgumentNullException() {
+        using var broadcaster = new BroadcastService(
+            new FakeSnapshotBatchSource(),
+            new FakeTimeProvider(FixedTimestamp),
+            NullLogger<BroadcastService>.Instance);
+        Assert.Throws<ArgumentNullException>(
+            () => broadcaster.BroadcastLanDeviceMacChanged("aa:bb:cc:dd:ee:01", null!));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void BroadcastLanDeviceMacChanged_NullOrEmptyPreviousMac_ThrowsArgumentException(string? previousMac) {
+        // ArgumentException.ThrowIfNullOrEmpty throws ArgumentNullException for
+        // null and ArgumentException for empty. xUnit's Assert.Throws is exact
+        // match — use ThrowsAny so the Theory covers both shapes with one
+        // assertion, since either is an acceptable "rejected bad input" signal.
+        using var broadcaster = new BroadcastService(
+            new FakeSnapshotBatchSource(),
+            new FakeTimeProvider(FixedTimestamp),
+            NullLogger<BroadcastService>.Instance);
+        var device = new LanDevice(
+            Mac: "aa:bb:cc:dd:ee:01",
+            Ip: "10.0.0.1",
+            Vendor: null,
+            Hostname: null,
+            FirstSeen: FixedTimestamp,
+            LastSeen: FixedTimestamp);
+        Assert.ThrowsAny<ArgumentException>(
+            () => broadcaster.BroadcastLanDeviceMacChanged(previousMac!, device));
+    }
+
+    [Fact]
+    public async Task BroadcastLanDeviceMacChanged_AllSubscribersReceiveEventWithPreviousMac() {
+        var ct = TestContext.Current.CancellationToken;
+        var source = new FakeSnapshotBatchSource();
+        var broadcaster = new BroadcastService(
+            source, new FakeTimeProvider(FixedTimestamp), NullLogger<BroadcastService>.Instance);
+        await broadcaster.StartAsync(ct);
+
+        await using var enumerator = broadcaster.SubscribeAsync(ct).GetAsyncEnumerator(ct);
+        var move = enumerator.MoveNextAsync().AsTask();
+        await WaitForAsync(() => broadcaster.ActiveSubscriberCount == 1, "subscriber registered", ct);
+
+        var device = new LanDevice(
+            Mac: "22:22:22:22:22:22",
+            Ip: "192.168.1.50",
+            Vendor: "NewVendor",
+            Hostname: "new-device",
+            FirstSeen: FixedTimestamp,
+            LastSeen: FixedTimestamp);
+        broadcaster.BroadcastLanDeviceMacChanged("11:11:11:11:11:11", device);
+
+        Assert.True(await move.WaitAsync(WaitTimeout, ct));
+        Assert.Equal(Local.DaemonEvent.PayloadOneofCase.LanDeviceMacChanged, enumerator.Current.PayloadCase);
+        Assert.Equal("11:11:11:11:11:11", enumerator.Current.LanDeviceMacChanged.PreviousMac);
+        Assert.Equal("22:22:22:22:22:22", enumerator.Current.LanDeviceMacChanged.Device.Mac);
+        Assert.Equal("192.168.1.50", enumerator.Current.LanDeviceMacChanged.Device.Ip);
+
+        await broadcaster.StopAsync(ct);
+        broadcaster.Dispose();
+    }
+
     private static IReadOnlyList<CounterSnapshot> BuildBatch(string processName) {
         return new[] {
             new CounterSnapshot(

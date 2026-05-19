@@ -276,6 +276,82 @@ public class ProtocolConvertersTests {
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_000_000L), result);
     }
 
+    // --- Phase 9.3: LanDevice round-trip ---
+
+    [Fact]
+    public void LanDevice_ToProto_AllFieldsPreserved() {
+        var source = new Core.LanDevice(
+            Mac: "aa:bb:cc:dd:ee:01",
+            Ip: "192.168.1.42",
+            Vendor: "TestVendor",
+            Hostname: "test-host",
+            FirstSeen: FixedTimestamp,
+            LastSeen: SecondTimestamp);
+
+        var proto = source.ToProto();
+
+        Assert.Equal("aa:bb:cc:dd:ee:01", proto.Mac);
+        Assert.Equal("192.168.1.42", proto.Ip);
+        Assert.Equal("TestVendor", proto.Vendor);
+        Assert.Equal("test-host", proto.Hostname);
+        Assert.Equal(FixedTimestamp.ToUnixTimeNanoseconds(), proto.FirstSeenUnixNs);
+        Assert.Equal(SecondTimestamp.ToUnixTimeNanoseconds(), proto.LastSeenUnixNs);
+    }
+
+    [Fact]
+    public void LanDevice_ToProto_NullVendorAndHostnameBecomeEmptyString() {
+        var source = new Core.LanDevice(
+            Mac: "aa:bb:cc:dd:ee:02",
+            Ip: "192.168.1.43",
+            Vendor: null,
+            Hostname: null,
+            FirstSeen: FixedTimestamp,
+            LastSeen: FixedTimestamp);
+
+        var proto = source.ToProto();
+
+        Assert.Equal("", proto.Vendor);
+        Assert.Equal("", proto.Hostname);
+    }
+
+    [Fact]
+    public void LanDevice_RoundTrip_PreservesNullSemantics() {
+        // Core (null Vendor/Hostname) → proto ("" Vendor/Hostname) → Core
+        // should restore the nulls. Confirms the empty-string sentinel is
+        // bidirectional, not lossy.
+        var source = new Core.LanDevice(
+            Mac: "aa:bb:cc:dd:ee:03",
+            Ip: "10.0.0.5",
+            Vendor: null,
+            Hostname: null,
+            FirstSeen: FixedTimestamp,
+            LastSeen: SecondTimestamp);
+
+        var roundTripped = source.ToProto().ToDomain();
+
+        Assert.Equal(source.Mac, roundTripped.Mac);
+        Assert.Equal(source.Ip, roundTripped.Ip);
+        Assert.Null(roundTripped.Vendor);
+        Assert.Null(roundTripped.Hostname);
+        Assert.Equal(source.FirstSeen, roundTripped.FirstSeen);
+        Assert.Equal(source.LastSeen, roundTripped.LastSeen);
+    }
+
+    [Fact]
+    public void LanDevice_RoundTrip_PreservesNonNullValues() {
+        var source = new Core.LanDevice(
+            Mac: "aa:bb:cc:dd:ee:04",
+            Ip: "10.0.0.6",
+            Vendor: "Acme Corp",
+            Hostname: "living-room-tv",
+            FirstSeen: FixedTimestamp,
+            LastSeen: SecondTimestamp);
+
+        var roundTripped = source.ToProto().ToDomain();
+
+        Assert.Equal(source, roundTripped);
+    }
+
     private static Core.CounterSnapshot BuildCounterSnapshot(
         IReadOnlyDictionary<Core.CountryCode, long> byCountry
     ) {

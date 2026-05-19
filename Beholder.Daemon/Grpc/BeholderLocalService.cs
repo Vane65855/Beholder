@@ -1,5 +1,6 @@
 using Beholder.Core;
 using Beholder.Daemon.Pipeline;
+using Beholder.Daemon.Scanner;
 using Beholder.Daemon.Storage;
 using Beholder.Protocol;
 using Grpc.Core;
@@ -20,6 +21,8 @@ namespace Beholder.Daemon.Grpc;
 /// </summary>
 internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBase {
     private const int RecentAlertLimit = 100;
+    private const int DefaultLanDeviceListLimit = 200;
+    private const int MaxLanDeviceListLimit = 1000;
 
     private readonly BroadcastService _broadcaster;
     private readonly FlowEventPipeline _pipeline;
@@ -29,6 +32,8 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     private readonly IFirewallEnforcementState _enforcementState;
     private readonly IEventStore _eventStore;
     private readonly ITrafficStore _trafficStore;
+    private readonly ILanDeviceStore _lanDeviceStore;
+    private readonly LanScannerService _lanScannerService;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<BeholderLocalService> _logger;
 
@@ -41,6 +46,8 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         IFirewallEnforcementState enforcementState,
         IEventStore eventStore,
         ITrafficStore trafficStore,
+        ILanDeviceStore lanDeviceStore,
+        LanScannerService lanScannerService,
         TimeProvider timeProvider,
         ILogger<BeholderLocalService> logger
     ) {
@@ -52,6 +59,8 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         ArgumentNullException.ThrowIfNull(enforcementState);
         ArgumentNullException.ThrowIfNull(eventStore);
         ArgumentNullException.ThrowIfNull(trafficStore);
+        ArgumentNullException.ThrowIfNull(lanDeviceStore);
+        ArgumentNullException.ThrowIfNull(lanScannerService);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _broadcaster = broadcaster;
@@ -62,6 +71,8 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         _enforcementState = enforcementState;
         _eventStore = eventStore;
         _trafficStore = trafficStore;
+        _lanDeviceStore = lanDeviceStore;
+        _lanScannerService = lanScannerService;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -516,6 +527,61 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         foreach (var summary in summaries) response.Summaries.Add(summary.ToProto());
         return response;
     }, context);
+
+    public override Task<Local.ListLanDevicesResponse> ListLanDevices(
+        Local.ListLanDevicesRequest request, ServerCallContext context
+    ) {
+        if (request.Limit < 0)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "limit must be non-negative"));
+
+        return ExecuteQueryAsync(nameof(ListLanDevices), async cancellationToken => {
+            // 0 → server default; clamped to the hard cap so a client can't
+            // ask the daemon for an unbounded slice of the store.
+            var requestedLimit = request.Limit == 0
+                ? DefaultLanDeviceListLimit
+                : Math.Min(request.Limit, MaxLanDeviceListLimit);
+            DateTimeOffset? seenSince = request.SeenSinceUnixNs > 0
+                ? request.SeenSinceUnixNs.FromUnixTimeNanoseconds()
+                : null;
+            var query = new LanDeviceQuery(seenSince, requestedLimit);
+
+            var devices = await _lanDeviceStore.ListAsync(query, cancellationToken).ConfigureAwait(false);
+
+            var response = new Local.ListLanDevicesResponse();
+            foreach (var device in devices) response.Devices.Add(device.ToProto());
+            return response;
+        }, context);
+    }
+
+    public override async Task<Local.TriggerScanResponse> TriggerScan(
+        Local.TriggerScanRequest request, ServerCallContext context
+    ) {
+        try {
+            var count = await _lanScannerService
+                .RunOnceManuallyAsync(context.CancellationToken)
+                .ConfigureAwait(false);
+            return new Local.TriggerScanResponse {
+                Success = true,
+                Message = $"Scan complete: {count} devices observed",
+                DevicesObserved = count,
+            };
+        } catch (OperationCanceledException) {
+            // Caller (e.g., disconnected UI) cancelled — let gRPC surface
+            // StatusCode.Cancelled rather than swallowing into success=false.
+            throw;
+        } catch (Exception ex) {
+            _logger.LogError(ex, "TriggerScan failed");
+            // Recoverable failure — return success=false with a structured
+            // message so the UI can render the reason inline rather than
+            // surfacing a generic RpcException. Mirrors the ApplyFirewallRule
+            // "soft-failure" precedent for caller-actionable conditions.
+            return new Local.TriggerScanResponse {
+                Success = false,
+                Message = $"Scan failed: {ex.Message}",
+                DevicesObserved = 0,
+            };
+        }
+    }
 
     /// <summary>
     /// Runs a query RPC's inner work with unified exception classification.

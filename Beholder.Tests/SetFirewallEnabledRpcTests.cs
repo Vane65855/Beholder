@@ -43,6 +43,7 @@ public sealed class SetFirewallEnabledRpcTests : IDisposable {
             _broadcaster, pipeline, firewallStore, alertStore,
             new FakeFirewallController(), _enforcementState,
             _eventStore, new FakeTrafficStore(),
+            new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
