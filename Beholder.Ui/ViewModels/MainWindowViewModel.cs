@@ -14,7 +14,7 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
     private readonly TrafficTabViewModel _trafficTab;
     private readonly FirewallTabViewModel _firewallTab;
     private readonly AlertsTabViewModel _alertsTab;
-    private readonly ScannerTabViewModel _scannerTab = new();
+    private readonly ScannerTabViewModel _scannerTab;
     private readonly SettingsTabViewModel _settingsTab = new();
 
     [ObservableProperty]
@@ -84,6 +84,8 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         // INotificationService abstraction so the platform impl is hidden.
         _alertsTab = new AlertsTabViewModel(
             daemonClient, streamSubscriber, dispatcher, notifications, NavigateToFirewallRuleAsync);
+        _scannerTab = new ScannerTabViewModel(
+            daemonClient, streamSubscriber, dispatcher, TimeProvider.System);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         _daemonClient.StateChanged += OnDaemonStateChanged;
@@ -166,6 +168,8 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
             _ = _firewallTab.ActivateAsync(CancellationToken.None);
         } else if (value == TabKind.Alerts) {
             _ = _alertsTab.ActivateAsync(CancellationToken.None);
+        } else if (value == TabKind.Scanner) {
+            _ = _scannerTab.ActivateAsync(CancellationToken.None);
         }
     }
 

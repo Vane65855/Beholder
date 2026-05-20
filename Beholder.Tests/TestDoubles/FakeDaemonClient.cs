@@ -62,6 +62,15 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public GetFirewallActivityResponse? FirewallActivityResponse { get; set; }
     public Func<ListLanDevicesRequest, ListLanDevicesResponse>? ListLanDevicesResponder { get; set; }
     public ListLanDevicesResponse? ListLanDevicesResponse { get; set; }
+    /// <summary>
+    /// Async responder for <see cref="ListLanDevicesAsync"/>. Lets tests gate
+    /// the response on a <see cref="TaskCompletionSource{T}"/> they signal
+    /// later, exercising the cold-start race in
+    /// <see cref="Beholder.Ui.ViewModels.ScannerTabViewModel.ActivateAsync"/>.
+    /// Takes precedence over the synchronous responder when both are set;
+    /// mirrors the <see cref="SnapshotResponder"/> precedent.
+    /// </summary>
+    public Func<ListLanDevicesRequest, CancellationToken, Task<ListLanDevicesResponse>>? AsyncListLanDevicesResponder { get; set; }
     public Func<TriggerScanRequest, TriggerScanResponse>? TriggerScanResponder { get; set; }
 
     // Captured invocations for assertions.
@@ -198,6 +207,8 @@ internal sealed class FakeDaemonClient : IDaemonClient {
         ListLanDevicesRequest request, CancellationToken cancellationToken) {
         ListLanDevicesCalls.Add(request);
         if (ListLanDevicesException is not null) throw ListLanDevicesException;
+        if (AsyncListLanDevicesResponder is not null)
+            return AsyncListLanDevicesResponder(request, cancellationToken);
         return Task.FromResult(ListLanDevicesResponder?.Invoke(request)
             ?? ListLanDevicesResponse ?? new ListLanDevicesResponse());
     }

@@ -492,6 +492,8 @@ The historical `Get*` RPCs query SQLite directly for traffic data. They accept t
 
 LAN scanner chain events (`LanDeviceFirstSeen` / `LanDeviceMacChanged`) are pushed to subscribed UIs via `BroadcastService` as part of the same fan-out mechanism that ships counter batches, alerts, and rule changes — Phase 9.3 closed the previously-implicit gap where the LAN scanner wrote to the chain but never broadcast (every other event kind already did both). The pattern is now invariant: every mutable event goes to both chain (durable audit) and broadcast (live UI).
 
+Phase 9.4 closes the user-facing loop: the Scanner tab UI (`Beholder.Ui/Views/Tabs/ScannerTabView.axaml` + `ScannerTabViewModel`) consumes the 9.3 IPC surface end-to-end. A master-detail layout (320-px-MinWidth device list on the left, full-context detail pane on the right) backed by `ListLanDevices` for the initial snapshot + `LanDeviceFirstSeenEvent` / `LanDeviceMacChangedEvent` for live updates. A "Scan now" button in the header drives `TriggerScan`; the structured `success / message / devices_observed` response renders as a transient warn/danger banner. Mirrors the `AlertsTabViewModel` precedent: single-tab state ownership (no cross-tab state service yet — abstraction deferred to a second-consumer phase), cold-start race handled via the `Task? _activationTask` field, all five required UI states (loading / empty / populated / error / extreme) implemented and tested. End-to-end loop: daemon discovers → store persists → chain audits → broadcast pushes → UI renders.
+
 ## Uplink Protocol (Daemon → Aggregator)
 
 Bidirectional streaming gRPC over TCP + TLS, initiated by the daemon:
