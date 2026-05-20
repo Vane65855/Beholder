@@ -1,12 +1,256 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Beholder.Ui.ViewModels"
+             xmlns:controls="using:Beholder.Ui.Controls"
              x:Class="Beholder.Ui.Views.Tabs.ScannerTabView"
              x:DataType="vm:ScannerTabViewModel"
              Background="{DynamicResource BackgroundRoot}">
-    <TextBlock Text="Scanner tab content (deferred)"
-               Foreground="{DynamicResource TextMuted}"
-               FontSize="{DynamicResource FontSizeHeading}"
-               HorizontalAlignment="Center"
-               VerticalAlignment="Center" />
+
+    <UserControl.Styles>
+        <!-- Master ListBox row container — selection + hover states, mirrors
+             AlertsTabView.alertList for cross-tab consistency. -->
+        <Style Selector="ListBox.deviceList">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="ListBox.deviceList ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="ListBox.deviceList ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+        </Style>
+        <Style Selector="ListBox.deviceList ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BackgroundSelected}" />
+        </Style>
+
+        <!-- Status dot — small ellipse, tinted by IsStale. 10px is icon-scale
+             per UI_QUALITY_STANDARDS §2.1 (acceptable fixed pixel use). -->
+        <Style Selector="Ellipse.statusDot">
+            <Setter Property="Width" Value="10" />
+            <Setter Property="Height" Value="10" />
+            <Setter Property="Fill" Value="{DynamicResource AccentPrimary}" />
+        </Style>
+        <Style Selector="Ellipse.statusDot.stale">
+            <Setter Property="Fill" Value="{DynamicResource BorderSubtle}" />
+        </Style>
+
+        <!-- Field label in the detail pane. Mirrors AlertsTabView. -->
+        <Style Selector="TextBlock.fieldLabel">
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="LetterSpacing" Value="2" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+        </Style>
+
+        <!-- Scan-now button + dismiss-X. Pill style mirrors the
+             actionButton from AlertsTabView. -->
+        <Style Selector="Button.scanButton">
+            <Setter Property="MinWidth" Value="100" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentPrimary}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="LetterSpacing" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentPrimary}" />
+        </Style>
+        <Style Selector="Button.scanButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+        </Style>
+        <Style Selector="Button.scanButton:disabled">
+            <Setter Property="Opacity" Value="0.5" />
+            <Setter Property="Cursor" Value="Arrow" />
+        </Style>
+    </UserControl.Styles>
+
+    <Grid ColumnDefinitions="320,*">
+
+        <!-- ────────────────  Master pane: device list  ──────────────── -->
+        <Border Grid.Column="0"
+                BorderBrush="{DynamicResource BorderSubtle}"
+                BorderThickness="0,0,1,0">
+            <DockPanel>
+                <!-- Header strip: SCANNER label + device count + Scan now button. -->
+                <Border DockPanel.Dock="Top"
+                        Background="{DynamicResource BackgroundPanel}"
+                        BorderBrush="{DynamicResource DividerHorizontal}"
+                        BorderThickness="0,0,0,1"
+                        Padding="16,12">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                            <TextBlock Text="LAN DEVICES"
+                                       FontSize="{DynamicResource FontSizeCaption}"
+                                       LetterSpacing="2"
+                                       Foreground="{DynamicResource TextMuted}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding DeviceCountLabel}"
+                                       FontSize="{DynamicResource FontSizeBody}"
+                                       Foreground="{DynamicResource TextPrimary}"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                        <!-- Phase 9.3 TriggerScan RPC. Disabled while a scan is
+                             in flight so the user can't queue a storm. Label
+                             flips to "SCANNING…" during the call. -->
+                        <Button Grid.Column="1"
+                                Classes="scanButton"
+                                Content="{Binding ScanButtonLabel}"
+                                Command="{Binding TriggerScanCommand}"
+                                IsEnabled="{Binding !IsScanInProgress}"
+                                ToolTip.Tip="Run an immediate LAN scan. Discovers new devices and refreshes hostnames; the response shows how many devices were observed." />
+                    </Grid>
+                </Border>
+
+                <!-- Master list. -->
+                <ListBox Classes="deviceList"
+                         ItemsSource="{Binding Devices}"
+                         SelectedItem="{Binding SelectedDevice, Mode=TwoWay}">
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:LanDeviceRow">
+                            <!-- Row layout: status dot (Auto) + name+vendor stack (*) + last-seen (Auto). -->
+                            <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,8" ColumnSpacing="10">
+                                <Ellipse Grid.Column="0"
+                                         Classes="statusDot"
+                                         Classes.stale="{Binding IsStale}"
+                                         VerticalAlignment="Center"
+                                         ToolTip.Tip="Active: seen in the most recent scan window. Stale: not seen for more than ten minutes." />
+                                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding DisplayName}"
+                                               FontSize="{DynamicResource FontSizeBody}"
+                                               Foreground="{DynamicResource TextPrimary}"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding VendorLabel}"
+                                               FontSize="{DynamicResource FontSizeCaption}"
+                                               Foreground="{DynamicResource TextMuted}"
+                                               TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding LastSeenLabel}"
+                                           FontSize="{DynamicResource FontSizeCaption}"
+                                           Foreground="{DynamicResource TextMuted}"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Border>
+
+        <!-- ────────────────  Detail pane (populated)  ──────────────── -->
+        <Grid Grid.Column="1"
+              IsVisible="{Binding ShowDetailPane}"
+              RowDefinitions="Auto,*"
+              Margin="24">
+
+            <!-- Header: display name + IP. -->
+            <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,24">
+                <TextBlock Text="{Binding SelectedDevice.DisplayName}"
+                           FontSize="{DynamicResource FontSizeHeading}"
+                           Foreground="{DynamicResource TextPrimary}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding SelectedDevice.Ip}"
+                           FontSize="{DynamicResource FontSizeBody}"
+                           Foreground="{DynamicResource TextSecondary}" />
+            </StackPanel>
+
+            <!-- Body: field grid. Each row is a label + value pair. -->
+            <Grid Grid.Row="1"
+                  ColumnDefinitions="140,*"
+                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+                  RowSpacing="14"
+                  VerticalAlignment="Top">
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="MAC ADDRESS" />
+                <SelectableTextBlock Grid.Row="0" Grid.Column="1"
+                                     Text="{Binding SelectedDevice.Mac}"
+                                     FontSize="{DynamicResource FontSizeBody}"
+                                     Foreground="{DynamicResource TextPrimary}" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Classes="fieldLabel" Text="IP ADDRESS" />
+                <SelectableTextBlock Grid.Row="1" Grid.Column="1"
+                                     Text="{Binding SelectedDevice.Ip}"
+                                     FontSize="{DynamicResource FontSizeBody}"
+                                     Foreground="{DynamicResource TextPrimary}" />
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Classes="fieldLabel" Text="VENDOR" />
+                <SelectableTextBlock Grid.Row="2" Grid.Column="1"
+                                     Text="{Binding SelectedDevice.VendorLabel}"
+                                     FontSize="{DynamicResource FontSizeBody}"
+                                     Foreground="{DynamicResource TextPrimary}" />
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Classes="fieldLabel" Text="HOSTNAME" />
+                <SelectableTextBlock Grid.Row="3" Grid.Column="1"
+                                     Text="{Binding SelectedDevice.DisplayName}"
+                                     FontSize="{DynamicResource FontSizeBody}"
+                                     Foreground="{DynamicResource TextPrimary}" />
+
+                <TextBlock Grid.Row="4" Grid.Column="0" Classes="fieldLabel" Text="FIRST SEEN" />
+                <SelectableTextBlock Grid.Row="4" Grid.Column="1"
+                                     Text="{Binding SelectedDevice.FirstSeenLabel}"
+                                     FontSize="{DynamicResource FontSizeBody}"
+                                     Foreground="{DynamicResource TextPrimary}" />
+
+                <TextBlock Grid.Row="5" Grid.Column="0" Classes="fieldLabel" Text="LAST SEEN" />
+                <SelectableTextBlock Grid.Row="5" Grid.Column="1"
+                                     Text="{Binding SelectedDevice.LastSeenLabel}"
+                                     FontSize="{DynamicResource FontSizeBody}"
+                                     Foreground="{DynamicResource TextPrimary}" />
+            </Grid>
+        </Grid>
+
+        <!-- ────────────────  Empty state  ──────────────── -->
+        <StackPanel Grid.Column="1"
+                    IsVisible="{Binding ShowEmptyState}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Spacing="6"
+                    Margin="32">
+            <TextBlock Text="No devices observed yet"
+                       Foreground="{DynamicResource TextSecondary}"
+                       FontSize="{DynamicResource FontSizeHeading}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="Click 'Scan now' or wait for the next scheduled scan to discover devices on your LAN. Devices appear when the daemon's ARP probe or mDNS service-discovery browse picks them up."
+                       Foreground="{DynamicResource TextMuted}"
+                       FontSize="{DynamicResource FontSizeBody}"
+                       MaxWidth="460"
+                       TextWrapping="Wrap"
+                       TextAlignment="Center" />
+        </StackPanel>
+
+        <!-- ────────────────  Loading state  ──────────────── -->
+        <Panel Grid.Column="1" IsVisible="{Binding ShowLoadingState}">
+            <TextBlock Text="Loading devices…"
+                       Foreground="{DynamicResource TextMuted}"
+                       FontSize="{DynamicResource FontSizeHeading}"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center" />
+        </Panel>
+
+        <!-- Scan-status transient banner. Severity=Warn for success and
+             Danger for failure; auto-dismissed by the VM after 4 s
+             (CTS-cancellable so a rapid second click resets the timer). -->
+        <controls:ErrorBanner Grid.Column="1"
+                              VerticalAlignment="Top"
+                              Margin="0,16,0,0"
+                              Severity="Warn"
+                              Message="{Binding ScanStatusMessage}"
+                              IsVisible="{Binding HasScanStatusMessage}"
+                              DismissCommand="{Binding DismissScanStatusCommand}" />
+
+        <!-- Error banner — same UI_DESIGN.md §5.10 treatment Alerts/Firewall use:
+             full-width red bottom-border, dismiss X. Severity=Danger. -->
+        <controls:ErrorBanner Grid.Column="1"
+                              VerticalAlignment="Top"
+                              Severity="Danger"
+                              Message="{Binding ErrorMessage}"
+                              IsVisible="{Binding HasError}"
+                              DismissCommand="{Binding DismissErrorCommand}" />
+    </Grid>
 </UserControl>
