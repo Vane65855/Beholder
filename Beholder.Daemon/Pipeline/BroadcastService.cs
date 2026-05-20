@@ -170,6 +170,19 @@ internal sealed class BroadcastService : IHostedService, IDisposable {
         FanOut(new Local.DaemonEvent { LanDeviceMacChanged = ev });
     }
 
+    /// <summary>
+    /// Broadcasts a Phase 9.5 LAN device label change. Called by
+    /// <c>BeholderLocalService.SetLanDeviceLabel</c> after the
+    /// <see cref="ILanDeviceStore.SetLabelAsync"/> call succeeds and the
+    /// updated row is re-fetched. <paramref name="device"/> carries the
+    /// refreshed device including the new (or cleared) label.
+    /// </summary>
+    public void BroadcastLanDeviceLabelChanged(LanDevice device) {
+        ArgumentNullException.ThrowIfNull(device);
+        var ev = new Local.LanDeviceLabelChangedEvent { Device = device.ToProto() };
+        FanOut(new Local.DaemonEvent { LanDeviceLabelChanged = ev });
+    }
+
     private void OnSnapshotBatch(IReadOnlyList<CounterSnapshot> snapshots) {
         var batch = new Local.CounterBatch {
             TickTimestampUnixNs = _timeProvider.GetUtcNow().ToUnixTimeNanoseconds(),

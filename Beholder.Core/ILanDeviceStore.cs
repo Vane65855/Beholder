@@ -38,7 +38,20 @@ public interface ILanDeviceStore {
     /// row with the same MAC already exists, updates its <c>ip</c>, <c>vendor</c>,
     /// <c>hostname</c>, and <c>last_seen_unix_ns</c> columns. The original
     /// <see cref="LanDevice.FirstSeen"/> is preserved across upserts — only the
-    /// initial insert records it.
+    /// initial insert records it. The <see cref="LanDevice.Label"/> column is
+    /// likewise preserved on conflict: scanner re-observations carry <c>null</c>
+    /// for the label (the scanner has no notion of user labels), but the
+    /// implementation's <c>ON CONFLICT</c> clause deliberately omits the column
+    /// so a user-set label persists across re-observations.
     /// </summary>
     Task UpsertAsync(LanDevice device, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sets or clears the user-supplied cosmetic label for the device identified
+    /// by <paramref name="mac"/>. Passing <see langword="null"/> or
+    /// whitespace-only clears the label. If no device with the given MAC exists,
+    /// the call is a no-op (no exception). Phase 9.5 / ADR 009: labels are
+    /// cosmetic UI state, not chain-audited.
+    /// </summary>
+    Task SetLabelAsync(string mac, string? label, CancellationToken cancellationToken);
 }

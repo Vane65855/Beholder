@@ -43,6 +43,7 @@ public sealed class DatabaseInitializer {
         EnableWalMode(connection);
         CreateTables(connection);
         MigrateProcessRegistryFor75(connection);
+        MigrateLanDeviceFor95(connection);
         CreateIndexes(connection);
     }
 
@@ -223,6 +224,18 @@ public sealed class DatabaseInitializer {
         AddColumnIfMissing(connection, existingColumns, "process_registry", "cert_subject_cn", "TEXT");
         AddColumnIfMissing(connection, existingColumns, "process_registry", "cert_issuer_cn", "TEXT");
         AddColumnIfMissing(connection, existingColumns, "process_registry", "signature_status", "TEXT");
+    }
+
+    /// <summary>
+    /// Phase 9.5: adds the user-supplied <c>label</c> column to <c>lan_device</c>.
+    /// Labels are cosmetic UI state (not chain-audited); persisted alongside
+    /// the existing columns so they survive across daemon restarts and across
+    /// scanner re-observations of the same MAC. Idempotent — re-runs on
+    /// already-migrated DBs are no-ops via <see cref="AddColumnIfMissing"/>.
+    /// </summary>
+    private static void MigrateLanDeviceFor95(SqliteConnection connection) {
+        var existingColumns = ReadColumnNames(connection, "lan_device");
+        AddColumnIfMissing(connection, existingColumns, "lan_device", "label", "TEXT");
     }
 
     private static HashSet<string> ReadColumnNames(SqliteConnection connection, string table) {

@@ -42,10 +42,26 @@ internal sealed class FakeLanDeviceStore : ILanDeviceStore {
     public Task UpsertAsync(LanDevice device, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(device);
         if (_byMac.TryGetValue(device.Mac, out var existing)) {
-            _byMac[device.Mac] = device with { FirstSeen = existing.FirstSeen };
+            // Mirror SqliteLanDeviceStore's ON CONFLICT clause: FirstSeen and
+            // Label survive the upsert. Scanner re-observations carry null
+            // for the label; the user's prior label persists.
+            _byMac[device.Mac] = device with {
+                FirstSeen = existing.FirstSeen,
+                Label = device.Label ?? existing.Label,
+            };
         } else {
             _byMac[device.Mac] = device;
         }
+        return Task.CompletedTask;
+    }
+
+    public Task SetLabelAsync(string mac, string? label, CancellationToken cancellationToken) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(mac);
+        var normalized = string.IsNullOrWhiteSpace(label) ? null : label;
+        if (_byMac.TryGetValue(mac, out var existing)) {
+            _byMac[mac] = existing with { Label = normalized };
+        }
+        // No-op when MAC isn't in the store, mirroring the SQL store.
         return Task.CompletedTask;
     }
 

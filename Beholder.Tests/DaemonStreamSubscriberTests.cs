@@ -106,6 +106,46 @@ public class DaemonStreamSubscriberTests {
     }
 
     [Fact]
+    public async Task Dispatch_LanDeviceLabelChangedEvent_RaisesEventHandler() {
+        var ct = TestContext.Current.CancellationToken;
+        var fakeClient = new FakeDaemonClient();
+        var subscriber = new DaemonStreamSubscriber(
+            fakeClient, TimeProvider.System, NullLogger<DaemonStreamSubscriber>.Instance);
+
+        LanDeviceLabelChangedEvent? received = null;
+        var signal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        subscriber.LanDeviceLabelChangedReceived += ev => {
+            received = ev;
+            signal.TrySetResult();
+        };
+
+        await subscriber.StartAsync(ct);
+        fakeClient.SimulateConnected();
+
+        var daemonEvent = new DaemonEvent {
+            LanDeviceLabelChanged = new LanDeviceLabelChangedEvent {
+                Device = new LanDevice {
+                    Mac = "aa:bb:cc:dd:ee:42",
+                    Ip = "192.168.1.42",
+                    Label = "Living Room TV",
+                    FirstSeenUnixNs = 1_000_000_000,
+                    LastSeenUnixNs = 2_000_000_000,
+                },
+            },
+        };
+        fakeClient.PushEvent(daemonEvent);
+
+        var completed = await Task.WhenAny(signal.Task, Task.Delay(TimeSpan.FromSeconds(5), ct));
+        Assert.True(completed == signal.Task, "Timed out waiting for LanDeviceLabelChangedReceived");
+
+        Assert.NotNull(received);
+        Assert.Equal("aa:bb:cc:dd:ee:42", received.Device.Mac);
+        Assert.Equal("Living Room TV", received.Device.Label);
+
+        await subscriber.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Dispatch_LanDeviceMacChangedEvent_RaisesEventHandler() {
         var ct = TestContext.Current.CancellationToken;
         var fakeClient = new FakeDaemonClient();

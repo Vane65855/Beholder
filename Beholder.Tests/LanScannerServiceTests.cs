@@ -108,7 +108,8 @@ public sealed class LanScannerServiceTests : IDisposable {
             Vendor: "AcmeCorp",
             Hostname: null,
             FirstSeen: BaseTime.AddDays(-1),
-            LastSeen: BaseTime.AddDays(-1)), CancellationToken.None);
+            LastSeen: BaseTime.AddDays(-1),
+            Label: null), CancellationToken.None);
 
         var observation = new LanDeviceObservation(
             Mac: "aa:bb:cc:11:22:33",
@@ -139,7 +140,8 @@ public sealed class LanScannerServiceTests : IDisposable {
             Vendor: "OldVendor",
             Hostname: null,
             FirstSeen: BaseTime.AddDays(-1),
-            LastSeen: BaseTime.AddHours(-1)), CancellationToken.None);
+            LastSeen: BaseTime.AddHours(-1),
+            Label: null), CancellationToken.None);
 
         // New scan: same IP, different MAC.
         var observation = new LanDeviceObservation(
@@ -324,7 +326,8 @@ public sealed class LanScannerServiceTests : IDisposable {
             Vendor: "OldVendor",
             Hostname: null,
             FirstSeen: BaseTime.AddDays(-1),
-            LastSeen: BaseTime.AddHours(-1)), CancellationToken.None);
+            LastSeen: BaseTime.AddHours(-1),
+            Label: null), CancellationToken.None);
 
         var observation = new LanDeviceObservation(
             Mac: "22:22:22:22:22:22",  // new MAC at the same IP
@@ -374,7 +377,8 @@ public sealed class LanScannerServiceTests : IDisposable {
             Vendor: null,
             Hostname: null,
             FirstSeen: BaseTime.AddDays(-1),
-            LastSeen: BaseTime.AddHours(-1)), CancellationToken.None);
+            LastSeen: BaseTime.AddHours(-1),
+            Label: null), CancellationToken.None);
 
         var observation = new LanDeviceObservation(
             Mac: "33:33:33:33:33:33",

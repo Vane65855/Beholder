@@ -46,12 +46,46 @@ internal sealed partial class LanDeviceRow : ObservableObject {
     private bool _isStale;
 
     /// <summary>
+    /// Phase 9.5: user-supplied cosmetic display name. Null when no label is
+    /// set; when set, overrides <see cref="DisplayName"/> in the master list
+    /// + detail-pane heading via <see cref="LabelOrFallback"/>. Observable so
+    /// the live <c>LanDeviceLabelChangedReceived</c> stream event updates
+    /// the row without a tab-switch refresh.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(LabelOrFallback))]
+    [NotifyPropertyChangedFor(nameof(HasLabel))]
+    private string? _label;
+
+    /// <summary>
     /// Master-list display name. Hostname is preferred when present (Apple TVs,
     /// Linux/Avahi machines, printers); falls back to IP for devices the
     /// hostname ladder couldn't resolve (random-MAC phones, NetBIOS-disabled
     /// Windows boxes — see <c>docs/manual-tests/lan-scanner.md</c>).
     /// </summary>
     public string DisplayName => string.IsNullOrEmpty(Hostname) ? Ip : Hostname;
+
+    /// <summary>
+    /// Master-list primary text + detail-pane heading. User-supplied
+    /// <see cref="Label"/> wins; falls back through <see cref="DisplayName"/>
+    /// (hostname or IP). Recomputed whenever <see cref="Label"/> changes via
+    /// the <c>[NotifyPropertyChangedFor]</c> annotation.
+    /// </summary>
+    public string LabelOrFallback =>
+        !string.IsNullOrEmpty(Label) ? Label
+        : !string.IsNullOrEmpty(Hostname) ? Hostname
+        : Ip;
+
+    /// <summary>True when the user has set a custom label. Drives the
+    /// detail pane's read-mode rendering (label-or-italic-placeholder).</summary>
+    public bool HasLabel => !string.IsNullOrEmpty(Label);
+
+    /// <summary>True when the discovery ladder produced a hostname. Drives
+    /// the detail pane's HOSTNAME row between "show the value" and "show
+    /// a muted '(not detected)' placeholder". Avoids the prior detail-pane
+    /// bug where the HOSTNAME row fell back to IP and looked identical to
+    /// the IP ADDRESS row above it.</summary>
+    public bool HasHostname => !string.IsNullOrEmpty(Hostname);
 
     /// <summary>
     /// Master-list secondary line. Vendor from the OUI lookup; falls back to
@@ -67,6 +101,7 @@ internal sealed partial class LanDeviceRow : ObservableObject {
         string hostname,
         DateTimeOffset firstSeen,
         DateTimeOffset lastSeen,
+        string? label,
         DateTimeOffset now
     ) {
         Mac = mac;
@@ -78,6 +113,7 @@ internal sealed partial class LanDeviceRow : ObservableObject {
         _lastSeen = lastSeen;
         _lastSeenLabel = RelativeTimeAgoConverter.Format(lastSeen, now);
         _isStale = now - lastSeen > StaleThreshold;
+        _label = label;
     }
 
     /// <summary>
@@ -96,6 +132,7 @@ internal sealed partial class LanDeviceRow : ObservableObject {
             hostname: proto.Hostname,
             firstSeen: DateTimeOffset.FromUnixTimeMilliseconds(proto.FirstSeenUnixNs / 1_000_000L),
             lastSeen: DateTimeOffset.FromUnixTimeMilliseconds(proto.LastSeenUnixNs / 1_000_000L),
+            label: string.IsNullOrEmpty(proto.Label) ? null : proto.Label,
             now: timeProvider.GetUtcNow());
     }
 
@@ -122,6 +159,7 @@ internal sealed partial class LanDeviceRow : ObservableObject {
         ArgumentNullException.ThrowIfNull(proto);
         ArgumentNullException.ThrowIfNull(timeProvider);
         LastSeen = DateTimeOffset.FromUnixTimeMilliseconds(proto.LastSeenUnixNs / 1_000_000L);
+        Label = string.IsNullOrEmpty(proto.Label) ? null : proto.Label;
         RefreshRelativeLabels(timeProvider);
     }
 }

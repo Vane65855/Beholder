@@ -190,19 +190,113 @@ public sealed class SqliteLanDeviceStoreTests : IDisposable {
         Assert.Null(fetched.Hostname);
     }
 
+    // ---- Phase 9.5: label round-trip + SetLabelAsync ----
+
+    [Fact]
+    public async Task UpsertAsync_DeviceWithLabel_RoundTripsLabel() {
+        var device = MakeDevice(mac: "aa:bb:cc:11:22:34", label: "Living Room TV");
+
+        await _store.UpsertAsync(device, CancellationToken.None);
+
+        var fetched = await _store.GetByMacAsync("aa:bb:cc:11:22:34", CancellationToken.None);
+        Assert.NotNull(fetched);
+        Assert.Equal("Living Room TV", fetched.Label);
+    }
+
+    [Fact]
+    public async Task UpsertAsync_KnownMacReObservedWithNullLabel_PreservesExistingLabel() {
+        // Critical invariant: scanner re-observations carry null for the
+        // label (the scanner has no notion of user labels). The ON CONFLICT
+        // SET clause deliberately omits the label column so the user's
+        // prior label persists across re-observations.
+        await _store.UpsertAsync(MakeDevice(mac: "aa:bb:cc:11:22:35", label: "Kitchen TV"), CancellationToken.None);
+
+        await _store.UpsertAsync(MakeDevice(
+            mac: "aa:bb:cc:11:22:35",
+            label: null,
+            lastSeen: BaseTime.AddHours(1)), CancellationToken.None);
+
+        var fetched = await _store.GetByMacAsync("aa:bb:cc:11:22:35", CancellationToken.None);
+        Assert.NotNull(fetched);
+        Assert.Equal("Kitchen TV", fetched.Label);  // preserved
+        Assert.Equal(BaseTime.AddHours(1), fetched.LastSeen);  // refreshed
+    }
+
+    [Fact]
+    public async Task SetLabelAsync_NewLabel_PersistsAndRoundTrips() {
+        await _store.UpsertAsync(MakeDevice(mac: "aa:bb:cc:11:22:36"), CancellationToken.None);
+
+        await _store.SetLabelAsync("aa:bb:cc:11:22:36", "Office Printer", CancellationToken.None);
+
+        var fetched = await _store.GetByMacAsync("aa:bb:cc:11:22:36", CancellationToken.None);
+        Assert.NotNull(fetched);
+        Assert.Equal("Office Printer", fetched.Label);
+    }
+
+    [Fact]
+    public async Task SetLabelAsync_NullLabel_ClearsExistingLabel() {
+        await _store.UpsertAsync(MakeDevice(mac: "aa:bb:cc:11:22:37", label: "Old Name"), CancellationToken.None);
+
+        await _store.SetLabelAsync("aa:bb:cc:11:22:37", null, CancellationToken.None);
+
+        var fetched = await _store.GetByMacAsync("aa:bb:cc:11:22:37", CancellationToken.None);
+        Assert.NotNull(fetched);
+        Assert.Null(fetched.Label);
+    }
+
+    [Fact]
+    public async Task SetLabelAsync_WhitespaceLabel_ClearsExistingLabel() {
+        // The store normalises whitespace-only to null per the interface
+        // contract — UI's empty TextBox round-trips cleanly to "no label".
+        await _store.UpsertAsync(MakeDevice(mac: "aa:bb:cc:11:22:38", label: "Stale"), CancellationToken.None);
+
+        await _store.SetLabelAsync("aa:bb:cc:11:22:38", "   ", CancellationToken.None);
+
+        var fetched = await _store.GetByMacAsync("aa:bb:cc:11:22:38", CancellationToken.None);
+        Assert.NotNull(fetched);
+        Assert.Null(fetched.Label);
+    }
+
+    [Fact]
+    public async Task SetLabelAsync_UnknownMac_NoOpDoesNotThrow() {
+        // Per the interface contract: SetLabelAsync against a MAC that's
+        // not in the store is a silent no-op. Callers can detect this via
+        // a follow-up GetByMacAsync.
+        await _store.SetLabelAsync("99:99:99:99:99:99", "ghost", CancellationToken.None);
+
+        var fetched = await _store.GetByMacAsync("99:99:99:99:99:99", CancellationToken.None);
+        Assert.Null(fetched);
+    }
+
+    [Fact]
+    public async Task ListAsync_WithLabels_LabelsReturned() {
+        await _store.UpsertAsync(MakeDevice(mac: "aa:bb:cc:11:22:40", label: "Device A"), CancellationToken.None);
+        await _store.UpsertAsync(MakeDevice(mac: "aa:bb:cc:11:22:41", label: null), CancellationToken.None);
+
+        var devices = await _store.ListAsync(new LanDeviceQuery(SeenSince: null, Limit: 0), CancellationToken.None);
+
+        Assert.Equal(2, devices.Count);
+        var a = devices.Single(d => d.Mac == "aa:bb:cc:11:22:40");
+        var b = devices.Single(d => d.Mac == "aa:bb:cc:11:22:41");
+        Assert.Equal("Device A", a.Label);
+        Assert.Null(b.Label);
+    }
+
     private static LanDevice MakeDevice(
         string mac = "aa:bb:cc:11:22:33",
         string ip = "192.168.1.10",
         string? vendor = "AcmeCorp",
         string? hostname = "router.lan",
         DateTimeOffset? firstSeen = null,
-        DateTimeOffset? lastSeen = null
+        DateTimeOffset? lastSeen = null,
+        string? label = null
     ) => new LanDevice(
         Mac: mac,
         Ip: ip,
         Vendor: vendor,
         Hostname: hostname,
         FirstSeen: firstSeen ?? BaseTime,
-        LastSeen: lastSeen ?? BaseTime
+        LastSeen: lastSeen ?? BaseTime,
+        Label: label
     );
 }

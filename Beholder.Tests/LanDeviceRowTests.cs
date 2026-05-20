@@ -14,7 +14,8 @@ public class LanDeviceRowTests {
         string vendor = "Acme Inc.",
         string hostname = "test-host",
         DateTimeOffset? firstSeen = null,
-        DateTimeOffset? lastSeen = null
+        DateTimeOffset? lastSeen = null,
+        string label = ""
     ) {
         var first = firstSeen ?? FixedTimestamp.AddDays(-1);
         var last = lastSeen ?? FixedTimestamp;
@@ -25,6 +26,7 @@ public class LanDeviceRowTests {
             Hostname = hostname,
             FirstSeenUnixNs = first.ToUnixTimeMilliseconds() * 1_000_000L,
             LastSeenUnixNs = last.ToUnixTimeMilliseconds() * 1_000_000L,
+            Label = label,
         };
     }
 
@@ -132,5 +134,68 @@ public class LanDeviceRowTests {
 
         Assert.Equal(FixedTimestamp, row.LastSeen);
         Assert.False(row.IsStale);  // refreshed within the threshold
+    }
+
+    // ---- Phase 9.5: Label + LabelOrFallback ----
+
+    [Fact]
+    public void FromProto_WithLabel_PreservesLabel() {
+        var proto = MakeProto(label: "Living Room TV");
+        var clock = new FakeTimeProvider(FixedTimestamp);
+
+        var row = LanDeviceRow.FromProto(proto, clock);
+
+        Assert.Equal("Living Room TV", row.Label);
+        Assert.True(row.HasLabel);
+    }
+
+    [Fact]
+    public void FromProto_EmptyLabel_LabelIsNull() {
+        var proto = MakeProto(label: "");  // proto3 default — wire shape for "no label"
+        var clock = new FakeTimeProvider(FixedTimestamp);
+
+        var row = LanDeviceRow.FromProto(proto, clock);
+
+        Assert.Null(row.Label);
+        Assert.False(row.HasLabel);
+    }
+
+    [Fact]
+    public void LabelOrFallback_LabelSet_UsesLabel() {
+        var proto = MakeProto(hostname: "auto-host", label: "My Custom Name");
+        var row = LanDeviceRow.FromProto(proto, new FakeTimeProvider(FixedTimestamp));
+
+        Assert.Equal("My Custom Name", row.LabelOrFallback);
+    }
+
+    [Fact]
+    public void LabelOrFallback_NoLabelButHostname_UsesHostname() {
+        var proto = MakeProto(hostname: "auto-host", label: "");
+        var row = LanDeviceRow.FromProto(proto, new FakeTimeProvider(FixedTimestamp));
+
+        Assert.Equal("auto-host", row.LabelOrFallback);
+    }
+
+    [Fact]
+    public void LabelOrFallback_NoLabelNoHostname_UsesIp() {
+        var proto = MakeProto(ip: "10.0.0.5", hostname: "", label: "");
+        var row = LanDeviceRow.FromProto(proto, new FakeTimeProvider(FixedTimestamp));
+
+        Assert.Equal("10.0.0.5", row.LabelOrFallback);
+    }
+
+    [Fact]
+    public void LabelChanged_RaisesPropertyChangedForLabelOrFallback() {
+        var proto = MakeProto(hostname: "auto-host", label: "");
+        var row = LanDeviceRow.FromProto(proto, new FakeTimeProvider(FixedTimestamp));
+        var fallbackChanges = 0;
+        row.PropertyChanged += (_, e) => {
+            if (e.PropertyName == nameof(LanDeviceRow.LabelOrFallback)) fallbackChanges++;
+        };
+
+        row.Label = "Renamed";
+
+        Assert.True(fallbackChanges > 0);
+        Assert.Equal("Renamed", row.LabelOrFallback);
     }
 }

@@ -149,7 +149,8 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
             Vendor: null,
             Hostname: null,
             FirstSeen: FixedTimestamp.AddDays(-1),
-            LastSeen: FixedTimestamp));
+            LastSeen: FixedTimestamp,
+            Label: null));
 
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
         var response = await _service.ListLanDevices(new Local.ListLanDevicesRequest(), context);
@@ -188,7 +189,7 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
 
     private static LanDevice MakeDevice(string mac, string ip, DateTimeOffset lastSeen) =>
         new(Mac: mac, Ip: ip, Vendor: "TestVendor", Hostname: "test-host",
-            FirstSeen: lastSeen.AddDays(-1), LastSeen: lastSeen);
+            FirstSeen: lastSeen.AddDays(-1), LastSeen: lastSeen, Label: null);
 
     private sealed class ThrowingLanDeviceStore : ILanDeviceStore {
         public Task<LanDevice?> GetByMacAsync(string mac, CancellationToken cancellationToken) =>
@@ -198,6 +199,8 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
         public Task<IReadOnlyList<LanDevice>> ListAsync(LanDeviceQuery query, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("simulated store failure");
         public Task UpsertAsync(LanDevice device, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("simulated store failure");
+        public Task SetLabelAsync(string mac, string? label, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("simulated store failure");
     }
 }

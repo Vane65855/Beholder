@@ -17,9 +17,10 @@ internal sealed class SqliteLanDeviceStore : ILanDeviceStore {
     private const int ColHostname = 3;
     private const int ColFirstSeen = 4;
     private const int ColLastSeen = 5;
+    private const int ColLabel = 6;
 
     private const string SelectColumns =
-        "mac, ip, vendor, hostname, first_seen_unix_ns, last_seen_unix_ns";
+        "mac, ip, vendor, hostname, first_seen_unix_ns, last_seen_unix_ns, label";
 
     private readonly ConnectionFactory _connectionFactory;
 
@@ -102,11 +103,16 @@ internal sealed class SqliteLanDeviceStore : ILanDeviceStore {
         // first_seen_unix_ns is deliberately omitted from DO UPDATE SET so the
         // original observation timestamp is preserved across re-observations.
         // Mirrors the SqliteFirewallRuleStore upsert's created_at handling.
+        //
+        // Phase 9.5: `label` is likewise omitted from DO UPDATE SET. Scanner
+        // re-observations carry null for the label (the scanner has no notion
+        // of user labels), so the conflict path must leave the existing label
+        // alone. Labels are set via SetLabelAsync, not via the upsert path.
         command.CommandText = """
             INSERT INTO lan_device
-                (mac, ip, vendor, hostname, first_seen_unix_ns, last_seen_unix_ns)
+                (mac, ip, vendor, hostname, first_seen_unix_ns, last_seen_unix_ns, label)
             VALUES
-                ($mac, $ip, $vendor, $hostname, $firstSeen, $lastSeen)
+                ($mac, $ip, $vendor, $hostname, $firstSeen, $lastSeen, $label)
             ON CONFLICT(mac) DO UPDATE SET
                 ip                = excluded.ip,
                 vendor            = excluded.vendor,
@@ -119,7 +125,29 @@ internal sealed class SqliteLanDeviceStore : ILanDeviceStore {
         command.Parameters.AddWithValue("$hostname", (object?)device.Hostname ?? DBNull.Value);
         command.Parameters.AddWithValue("$firstSeen", ToUnixNanoseconds(device.FirstSeen));
         command.Parameters.AddWithValue("$lastSeen", ToUnixNanoseconds(device.LastSeen));
+        command.Parameters.AddWithValue("$label", (object?)device.Label ?? DBNull.Value);
 
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task SetLabelAsync(string mac, string? label, CancellationToken cancellationToken) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(mac);
+        // Treat whitespace-only labels as "clear" — saves a noisy stored value
+        // and lets the UI's empty TextBox round-trip cleanly to "no label."
+        var normalized = string.IsNullOrWhiteSpace(label) ? null : label;
+
+        using var connection = _connectionFactory.CreateConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE lan_device
+            SET label = $label
+            WHERE mac = $mac;
+            """;
+        command.Parameters.AddWithValue("$mac", mac);
+        command.Parameters.AddWithValue("$label", (object?)normalized ?? DBNull.Value);
+
+        // ExecuteNonQueryAsync returns 0 when the MAC isn't in the table — that's
+        // a no-op per the interface contract (caller can check via GetByMacAsync).
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -130,7 +158,8 @@ internal sealed class SqliteLanDeviceStore : ILanDeviceStore {
             Vendor: reader.IsDBNull(ColVendor) ? null : reader.GetString(ColVendor),
             Hostname: reader.IsDBNull(ColHostname) ? null : reader.GetString(ColHostname),
             FirstSeen: FromUnixNanoseconds(reader.GetInt64(ColFirstSeen)),
-            LastSeen: FromUnixNanoseconds(reader.GetInt64(ColLastSeen))
+            LastSeen: FromUnixNanoseconds(reader.GetInt64(ColLastSeen)),
+            Label: reader.IsDBNull(ColLabel) ? null : reader.GetString(ColLabel)
         );
     }
 

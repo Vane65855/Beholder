@@ -112,6 +112,30 @@ internal sealed partial class ScannerTabViewModel : ViewModelBase, IDisposable {
     [ObservableProperty]
     private bool _scanStatusIsError;
 
+    /// <summary>
+    /// Phase 9.5: true while the user is editing the selected device's
+    /// custom label. Toggles the detail-pane's CUSTOM NAME row between
+    /// read mode (label-or-placeholder + RENAME button) and edit mode
+    /// (TextBox + SAVE + CANCEL buttons).
+    /// </summary>
+    [ObservableProperty]
+    private bool _isEditingLabel;
+
+    /// <summary>
+    /// Backing value for the label-edit <c>TextBox</c>. Bound TwoWay so the
+    /// user's keystrokes flow into the VM and the
+    /// <see cref="SaveLabelCommand"/> reads the final value here. Reset to
+    /// the selected device's current label on each <see cref="BeginEditLabelCommand"/>.
+    /// </summary>
+    [ObservableProperty]
+    private string _labelEditText = string.Empty;
+
+    /// <summary>True while the <see cref="SaveLabelCommand"/> RPC is in
+    /// flight. Disables the SAVE + CANCEL buttons so the user can't double-
+    /// fire the call.</summary>
+    [ObservableProperty]
+    private bool _isSavingLabel;
+
     public ObservableCollection<LanDeviceRow> Devices { get; } = new();
 
     public bool HasDevices => Devices.Count > 0;
@@ -138,6 +162,7 @@ internal sealed partial class ScannerTabViewModel : ViewModelBase, IDisposable {
 
         _streamSubscriber.LanDeviceFirstSeenReceived += OnLanDeviceFirstSeen;
         _streamSubscriber.LanDeviceMacChangedReceived += OnLanDeviceMacChanged;
+        _streamSubscriber.LanDeviceLabelChangedReceived += OnLanDeviceLabelChanged;
         Devices.CollectionChanged += (_, _) => {
             OnPropertyChanged(nameof(HasDevices));
             OnPropertyChanged(nameof(DeviceCountLabel));
@@ -151,6 +176,7 @@ internal sealed partial class ScannerTabViewModel : ViewModelBase, IDisposable {
         _disposed = true;
         _streamSubscriber.LanDeviceFirstSeenReceived -= OnLanDeviceFirstSeen;
         _streamSubscriber.LanDeviceMacChangedReceived -= OnLanDeviceMacChanged;
+        _streamSubscriber.LanDeviceLabelChangedReceived -= OnLanDeviceLabelChanged;
         _activationCts?.Cancel();
         _activationCts?.Dispose();
         _scanStatusCts?.Cancel();
@@ -235,6 +261,93 @@ internal sealed partial class ScannerTabViewModel : ViewModelBase, IDisposable {
     /// </summary>
     [RelayCommand]
     private void DismissScanStatus() => ClearScanStatus();
+
+    // ---- Phase 9.5: label-edit state machine ----
+
+    /// <summary>
+    /// User clicked RENAME on the detail-pane's CUSTOM NAME row. Seeds the
+    /// edit text from the currently-selected device's label (empty string
+    /// when no label set) and flips into edit mode. No-op when no device is
+    /// selected (defensive — the button is `IsVisible=ShowDetailPane` so
+    /// this shouldn't trigger from the UI anyway).
+    /// </summary>
+    [RelayCommand]
+    private void BeginEditLabel() {
+        if (SelectedDevice is null) return;
+        LabelEditText = SelectedDevice.Label ?? string.Empty;
+        IsEditingLabel = true;
+        // Clear any stale scan-status banner — the user is moving on to a
+        // new interaction and an old "Scan complete: 4 devices" message is
+        // a stale signal that competes with the rename's confirmation
+        // message space.
+        ClearScanStatus();
+    }
+
+    /// <summary>
+    /// User clicked CANCEL during edit. Returns to read mode and discards
+    /// the staged text. Idempotent — re-cancelling is a no-op.
+    /// </summary>
+    [RelayCommand]
+    private void CancelEditLabel() {
+        IsEditingLabel = false;
+        LabelEditText = string.Empty;
+    }
+
+    /// <summary>
+    /// User clicked SAVE during edit. Calls the Phase 9.3 RPC + surfaces
+    /// the structured response. Re-entry guarded by <see cref="IsSavingLabel"/>
+    /// so a double-click (or fast Enter-key press) doesn't queue duplicate
+    /// RPCs. On success, the broadcast leg refreshes the row naturally; we
+    /// additionally clear the editing state so the read-mode pill reappears.
+    /// On failure, surface the message via the existing scan-status banner
+    /// (Severity=Danger) — labels are infrequent enough not to need their
+    /// own banner.
+    /// </summary>
+    [RelayCommand]
+    private async Task SaveLabel() {
+        if (SelectedDevice is null || IsSavingLabel) return;
+        IsSavingLabel = true;
+        ClearScanStatus();
+        try {
+            var request = new SetLanDeviceLabelRequest {
+                Mac = SelectedDevice.Mac,
+                Label = LabelEditText.Trim(),
+            };
+            var response = await _daemonClient.SetLanDeviceLabelAsync(request, CancellationToken.None);
+            if (response.Success) {
+                // Optimistic: flip the row's label locally so the master-list
+                // primary text updates instantly. The broadcast stream will
+                // also fire and re-confirm — idempotent via Mac-keyed lookup.
+                SelectedDevice.Label = string.IsNullOrWhiteSpace(LabelEditText) ? null : LabelEditText.Trim();
+                IsEditingLabel = false;
+                LabelEditText = string.Empty;
+            } else {
+                SetScanStatus(response.Message, isError: true);
+            }
+        } catch (RpcException ex) {
+            SetScanStatus($"Failed to set label: {ex.Status.Detail}", isError: true);
+        } catch (Exception ex) {
+            SetScanStatus($"Failed to set label: {ex.Message}", isError: true);
+        } finally {
+            IsSavingLabel = false;
+        }
+    }
+
+    /// <summary>
+    /// Live broadcast handler: the daemon's <c>LanDeviceLabelChanged</c>
+    /// stream variant. Dispatcher-marshaled. Finds the row by MAC and
+    /// refreshes its label. If the changed device IS the currently-selected
+    /// device, the detail pane's binding sources (which target
+    /// <see cref="SelectedDevice"/>) re-read via the row's observable
+    /// <see cref="LanDeviceRow.Label"/> setter.
+    /// </summary>
+    private void OnLanDeviceLabelChanged(LanDeviceLabelChangedEvent ev) =>
+        _dispatcher.Post(() => {
+            if (ev.Device is null) return;
+            if (_rowByMac.TryGetValue(ev.Device.Mac, out var existing)) {
+                existing.RefreshFromProto(ev.Device, _timeProvider);
+            }
+        });
 
     /// <summary>
     /// Dismiss the danger-severity error banner triggered by a failed
