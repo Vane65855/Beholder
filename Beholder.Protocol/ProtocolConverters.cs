@@ -116,13 +116,14 @@ internal static class ProtocolConverters {
             Hostname = source.Hostname ?? "",
             FirstSeenUnixNs = source.FirstSeen.ToUnixTimeNanoseconds(),
             LastSeenUnixNs = source.LastSeen.ToUnixTimeNanoseconds(),
+            Label = source.Label ?? "",
         };
     }
 
     /// <summary>
     /// Maps a wire LAN device to its domain equivalent. Empty-string
-    /// <c>vendor</c> / <c>hostname</c> become null per the inverse of
-    /// <see cref="ToProto(Core.LanDevice)"/>.
+    /// <c>vendor</c> / <c>hostname</c> / <c>label</c> become null per the
+    /// inverse of <see cref="ToProto(Core.LanDevice)"/>.
     /// </summary>
     public static Core.LanDevice ToDomain(this Local.LanDevice source) {
         ArgumentNullException.ThrowIfNull(source);
@@ -132,7 +133,8 @@ internal static class ProtocolConverters {
             Vendor: string.IsNullOrEmpty(source.Vendor) ? null : source.Vendor,
             Hostname: string.IsNullOrEmpty(source.Hostname) ? null : source.Hostname,
             FirstSeen: source.FirstSeenUnixNs.FromUnixTimeNanoseconds(),
-            LastSeen: source.LastSeenUnixNs.FromUnixTimeNanoseconds());
+            LastSeen: source.LastSeenUnixNs.FromUnixTimeNanoseconds(),
+            Label: string.IsNullOrEmpty(source.Label) ? null : source.Label);
     }
 
     /// <summary>

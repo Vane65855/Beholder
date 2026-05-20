@@ -190,6 +190,16 @@ PeriodicTimer (every ScanIntervalSeconds, default 300)
                 → fallback NetbiosHostnameProbe (RFC 1002): UDP NBSTAT
                   unicast to <ip>:137; parser extracts the workstation
                   name (suffix 0x00, unique-type). 1 s per-probe timeout.
+                → fallback RouterDnsHostnameProbe (Phase 9.5): OS reverse-
+                  DNS (Dns.GetHostEntryAsync via the existing
+                  IReverseDnsResolver from ADR 005). On most home networks
+                  the configured DNS server is the router; many routers
+                  mirror their DHCP table into LAN DNS, so this picks up
+                  DHCP-option-12 hostnames (Samsung's "Send Device Name
+                  to Network", iPhone hostnames, etc.) that mDNS / NetBIOS
+                  / DNS-SD miss. 2 s per-probe timeout. Hit rate is
+                  router-dependent (some publish, some don't); silent miss
+                  on routers that don't.
             → 60 s per-ladder deadline mirrors ArpScanProbe; first non-null
               wins per IP.
             → returns Dictionary<ip, hostname>
@@ -295,14 +305,17 @@ CREATE TABLE lan_device (
     mac                TEXT    PRIMARY KEY,    -- lowercase hex with colons (aa:bb:cc:dd:ee:ff)
     ip                 TEXT    NOT NULL,
     vendor             TEXT    NULL,           -- NULL if MAC's OUI prefix not in IEEE table
-    hostname           TEXT    NULL,           -- NULL if mDNS/NetBIOS/PTR ladder all failed
+    hostname           TEXT    NULL,           -- NULL if mDNS/NetBIOS/RouterDNS ladder all failed
     first_seen_unix_ns INTEGER NOT NULL,
-    last_seen_unix_ns  INTEGER NOT NULL
+    last_seen_unix_ns  INTEGER NOT NULL,
+    label              TEXT    NULL            -- Phase 9.5: user-supplied cosmetic name
 );
 -- Indexes: (ip), (last_seen_unix_ns)
 ```
 
 Identity is keyed on `mac` per [ADR 009](decisions/009-scanner-as-lan-device-discovery.md). IP is mutable (DHCP renewals); the scanner uses `idx_lan_device_ip` to find the device currently associated with a given IP, compares its MAC to the just-observed MAC, and writes a `LanDeviceMacChanged` chain event when they differ (potential ARP-spoof signal in the simplest case, more commonly just DHCP reassignment). `idx_lan_device_last_seen` supports the `ListLanDevices` RPC's `seen_since` filter.
+
+The `label` column (Phase 9.5) is user-supplied cosmetic UI state — set via the Scanner tab's RENAME button + the `SetLanDeviceLabel` RPC. It is deliberately **NOT chain-audited** (same category as Alert read-state) and is preserved across scanner re-observations of the same MAC: `SqliteLanDeviceStore.UpsertAsync`'s `ON CONFLICT(mac) DO UPDATE SET` clause omits the `label` column, so the user's label survives across re-discovery passes that carry `Label = null`. Migration to existing DBs is idempotent via `DatabaseInitializer.MigrateLanDeviceFor95` using the Phase 7.5 `AddColumnIfMissing` pattern.
 
 ### traffic_buckets_10s (first tier of rollup cascade)
 
@@ -453,9 +466,10 @@ The UI is a gRPC client. The daemon is a gRPC server. The primary RPC is a serve
 
 ```protobuf
 service BeholderLocal {
-    // Live streaming — DaemonEvent has 5 oneof variants:
+    // Live streaming — DaemonEvent has 6 oneof variants:
     //   CounterBatch / FirewallRuleChange / Alert (Phases 2-7)
     //   LanDeviceFirstSeenEvent / LanDeviceMacChangedEvent (Phase 9.3)
+    //   LanDeviceLabelChangedEvent (Phase 9.5)
     rpc Subscribe (SubscribeRequest) returns (stream DaemonEvent);
     // Current state
     rpc GetSnapshot (GetSnapshotRequest) returns (GetSnapshotResponse);
@@ -479,6 +493,8 @@ service BeholderLocal {
     // LAN scanner (Phase 9.3)
     rpc ListLanDevices (ListLanDevicesRequest) returns (ListLanDevicesResponse);
     rpc TriggerScan (TriggerScanRequest) returns (TriggerScanResponse);
+    // LAN scanner — manual labels (Phase 9.5)
+    rpc SetLanDeviceLabel (SetLanDeviceLabelRequest) returns (SetLanDeviceLabelResponse);
 }
 ```
 

@@ -286,7 +286,8 @@ public class ProtocolConvertersTests {
             Vendor: "TestVendor",
             Hostname: "test-host",
             FirstSeen: FixedTimestamp,
-            LastSeen: SecondTimestamp);
+            LastSeen: SecondTimestamp,
+            Label: null);
 
         var proto = source.ToProto();
 
@@ -306,17 +307,19 @@ public class ProtocolConvertersTests {
             Vendor: null,
             Hostname: null,
             FirstSeen: FixedTimestamp,
-            LastSeen: FixedTimestamp);
+            LastSeen: FixedTimestamp,
+            Label: null);
 
         var proto = source.ToProto();
 
         Assert.Equal("", proto.Vendor);
         Assert.Equal("", proto.Hostname);
+        Assert.Equal("", proto.Label);
     }
 
     [Fact]
     public void LanDevice_RoundTrip_PreservesNullSemantics() {
-        // Core (null Vendor/Hostname) → proto ("" Vendor/Hostname) → Core
+        // Core (null Vendor/Hostname/Label) → proto ("" Vendor/Hostname/Label) → Core
         // should restore the nulls. Confirms the empty-string sentinel is
         // bidirectional, not lossy.
         var source = new Core.LanDevice(
@@ -325,7 +328,8 @@ public class ProtocolConvertersTests {
             Vendor: null,
             Hostname: null,
             FirstSeen: FixedTimestamp,
-            LastSeen: SecondTimestamp);
+            LastSeen: SecondTimestamp,
+            Label: null);
 
         var roundTripped = source.ToProto().ToDomain();
 
@@ -333,6 +337,7 @@ public class ProtocolConvertersTests {
         Assert.Equal(source.Ip, roundTripped.Ip);
         Assert.Null(roundTripped.Vendor);
         Assert.Null(roundTripped.Hostname);
+        Assert.Null(roundTripped.Label);
         Assert.Equal(source.FirstSeen, roundTripped.FirstSeen);
         Assert.Equal(source.LastSeen, roundTripped.LastSeen);
     }
@@ -345,7 +350,8 @@ public class ProtocolConvertersTests {
             Vendor: "Acme Corp",
             Hostname: "living-room-tv",
             FirstSeen: FixedTimestamp,
-            LastSeen: SecondTimestamp);
+            LastSeen: SecondTimestamp,
+            Label: "Living Room TV");
 
         var roundTripped = source.ToProto().ToDomain();
 

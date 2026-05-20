@@ -78,6 +78,13 @@ public class ScannerTabViewModelTests {
         del?.Invoke(ev);
     }
 
+    private static void RaiseLanDeviceLabelChanged(DaemonStreamSubscriber subscriber, LanDeviceLabelChangedEvent ev) {
+        var eventField = typeof(DaemonStreamSubscriber)
+            .GetField("LanDeviceLabelChangedReceived", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var del = (Action<LanDeviceLabelChangedEvent>?)eventField.GetValue(subscriber);
+        del?.Invoke(ev);
+    }
+
     // ---- Constructor null-guards ----
 
     [Fact]
@@ -496,14 +503,148 @@ public class ScannerTabViewModelTests {
             "LanDeviceFirstSeenReceived", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var macChangedField = typeof(DaemonStreamSubscriber).GetField(
             "LanDeviceMacChangedReceived", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var labelChangedField = typeof(DaemonStreamSubscriber).GetField(
+            "LanDeviceLabelChangedReceived", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var firstSeenBefore = ((Delegate?)firstSeenField.GetValue(subscriber))?.GetInvocationList().Length ?? 0;
         var macChangedBefore = ((Delegate?)macChangedField.GetValue(subscriber))?.GetInvocationList().Length ?? 0;
+        var labelChangedBefore = ((Delegate?)labelChangedField.GetValue(subscriber))?.GetInvocationList().Length ?? 0;
 
         vm.Dispose();
 
         var firstSeenAfter = ((Delegate?)firstSeenField.GetValue(subscriber))?.GetInvocationList().Length ?? 0;
         var macChangedAfter = ((Delegate?)macChangedField.GetValue(subscriber))?.GetInvocationList().Length ?? 0;
+        var labelChangedAfter = ((Delegate?)labelChangedField.GetValue(subscriber))?.GetInvocationList().Length ?? 0;
         Assert.Equal(firstSeenBefore - 1, firstSeenAfter);
         Assert.Equal(macChangedBefore - 1, macChangedAfter);
+        Assert.Equal(labelChangedBefore - 1, labelChangedAfter);
+    }
+
+    // ---- Phase 9.5: label-edit state machine + commands ----
+
+    [Fact]
+    public async Task BeginEditLabelCommand_NoSelection_NoOps() {
+        var (vm, _, _, _) = CreateVm();
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        // Empty list → SelectedDevice is null.
+        Assert.Null(vm.SelectedDevice);
+
+        vm.BeginEditLabelCommand.Execute(null);
+
+        Assert.False(vm.IsEditingLabel);
+    }
+
+    [Fact]
+    public async Task BeginEditLabelCommand_WithSelection_FlipsIsEditingTrueAndSeedsTextBox() {
+        var response = ListResponseWith(MakeDevice("aa:bb:cc:dd:ee:01"));
+        var (vm, _, _, _) = CreateVm(response);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        // Seed the row's label directly to simulate a pre-existing label.
+        vm.Devices[0].Label = "Pre-existing";
+
+        vm.BeginEditLabelCommand.Execute(null);
+
+        Assert.True(vm.IsEditingLabel);
+        Assert.Equal("Pre-existing", vm.LabelEditText);
+    }
+
+    [Fact]
+    public async Task BeginEditLabelCommand_WithNullLabel_SeedsEmptyTextBox() {
+        var response = ListResponseWith(MakeDevice("aa:bb:cc:dd:ee:02"));
+        var (vm, _, _, _) = CreateVm(response);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        // No label set on the seeded device.
+
+        vm.BeginEditLabelCommand.Execute(null);
+
+        Assert.True(vm.IsEditingLabel);
+        Assert.Equal(string.Empty, vm.LabelEditText);
+    }
+
+    [Fact]
+    public async Task CancelEditLabelCommand_ResetsState() {
+        var response = ListResponseWith(MakeDevice("aa:bb:cc:dd:ee:03"));
+        var (vm, _, _, _) = CreateVm(response);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        vm.BeginEditLabelCommand.Execute(null);
+        vm.LabelEditText = "Some typing in progress";
+
+        vm.CancelEditLabelCommand.Execute(null);
+
+        Assert.False(vm.IsEditingLabel);
+        Assert.Equal(string.Empty, vm.LabelEditText);
+    }
+
+    [Fact]
+    public async Task SaveLabelCommand_Success_ClearsEditingStateAndCallsRpc() {
+        var response = ListResponseWith(MakeDevice("aa:bb:cc:dd:ee:04"));
+        var (vm, client, _, _) = CreateVm(response);
+        client.SetLanDeviceLabelResponder = _ => new SetLanDeviceLabelResponse {
+            Success = true,
+            Message = "Label updated to \"Office Printer\".",
+        };
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        vm.BeginEditLabelCommand.Execute(null);
+        vm.LabelEditText = "Office Printer";
+
+        await vm.SaveLabelCommand.ExecuteAsync(null);
+
+        Assert.False(vm.IsEditingLabel);
+        Assert.False(vm.IsSavingLabel);
+        Assert.Single(client.SetLanDeviceLabelCalls);
+        Assert.Equal("aa:bb:cc:dd:ee:04", client.SetLanDeviceLabelCalls[0].Mac);
+        Assert.Equal("Office Printer", client.SetLanDeviceLabelCalls[0].Label);
+        // Optimistic update: SelectedDevice.Label flipped locally.
+        Assert.Equal("Office Printer", vm.SelectedDevice?.Label);
+    }
+
+    [Fact]
+    public async Task SaveLabelCommand_FailureResponse_StaysInEditModeAndShowsErrorBanner() {
+        var response = ListResponseWith(MakeDevice("aa:bb:cc:dd:ee:05"));
+        var (vm, client, _, _) = CreateVm(response);
+        client.SetLanDeviceLabelResponder = _ => new SetLanDeviceLabelResponse {
+            Success = false,
+            Message = "Label exceeds the 100-character limit (got 150).",
+        };
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        vm.BeginEditLabelCommand.Execute(null);
+        vm.LabelEditText = "A".PadRight(150, 'a');
+
+        await vm.SaveLabelCommand.ExecuteAsync(null);
+
+        // User stays in edit mode so they can shorten the label and retry.
+        Assert.True(vm.IsEditingLabel);
+        Assert.True(vm.HasScanStatusMessage);
+        Assert.True(vm.ScanStatusIsError);
+        Assert.Contains("100-character", vm.ScanStatusMessage);
+    }
+
+    [Fact]
+    public async Task SaveLabelCommand_RpcThrows_ShowsErrorBanner() {
+        var response = ListResponseWith(MakeDevice("aa:bb:cc:dd:ee:06"));
+        var (vm, client, _, _) = CreateVm(response);
+        client.SetLanDeviceLabelException = new InvalidOperationException("network gone");
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        vm.BeginEditLabelCommand.Execute(null);
+        vm.LabelEditText = "doomed";
+
+        await vm.SaveLabelCommand.ExecuteAsync(null);
+
+        Assert.True(vm.HasScanStatusMessage);
+        Assert.True(vm.ScanStatusIsError);
+        Assert.Contains("network gone", vm.ScanStatusMessage);
+        Assert.False(vm.IsSavingLabel);
+    }
+
+    [Fact]
+    public async Task LanDeviceLabelChanged_KnownMac_UpdatesRowLabel() {
+        var response = ListResponseWith(MakeDevice("aa:bb:cc:dd:ee:07"));
+        var (vm, _, subscriber, _) = CreateVm(response);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        var protoWithLabel = MakeDevice("aa:bb:cc:dd:ee:07");
+        protoWithLabel.Label = "Renamed By Other UI";
+        RaiseLanDeviceLabelChanged(subscriber, new LanDeviceLabelChangedEvent { Device = protoWithLabel });
+
+        Assert.Equal("Renamed By Other UI", vm.Devices[0].Label);
     }
 }

@@ -23,6 +23,11 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     private const int RecentAlertLimit = 100;
     private const int DefaultLanDeviceListLimit = 200;
     private const int MaxLanDeviceListLimit = 1000;
+    /// <summary>Phase 9.5: maximum user-supplied device label length. 100
+    /// chars matches GlassWire's label UX + leaves headroom for descriptive
+    /// names ("Kitchen — Living Room TV (Samsung)") without enabling
+    /// pathological store / wire sizes.</summary>
+    private const int MaxLanDeviceLabelLength = 100;
 
     private readonly BroadcastService _broadcaster;
     private readonly FlowEventPipeline _pipeline;
@@ -579,6 +584,75 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
                 Success = false,
                 Message = $"Scan failed: {ex.Message}",
                 DevicesObserved = 0,
+            };
+        }
+    }
+
+    /// <summary>
+    /// Phase 9.5: sets or clears the user-supplied cosmetic label for a LAN
+    /// device. Persists via <see cref="ILanDeviceStore.SetLabelAsync"/> and
+    /// broadcasts a <c>LanDeviceLabelChangedEvent</c> so other subscribed
+    /// UIs (if any) refresh in real time. Recoverable failures (no such
+    /// MAC, label too long, store throws) surface as <c>success=false</c>
+    /// with a human-readable message; hard validation errors (empty MAC)
+    /// throw <see cref="StatusCode.InvalidArgument"/>; cancellation
+    /// propagates. Labels are NOT chain-audited — cosmetic UI state only.
+    /// </summary>
+    public override async Task<Local.SetLanDeviceLabelResponse> SetLanDeviceLabel(
+        Local.SetLanDeviceLabelRequest request, ServerCallContext context
+    ) {
+        if (string.IsNullOrWhiteSpace(request.Mac)) {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "mac is required"));
+        }
+        // Treat empty / whitespace-only label as "clear the existing label".
+        // The store also normalises this, but normalising here too lets us
+        // surface a meaningful "cleared" message in the response.
+        var normalizedLabel = string.IsNullOrWhiteSpace(request.Label) ? null : request.Label;
+        if (normalizedLabel is not null && normalizedLabel.Length > MaxLanDeviceLabelLength) {
+            return new Local.SetLanDeviceLabelResponse {
+                Success = false,
+                Message = $"Label exceeds the {MaxLanDeviceLabelLength}-character limit "
+                          + $"(got {normalizedLabel.Length}).",
+            };
+        }
+
+        try {
+            await _lanDeviceStore
+                .SetLabelAsync(request.Mac, normalizedLabel, context.CancellationToken)
+                .ConfigureAwait(false);
+            // Re-fetch so we have a snapshot to broadcast and to confirm the
+            // device actually exists (SetLabelAsync is a silent no-op on
+            // unknown MAC per the interface contract).
+            var refreshed = await _lanDeviceStore
+                .GetByMacAsync(request.Mac, context.CancellationToken)
+                .ConfigureAwait(false);
+            if (refreshed is null) {
+                return new Local.SetLanDeviceLabelResponse {
+                    Success = false,
+                    Message = $"Device not found: {request.Mac}",
+                };
+            }
+            try {
+                _broadcaster.BroadcastLanDeviceLabelChanged(refreshed);
+            } catch (Exception ex) {
+                _logger.LogError(ex, "SetLanDeviceLabel broadcast failed for {Mac}", request.Mac);
+                // Broadcast failure does NOT fail the call — the label is
+                // already persisted. The UI that initiated the change has the
+                // optimistic update; other UIs will catch up on next refresh.
+            }
+            return new Local.SetLanDeviceLabelResponse {
+                Success = true,
+                Message = normalizedLabel is null
+                    ? "Label cleared."
+                    : $"Label updated to \"{normalizedLabel}\".",
+            };
+        } catch (OperationCanceledException) {
+            throw;
+        } catch (Exception ex) {
+            _logger.LogError(ex, "SetLanDeviceLabel failed for {Mac}", request.Mac);
+            return new Local.SetLanDeviceLabelResponse {
+                Success = false,
+                Message = $"Failed to set label: {ex.Message}",
             };
         }
     }

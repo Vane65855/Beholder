@@ -240,13 +240,21 @@ internal sealed class LanScannerService : IHostedService, IAsyncDisposable {
                 }
             }
 
+            // Label is deliberately not threaded through the scanner — labels
+            // are user-supplied UI state managed via SetLabelAsync, not by the
+            // discovery pass. SqliteLanDeviceStore.UpsertAsync's ON CONFLICT
+            // clause omits the label column so any existing user label is
+            // preserved across re-observations. For the broadcast leg below,
+            // include the existing label so subscribed UIs render the
+            // already-labelled name on FirstSeen → live-list refresh.
             var device = new LanDevice(
                 Mac: obs.Mac,
                 Ip: obs.Ip,
                 Vendor: vendor,
                 Hostname: obs.Hostname,
                 FirstSeen: existingByMac?.FirstSeen ?? obs.ObservedAt,
-                LastSeen: obs.ObservedAt);
+                LastSeen: obs.ObservedAt,
+                Label: existingByMac?.Label);
             await _store.UpsertAsync(device, cancellationToken).ConfigureAwait(false);
 
             // Mirror the chain-write leg with a best-effort broadcast leg —

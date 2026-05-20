@@ -33,6 +33,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? MarkAlertReadException { get; set; }
     public Exception? ListLanDevicesException { get; set; }
     public Exception? TriggerScanException { get; set; }
+    public Exception? SetLanDeviceLabelException { get; set; }
 
     // Optional canned snapshot/response bodies so tests can drive real data
     // through the seeding path. Existing callers that don't set these get the
@@ -72,6 +73,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     /// </summary>
     public Func<ListLanDevicesRequest, CancellationToken, Task<ListLanDevicesResponse>>? AsyncListLanDevicesResponder { get; set; }
     public Func<TriggerScanRequest, TriggerScanResponse>? TriggerScanResponder { get; set; }
+    public Func<SetLanDeviceLabelRequest, SetLanDeviceLabelResponse>? SetLanDeviceLabelResponder { get; set; }
 
     // Captured invocations for assertions.
     public List<ApplyFirewallRuleRequest> ApplyFirewallRuleCalls { get; } = new();
@@ -80,6 +82,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public List<MarkAlertReadRequest> MarkAlertReadCalls { get; } = new();
     public List<ListLanDevicesRequest> ListLanDevicesCalls { get; } = new();
     public List<TriggerScanRequest> TriggerScanCalls { get; } = new();
+    public List<SetLanDeviceLabelRequest> SetLanDeviceLabelCalls { get; } = new();
     // Responder variant for tests that need the CancellationToken the VM
     // passed (e.g., cancellation-plumbing tests). Takes precedence over
     // AggregateTimelineResponse when set.
@@ -218,6 +221,14 @@ internal sealed class FakeDaemonClient : IDaemonClient {
         TriggerScanCalls.Add(request);
         if (TriggerScanException is not null) throw TriggerScanException;
         return Task.FromResult(TriggerScanResponder?.Invoke(request) ?? new TriggerScanResponse());
+    }
+
+    public Task<SetLanDeviceLabelResponse> SetLanDeviceLabelAsync(
+        SetLanDeviceLabelRequest request, CancellationToken cancellationToken) {
+        SetLanDeviceLabelCalls.Add(request);
+        if (SetLanDeviceLabelException is not null) throw SetLanDeviceLabelException;
+        return Task.FromResult(SetLanDeviceLabelResponder?.Invoke(request)
+            ?? new SetLanDeviceLabelResponse { Success = true });
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

@@ -27,6 +27,7 @@ internal sealed class DaemonStreamSubscriber : IAsyncDisposable {
     public event Action<AlertEvent>? AlertReceived;
     public event Action<LanDeviceFirstSeenEvent>? LanDeviceFirstSeenReceived;
     public event Action<LanDeviceMacChangedEvent>? LanDeviceMacChangedReceived;
+    public event Action<LanDeviceLabelChangedEvent>? LanDeviceLabelChangedReceived;
 
     /// <summary>
     /// Async callback invoked after the daemon connection is established but
@@ -148,6 +149,9 @@ internal sealed class DaemonStreamSubscriber : IAsyncDisposable {
                 break;
             case DaemonEvent.PayloadOneofCase.LanDeviceMacChanged:
                 LanDeviceMacChangedReceived?.Invoke(daemonEvent.LanDeviceMacChanged);
+                break;
+            case DaemonEvent.PayloadOneofCase.LanDeviceLabelChanged:
+                LanDeviceLabelChangedReceived?.Invoke(daemonEvent.LanDeviceLabelChanged);
                 break;
         }
     }

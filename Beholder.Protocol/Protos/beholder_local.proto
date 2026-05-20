@@ -88,6 +88,7 @@ message DaemonEvent {
     AlertEvent alert = 3;
     LanDeviceFirstSeenEvent lan_device_first_seen = 4;
     LanDeviceMacChangedEvent lan_device_mac_changed = 5;
+    LanDeviceLabelChangedEvent lan_device_label_changed = 6;
   }
 }
 
@@ -347,6 +348,10 @@ message LanDevice {
   string hostname = 4;                  // "" when mDNS-SD / mDNS-PTR / NetBIOS all failed
   int64 first_seen_unix_ns = 5;
   int64 last_seen_unix_ns = 6;
+  // Phase 9.5: user-supplied cosmetic display name. "" when no label set.
+  // Empty-string-as-null on the wire per the existing Alert.summary precedent.
+  // Persisted in lan_device.label; NOT chain-audited (cosmetic UI state).
+  string label = 7;
 }
 
 message ListLanDevicesRequest {
@@ -392,6 +397,31 @@ message LanDeviceMacChangedEvent {
   LanDevice device = 2;
 }
 
+// Stream event (Phase 9.5): the user changed a device's cosmetic label.
+// device carries the full refreshed device including the new label value
+// (empty string when the label was cleared).
+message LanDeviceLabelChangedEvent {
+  LanDevice device = 1;
+}
+
+// Phase 9.5: set or clear a device's user-supplied cosmetic label.
+message SetLanDeviceLabelRequest {
+  // MAC address of the device (lowercase hex with colons).
+  string mac = 1;
+  // Empty / whitespace-only label clears any existing label. Server clamps
+  // to a maximum of 100 characters; longer labels return success=false.
+  string label = 2;
+}
+
+message SetLanDeviceLabelResponse {
+  // success=false for recoverable failures (no such MAC, label too long,
+  // store throws). Hard validation errors (empty MAC) throw
+  // InvalidArgument. Mirrors the TriggerScan / ApplyFirewallRule
+  // soft-failure precedent.
+  bool success = 1;
+  string message = 2;
+}
+
 // ---- Service ----
 
 service BeholderLocal {
@@ -413,4 +443,6 @@ service BeholderLocal {
   // Phase 9.3 — LAN scanner IPC
   rpc ListLanDevices(ListLanDevicesRequest) returns (ListLanDevicesResponse);
   rpc TriggerScan(TriggerScanRequest) returns (TriggerScanResponse);
+  // Phase 9.5 — user-supplied cosmetic label
+  rpc SetLanDeviceLabel(SetLanDeviceLabelRequest) returns (SetLanDeviceLabelResponse);
 }

@@ -28,5 +28,6 @@ internal interface IDaemonClient : IAsyncDisposable {
     Task<GetFirewallActivityResponse> GetFirewallActivityAsync(GetFirewallActivityRequest request, CancellationToken cancellationToken);
     Task<ListLanDevicesResponse> ListLanDevicesAsync(ListLanDevicesRequest request, CancellationToken cancellationToken);
     Task<TriggerScanResponse> TriggerScanAsync(TriggerScanRequest request, CancellationToken cancellationToken);
+    Task<SetLanDeviceLabelResponse> SetLanDeviceLabelAsync(SetLanDeviceLabelRequest request, CancellationToken cancellationToken);
     Grpc.Core.AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken cancellationToken);
 }

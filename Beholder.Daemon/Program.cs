@@ -123,10 +123,15 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<MdnsHostnameProbe>();
     builder.Services.AddSingleton<NetbiosHostnameProbe>();
     builder.Services.AddSingleton<MdnsServiceDiscoveryProbe>();
+    builder.Services.AddSingleton<RouterDnsHostnameProbe>();
+    // Probe priority: mDNS-PTR (device's own advertisement) > NetBIOS
+    // (Windows / NAS) > router DNS (router's view of DHCP-supplied
+    // hostnames). First non-null wins per-IP via HostnameResolutionLadder.
     builder.Services.AddSingleton<HostnameResolutionLadder>(sp => new HostnameResolutionLadder(
         probes: [
             sp.GetRequiredService<MdnsHostnameProbe>(),
             sp.GetRequiredService<NetbiosHostnameProbe>(),
+            sp.GetRequiredService<RouterDnsHostnameProbe>(),
         ],
         logger: sp.GetRequiredService<ILogger<HostnameResolutionLadder>>()));
 

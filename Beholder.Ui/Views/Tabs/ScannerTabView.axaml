@@ -122,7 +122,7 @@
                                          VerticalAlignment="Center"
                                          ToolTip.Tip="Active: seen in the most recent scan window. Stale: not seen for more than ten minutes." />
                                 <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding DisplayName}"
+                                    <TextBlock Text="{Binding LabelOrFallback}"
                                                FontSize="{DynamicResource FontSizeBody}"
                                                Foreground="{DynamicResource TextPrimary}"
                                                TextTrimming="CharacterEllipsis" />
@@ -149,9 +149,9 @@
               RowDefinitions="Auto,*"
               Margin="24">
 
-            <!-- Header: display name + IP. -->
+            <!-- Header: label-or-fallback name + IP. -->
             <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,24">
-                <TextBlock Text="{Binding SelectedDevice.DisplayName}"
+                <TextBlock Text="{Binding SelectedDevice.LabelOrFallback}"
                            FontSize="{DynamicResource FontSizeHeading}"
                            Foreground="{DynamicResource TextPrimary}"
                            TextTrimming="CharacterEllipsis" />
@@ -160,45 +160,109 @@
                            Foreground="{DynamicResource TextSecondary}" />
             </StackPanel>
 
-            <!-- Body: field grid. Each row is a label + value pair. -->
+            <!-- Body: field grid. Each row is a label + value pair.
+                 Row 0 = CUSTOM NAME (Phase 9.5, editable in-place).
+                 Rows 1-6 = read-only auto-detected facts. -->
             <Grid Grid.Row="1"
                   ColumnDefinitions="140,*"
-                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                   RowSpacing="14"
                   VerticalAlignment="Top">
 
-                <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="MAC ADDRESS" />
-                <SelectableTextBlock Grid.Row="0" Grid.Column="1"
+                <!-- Phase 9.5: editable custom label. Two visual states
+                     governed by IsEditingLabel — read mode shows the current
+                     label (or italic "(no label)" placeholder) + a RENAME
+                     button; edit mode swaps in a TextBox + SAVE + CANCEL
+                     pills. SAVE + CANCEL disabled while the RPC is in
+                     flight (IsSavingLabel). -->
+                <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="CUSTOM NAME" />
+                <Grid Grid.Row="0" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <!-- Read mode: label-or-italic-placeholder. -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8"
+                                IsVisible="{Binding !IsEditingLabel}"
+                                VerticalAlignment="Center">
+                        <SelectableTextBlock Text="{Binding SelectedDevice.Label}"
+                                             FontSize="{DynamicResource FontSizeBody}"
+                                             Foreground="{DynamicResource TextPrimary}"
+                                             IsVisible="{Binding SelectedDevice.HasLabel}"
+                                             VerticalAlignment="Center" />
+                        <TextBlock Text="(no label)"
+                                   FontSize="{DynamicResource FontSizeBody}"
+                                   FontStyle="Italic"
+                                   Foreground="{DynamicResource TextMuted}"
+                                   IsVisible="{Binding !SelectedDevice.HasLabel}"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Classes="scanButton" MinWidth="80"
+                            Content="RENAME"
+                            Command="{Binding BeginEditLabelCommand}"
+                            IsVisible="{Binding !IsEditingLabel}"
+                            ToolTip.Tip="Give this device a custom display name. Useful when the auto-detected hostname is missing or unhelpful." />
+                    <!-- Edit mode: TextBox + SAVE + CANCEL. MaxLength=100
+                         matches the daemon-side MaxLanDeviceLabelLength cap
+                         so the UI can't post a label that'll fail validation. -->
+                    <TextBox Grid.Column="0"
+                             Text="{Binding LabelEditText, Mode=TwoWay}"
+                             PlaceholderText="Custom name…"
+                             MaxLength="100"
+                             IsVisible="{Binding IsEditingLabel}"
+                             VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6"
+                                IsVisible="{Binding IsEditingLabel}">
+                        <Button Classes="scanButton" MinWidth="70" Content="SAVE"
+                                Command="{Binding SaveLabelCommand}"
+                                IsEnabled="{Binding !IsSavingLabel}" />
+                        <Button Classes="scanButton" MinWidth="70" Content="CANCEL"
+                                Command="{Binding CancelEditLabelCommand}"
+                                IsEnabled="{Binding !IsSavingLabel}" />
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Classes="fieldLabel" Text="MAC ADDRESS" />
+                <SelectableTextBlock Grid.Row="1" Grid.Column="1"
                                      Text="{Binding SelectedDevice.Mac}"
                                      FontSize="{DynamicResource FontSizeBody}"
                                      Foreground="{DynamicResource TextPrimary}" />
 
-                <TextBlock Grid.Row="1" Grid.Column="0" Classes="fieldLabel" Text="IP ADDRESS" />
-                <SelectableTextBlock Grid.Row="1" Grid.Column="1"
+                <TextBlock Grid.Row="2" Grid.Column="0" Classes="fieldLabel" Text="IP ADDRESS" />
+                <SelectableTextBlock Grid.Row="2" Grid.Column="1"
                                      Text="{Binding SelectedDevice.Ip}"
                                      FontSize="{DynamicResource FontSizeBody}"
                                      Foreground="{DynamicResource TextPrimary}" />
 
-                <TextBlock Grid.Row="2" Grid.Column="0" Classes="fieldLabel" Text="VENDOR" />
-                <SelectableTextBlock Grid.Row="2" Grid.Column="1"
+                <TextBlock Grid.Row="3" Grid.Column="0" Classes="fieldLabel" Text="VENDOR" />
+                <SelectableTextBlock Grid.Row="3" Grid.Column="1"
                                      Text="{Binding SelectedDevice.VendorLabel}"
                                      FontSize="{DynamicResource FontSizeBody}"
                                      Foreground="{DynamicResource TextPrimary}" />
 
-                <TextBlock Grid.Row="3" Grid.Column="0" Classes="fieldLabel" Text="HOSTNAME" />
-                <SelectableTextBlock Grid.Row="3" Grid.Column="1"
-                                     Text="{Binding SelectedDevice.DisplayName}"
-                                     FontSize="{DynamicResource FontSizeBody}"
-                                     Foreground="{DynamicResource TextPrimary}" />
+                <!-- HOSTNAME shows the raw discovery-ladder result. When no
+                     probe contributed (mDNS / NetBIOS / router-DNS all
+                     silent — typical for random-MAC phones or routers
+                     that don't publish DHCP hostnames), show a muted
+                     "(not detected)" placeholder instead of falling back
+                     to the IP (which would just duplicate the row above). -->
+                <TextBlock Grid.Row="4" Grid.Column="0" Classes="fieldLabel" Text="HOSTNAME" />
+                <Grid Grid.Row="4" Grid.Column="1">
+                    <SelectableTextBlock Text="{Binding SelectedDevice.Hostname}"
+                                         FontSize="{DynamicResource FontSizeBody}"
+                                         Foreground="{DynamicResource TextPrimary}"
+                                         IsVisible="{Binding SelectedDevice.HasHostname}" />
+                    <TextBlock Text="(not detected)"
+                               FontSize="{DynamicResource FontSizeBody}"
+                               FontStyle="Italic"
+                               Foreground="{DynamicResource TextMuted}"
+                               IsVisible="{Binding !SelectedDevice.HasHostname}" />
+                </Grid>
 
-                <TextBlock Grid.Row="4" Grid.Column="0" Classes="fieldLabel" Text="FIRST SEEN" />
-                <SelectableTextBlock Grid.Row="4" Grid.Column="1"
+                <TextBlock Grid.Row="5" Grid.Column="0" Classes="fieldLabel" Text="FIRST SEEN" />
+                <SelectableTextBlock Grid.Row="5" Grid.Column="1"
                                      Text="{Binding SelectedDevice.FirstSeenLabel}"
                                      FontSize="{DynamicResource FontSizeBody}"
                                      Foreground="{DynamicResource TextPrimary}" />
 
-                <TextBlock Grid.Row="5" Grid.Column="0" Classes="fieldLabel" Text="LAST SEEN" />
-                <SelectableTextBlock Grid.Row="5" Grid.Column="1"
+                <TextBlock Grid.Row="6" Grid.Column="0" Classes="fieldLabel" Text="LAST SEEN" />
+                <SelectableTextBlock Grid.Row="6" Grid.Column="1"
                                      Text="{Binding SelectedDevice.LastSeenLabel}"
                                      FontSize="{DynamicResource FontSizeBody}"
                                      Foreground="{DynamicResource TextPrimary}" />

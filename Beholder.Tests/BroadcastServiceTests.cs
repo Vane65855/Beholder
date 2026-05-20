@@ -281,7 +281,8 @@ public class BroadcastServiceTests {
             Vendor: "TestVendor",
             Hostname: "test-host",
             FirstSeen: FixedTimestamp,
-            LastSeen: FixedTimestamp);
+            LastSeen: FixedTimestamp,
+            Label: null);
         broadcaster.BroadcastLanDeviceFirstSeen(device);
 
         Assert.True(await m1.WaitAsync(WaitTimeout, ct));
@@ -322,7 +323,8 @@ public class BroadcastServiceTests {
             Vendor: null,
             Hostname: null,
             FirstSeen: FixedTimestamp,
-            LastSeen: FixedTimestamp);
+            LastSeen: FixedTimestamp,
+            Label: null);
         Assert.ThrowsAny<ArgumentException>(
             () => broadcaster.BroadcastLanDeviceMacChanged(previousMac!, device));
     }
@@ -345,7 +347,8 @@ public class BroadcastServiceTests {
             Vendor: "NewVendor",
             Hostname: "new-device",
             FirstSeen: FixedTimestamp,
-            LastSeen: FixedTimestamp);
+            LastSeen: FixedTimestamp,
+            Label: null);
         broadcaster.BroadcastLanDeviceMacChanged("11:11:11:11:11:11", device);
 
         Assert.True(await move.WaitAsync(WaitTimeout, ct));
@@ -353,6 +356,49 @@ public class BroadcastServiceTests {
         Assert.Equal("11:11:11:11:11:11", enumerator.Current.LanDeviceMacChanged.PreviousMac);
         Assert.Equal("22:22:22:22:22:22", enumerator.Current.LanDeviceMacChanged.Device.Mac);
         Assert.Equal("192.168.1.50", enumerator.Current.LanDeviceMacChanged.Device.Ip);
+
+        await broadcaster.StopAsync(ct);
+        broadcaster.Dispose();
+    }
+
+    // ---- Phase 9.5: LanDeviceLabelChanged ----
+
+    [Fact]
+    public void BroadcastLanDeviceLabelChanged_NullDevice_ThrowsArgumentNullException() {
+        using var broadcaster = new BroadcastService(
+            new FakeSnapshotBatchSource(),
+            new FakeTimeProvider(FixedTimestamp),
+            NullLogger<BroadcastService>.Instance);
+        Assert.Throws<ArgumentNullException>(
+            () => broadcaster.BroadcastLanDeviceLabelChanged(null!));
+    }
+
+    [Fact]
+    public async Task BroadcastLanDeviceLabelChanged_AllSubscribersReceiveEvent() {
+        var ct = TestContext.Current.CancellationToken;
+        var source = new FakeSnapshotBatchSource();
+        var broadcaster = new BroadcastService(
+            source, new FakeTimeProvider(FixedTimestamp), NullLogger<BroadcastService>.Instance);
+        await broadcaster.StartAsync(ct);
+
+        await using var enumerator = broadcaster.SubscribeAsync(ct).GetAsyncEnumerator(ct);
+        var move = enumerator.MoveNextAsync().AsTask();
+        await WaitForAsync(() => broadcaster.ActiveSubscriberCount == 1, "subscriber registered", ct);
+
+        var device = new LanDevice(
+            Mac: "aa:bb:cc:dd:ee:99",
+            Ip: "192.168.1.99",
+            Vendor: "Acme",
+            Hostname: "router.lan",
+            FirstSeen: FixedTimestamp,
+            LastSeen: FixedTimestamp,
+            Label: "Living Room TV");
+        broadcaster.BroadcastLanDeviceLabelChanged(device);
+
+        Assert.True(await move.WaitAsync(WaitTimeout, ct));
+        Assert.Equal(Local.DaemonEvent.PayloadOneofCase.LanDeviceLabelChanged, enumerator.Current.PayloadCase);
+        Assert.Equal("aa:bb:cc:dd:ee:99", enumerator.Current.LanDeviceLabelChanged.Device.Mac);
+        Assert.Equal("Living Room TV", enumerator.Current.LanDeviceLabelChanged.Device.Label);
 
         await broadcaster.StopAsync(ct);
         broadcaster.Dispose();
