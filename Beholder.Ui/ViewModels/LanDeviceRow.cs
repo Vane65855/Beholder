@@ -61,7 +61,7 @@ internal sealed partial class LanDeviceRow : ObservableObject {
     /// Master-list display name. Hostname is preferred when present (Apple TVs,
     /// Linux/Avahi machines, printers); falls back to IP for devices the
     /// hostname ladder couldn't resolve (random-MAC phones, NetBIOS-disabled
-    /// Windows boxes — see <c>docs/manual-tests/lan-scanner.md</c>).
+    /// Windows boxes, routers that don't publish DHCP hostnames to LAN DNS).
     /// </summary>
     public string DisplayName => string.IsNullOrEmpty(Hostname) ? Ip : Hostname;
 
