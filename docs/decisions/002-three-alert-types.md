@@ -2,7 +2,7 @@
 
 ## Context
 
-GlassWire and similar tools generate alerts for many event types: blocked connections, rule changes, new processes, host changes, WiFi changes, and more. High alert volume leads to alert fatigue — users stop reading them and the feature becomes decorative.
+Many consumer firewalls and network monitors generate alerts for a wide range of event types: blocked connections, rule changes, new processes, host changes, WiFi changes, and more. High alert volume leads to alert fatigue — users stop reading them and the feature becomes decorative.
 
 ## Decision
 

@@ -2,7 +2,7 @@
 
 ## 1. Purpose and Scope
 
-This document defines non-negotiable quality requirements for every UI phase in the Beholder NMT project. Any phase that produces Avalonia XAML, Views, ViewModels, styles, theme resources, or converters must comply with every section of this document. Backend-only phases (daemon, storage, protocol, platform providers) are exempt. The requirements exist because Phases 5.1 through 5.3 repeatedly produced elements that worked at one resolution with one data set but broke or looked cheap under real-world variation. The quality bar going forward is the standard set by GlassWire, Windows Task Manager, and Resource Monitor — applications where every surface a user touches in the first five minutes feels intentional. Beholder NMT competes with commercial tools; any UI element that feels like a demo prototype represents a brand failure.
+This document defines non-negotiable quality requirements for every UI phase in the Beholder NMT project. Any phase that produces Avalonia XAML, Views, ViewModels, styles, theme resources, or converters must comply with every section of this document. Backend-only phases (daemon, storage, protocol, platform providers) are exempt. The requirements exist because Phases 5.1 through 5.3 repeatedly produced elements that worked at one resolution with one data set but broke or looked cheap under real-world variation. The quality bar going forward is the standard set by polished commercial network-monitoring and system-diagnostic UIs — applications where every surface a user touches in the first five minutes feels intentional. Beholder NMT operates in that product class; any UI element that feels like a demo prototype represents a brand failure.
 
 ---
 
@@ -311,16 +311,16 @@ For each element type introduced in the phase, test with at least:
 
 Before marking a UI phase complete, the implementation must be visually compared to at least one reference application that solves a similar problem well. The purpose is to calibrate quality expectations against shipping software, not to copy another product's design.
 
-**Reference applications by element type:**
+**Reference categories by element type:**
 
-- Network traffic charts, per-process lists: **GlassWire**, **Windows Task Manager** (Performance tab), **Resource Monitor**
-- Firewall rules tables: **Windows Firewall with Advanced Security**, **UFW GUI frontends**
-- Alert/event timelines: **Windows Event Viewer**, **Splunk** search results
-- Geographic traffic maps: **GlassWire** (Things tab map view)
+- Network traffic charts, per-process lists: established consumer network-monitoring UIs + the platform's built-in performance / resource diagnostics tooling.
+- Firewall rules tables: the platform's built-in firewall administration console (e.g. Windows Firewall with Advanced Security on Windows; `ufw` / firewall-config frontends on Linux).
+- Alert/event timelines: the platform's built-in event-log viewer.
+- Geographic traffic maps: any polished consumer network-monitor that ships a per-country heatmap.
 
-The comparison must be written in prose in the phase's manual test document. Example:
+The comparison must be written in prose in the phase's commit message or phase summary. Example shape:
 
-> Compared against GlassWire's Usage tab at 1920x1080. Beholder's per-process list matches density and selectability. Differences: Beholder shows fewer columns by default (no host column yet), Beholder's chart uses stacked areas where GlassWire uses overlaid lines. The chart re-lays axis labels correctly on resize; GlassWire does the same but also adjusts time-axis granularity, which Beholder does not yet do (deferred).
+> Compared against an established consumer network-monitor's per-process traffic view at 1920x1080. Beholder's per-process list matches density and selectability. Differences: Beholder shows fewer columns by default (no host column yet); the reference uses overlaid lines where Beholder uses stacked areas. The chart re-lays axis labels correctly on resize; the reference also adjusts time-axis granularity, which Beholder does not yet do (deferred).
 
 If the implementation feels noticeably inferior to the reference — less responsive, sparser, uglier, jerkier — the phase is not complete. Specific inferiorities are either fixed or explicitly deferred with tracking in the phase summary.
 

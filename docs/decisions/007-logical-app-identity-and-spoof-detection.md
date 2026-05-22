@@ -13,11 +13,7 @@ C:\Users\Vane\AppData\Local\Discord\app-1.0.9235\Discord.exe   ← after auto-up
 
 Each new version is a "new path" by the original spec, so each Discord update fires another `NEW PROCESS` alert. The user sees Discord alert twice within minutes of a silent background update — noise, not signal.
 
-This is industry-wide:
-- **GlassWire** has the identical bug ([forum.glasswire.com/t/bug-report-discord/19801](https://forum.glasswire.com/t/bug-report-discord/19801)) — acknowledged by the developers, no fix shipped.
-- **SimpleWall** ([github.com/henrypp/simplewall/issues/1368](https://github.com/henrypp/simplewall/issues/1368)) — same bug, same status.
-- **NetLimiter** fixed it for Windows Store / MSIX apps only (Microsoft provides stable identity); Squirrel still produces noise.
-- **Little Snitch** sidesteps via macOS bundle identifiers — not portable to Windows.
+This is industry-wide. Multiple shipping Windows network-monitoring and firewall products have the identical bug — acknowledged in public bug trackers, unfixed in all of them. The handful of products that "fixed" it did so only for Microsoft Store / MSIX apps (where the OS provides a stable identity); Squirrel-deployed unpackaged executables still produce noise everywhere. macOS-only tools sidestep the problem via bundle identifiers, an OS primitive that has no Windows equivalent.
 
 Windows lacks an OS-provided "logical app identity" primitive, so every Windows network monitor inherits this problem. We can do better.
 
@@ -87,7 +83,7 @@ Both reference this ADR.
 
 **Trust model:** Trusts the Windows certificate store. We validate Authenticode chains the same way `WinVerifyTrust` does — same trust roots, same revocation behavior, same OCSP/CRL handling. Beholder's spoof detection inherits Windows's trust posture; we don't try to be more paranoid than the OS itself.
 
-**Competitive position:** Beholder becomes (to our knowledge) the first Windows network monitor that handles Squirrel-style auto-updaters silently AND detects publisher-spoofing on top. GlassWire/SimpleWall don't have either capability today.
+**Competitive position:** Beholder becomes (to our knowledge) the first Windows network monitor that handles Squirrel-style auto-updaters silently AND detects publisher-spoofing on top. No current Windows network-monitor / personal-firewall product ships both capabilities together.
 
 **Out of scope (deferred):**
 - "Verified publisher" badge in the Alerts UI — plumbing supports it, but UI work is separate.

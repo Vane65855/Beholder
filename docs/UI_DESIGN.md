@@ -31,7 +31,7 @@
 
 ## 1. Design Philosophy
 
-Beholder NMT is a control-surface tool for network monitoring and firewall management. The UI prioritizes information density and dark-environment readability over consumer aesthetics. Its visual DNA draws from network-engineering consoles, security-analyst dashboards, and tools like GlassWire — utilitarian interfaces where every pixel earns its place by communicating state. The design is compact, technical, and structured around rapid comprehension: a user glancing at the screen should immediately know what's flowing, what's blocked, and what needs attention. Color is semantic, not decorative — it encodes severity, state, and data series, never branding or embellishment.
+Beholder NMT is a control-surface tool for network monitoring and firewall management. The UI prioritizes information density and dark-environment readability over consumer aesthetics. Its visual DNA draws from network-engineering consoles and security-analyst dashboards — utilitarian interfaces where every pixel earns its place by communicating state. The design is compact, technical, and structured around rapid comprehension: a user glancing at the screen should immediately know what's flowing, what's blocked, and what needs attention. Color is semantic, not decorative — it encodes severity, state, and data series, never branding or embellishment.
 
 For implementation-level quality requirements — responsive sizing, required UI states, verification procedures, and banned patterns — see [UI_QUALITY_STANDARDS.md](UI_QUALITY_STANDARDS.md). That document governs how designs in this file are built. This file governs what they look like.
 
@@ -131,9 +131,10 @@ Beholder uses two primary colors for directional traffic indicators:
   distinct from both the neutral text colors AND the severity-danger
   red, giving upload its own clear semantic space.
 
-This is intentionally contrarian to tools like Speedtest.net (green for
-download) and GlassWire (cyan for both). Beholder's framing is
-security-first, not performance-first.
+This is intentionally contrarian to consumer-grade network UIs that
+optimize for performance framing (green for download, single-tone
+ratio bars). Beholder's framing is security-first, not
+performance-first.
 
 **Historical note:** An earlier design used coral/orange (`#E8734A`) for
 upload. This was changed to purple (`#A855F7`) because coral read as

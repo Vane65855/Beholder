@@ -23,7 +23,7 @@ namespace Beholder.Ui.ViewModels;
 internal sealed partial class FirewallActivityViewModel : ViewModelBase, IDisposable {
     /// <summary>
     /// How many events to fetch on tab activation. Matches the activity
-    /// strip's reasonable visual ceiling — a 30-day GlassWire-style log is
+    /// strip's reasonable visual ceiling — a 30-day exhaustive log is
     /// excessive for a strip that lives below the rule table.
     /// </summary>
     private const int InitialFetchLimit = 100;

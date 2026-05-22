@@ -14,8 +14,8 @@ using Grpc.Core;
 namespace Beholder.Ui.ViewModels;
 
 /// <summary>
-/// Backs the Traffic tab's COLS sub-view — a GlassWire-style 3-column
-/// destination/protocol/country breakdown of the current range (and process
+/// Backs the Traffic tab's COLS sub-view — a 3-column destination /
+/// protocol / country breakdown of the current range (and process
 /// selection). Each column is an <see cref="ObservableCollection{T}"/> of
 /// <c>{name, bar ratio, bytes label}</c> rows sorted by total bytes desc.
 /// </summary>

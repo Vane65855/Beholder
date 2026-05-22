@@ -10,7 +10,7 @@ The four candidates compared against Beholder's "see what your machine is doing 
 
 | Candidate | Fit | Why / Why not |
 |---|---|---|
-| **LAN device discovery** | ★★★★★ | Direct extension of the visibility thesis from "this machine" to "this machine + its peers." Reuses existing infrastructure: the cross-link from a discovered LAN host to its traffic in the Traffic tab is a one-RPC reuse, not a new pipeline. Mirrors GlassWire's "Things" tab — the project's most-cited reference comparison per UI_QUALITY_STANDARDS §7. |
+| **LAN device discovery** | ★★★★★ | Direct extension of the visibility thesis from "this machine" to "this machine + its peers." Reuses existing infrastructure: the cross-link from a discovered LAN host to its traffic in the Traffic tab is a one-RPC reuse, not a new pipeline. A "Things"-style LAN device list is table-stakes UX for this product class. |
 | Port scan of locally-known destinations | ★★ | Active reconnaissance of WAN destinations crosses from "monitoring" into "scanning a third party." Legal/ethical surface (CFAA in the US, equivalents elsewhere) for a feature whose value to a desktop user is unclear. |
 | CVE feed lookup | ★ | Requires an outbound CVE feed connection (violates Beholder's "no outbound network on the daemon" posture per `PRINCIPLES.md`). Even with a manual fetcher pattern (like `Beholder.Tools.GeoIpFetcher`), the matching surface — process → CPE → CVE — is enormous and out of scope for a desktop tool. |
 | Anomaly detection on existing flows | ★★ | Genuinely interesting but conceptually distinct from "scanning." Belongs in its own phase if it ships at all; doesn't fit "Scanner" as a label. |
@@ -29,7 +29,7 @@ LAN discovery also resolves the longest-standing roadmap ambiguity: Phase 13.6 (
 2. **mDNS service-discovery queries** (`_services._dns-sd._udp.local`) for hostnames. Most modern devices (Apple, Linux with Avahi, recent Windows, IoT firmwares) respond.
 3. **NetBIOS name queries** for the Windows-flavored hostname fallback when mDNS is silent. Legacy but still common on small business / home networks with older Windows machines.
 
-Passive-only (ARP cache walk + listening) was considered and rejected as the default: it produces a sparse picture (devices invisible until they speak), defeats the "what's on my LAN right now" use case, and provides no hostname resolution. Active probing within the local subnet is what every comparable tool does (Fing, GlassWire, Angry IP Scanner, nmap's `-sn`) and matches the ambient ARP/mDNS traffic any normal device generates during DHCP/connectivity checks.
+Passive-only (ARP cache walk + listening) was considered and rejected as the default: it produces a sparse picture (devices invisible until they speak), defeats the "what's on my LAN right now" use case, and provides no hostname resolution. Active probing within the local subnet is standard practice for LAN discovery tooling (`arp-scan`, `nmap -sn`, every router admin UI, every consumer LAN-scanner app) and matches the ambient ARP/mDNS traffic any normal device generates during DHCP/connectivity checks.
 
 The probes never leave the local subnet. No ICMP echo to gateway/internet. No TCP SYN probes. No UDP service probes beyond the three discovery protocols above.
 
@@ -53,7 +53,7 @@ Out: open-port scan per device (crosses into reconnaissance), OS fingerprinting 
 **Identity = MAC address.** Rationale:
 
 - **IP is mutable** (DHCP lease changes, static-vs-dynamic configuration drift). Keying on IP would produce false "new device" entries every lease renewal.
-- **MAC is the durable layer-2 identifier.** Standard practice for LAN device tracking (Fing, GlassWire, every router admin UI).
+- **MAC is the durable layer-2 identifier.** Standard practice for LAN device tracking — every router admin UI and every comparable consumer LAN-scanner does it this way.
 - **MAC randomization is a known limitation.** Modern iOS / Android / Windows 11 randomize MACs per-SSID. The Scanner will record more "new device" entries than philosophically ideal for these. This is the same trade-off as ADR 007's path-based fallback for unsigned binaries: **we don't pretend to know more than is observable on the wire.** The Scanner tab's UX makes "this is a tracked snapshot of what answered ARP" explicit rather than "this is a roster of physical devices."
 
 When a known `mac` appears at a different `ip`, we update the row (no new entry, no event). When a known `ip` is associated with a different `mac`, we record a `LanDeviceMacChanged` event in the chain (potential ARP spoof signal, though more commonly just DHCP reassignment).
@@ -73,7 +73,7 @@ Promoting a chain event to an alert is a Phase 13 Settings concern ("notify me w
 
 **Day-1 feature.** Clicking a LAN device in the Scanner deep-links to the Traffic tab with the table filtered to flows where `remote_address == device.ip`. Implementation reuses the existing Alerts → Firewall deep-link pattern (selected-tab message + a filter parameter on the target VM). No new RPC; the existing `GetProcessDestinations` returns rows keyed on `remote_address` already.
 
-This is the differentiator from Fing/GlassWire. Those tools show you devices; we show you devices **and the per-process flows with each device**, because we already have the per-process flow log.
+This is the differentiator from typical LAN scanners. Those tools show you devices; we show you devices **and the per-process flows with each device**, because we already have the per-process flow log.
 
 ### OUI database
 

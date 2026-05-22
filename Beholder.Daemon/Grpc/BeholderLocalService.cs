@@ -24,9 +24,10 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     private const int DefaultLanDeviceListLimit = 200;
     private const int MaxLanDeviceListLimit = 1000;
     /// <summary>Phase 9.5: maximum user-supplied device label length. 100
-    /// chars matches GlassWire's label UX + leaves headroom for descriptive
-    /// names ("Kitchen — Living Room TV (Samsung)") without enabling
-    /// pathological store / wire sizes.</summary>
+    /// chars is the conventional ceiling for short cosmetic display names
+    /// in this product class — long enough for descriptive labels
+    /// ("Kitchen — Living Room TV (Samsung)") without enabling pathological
+    /// store / wire sizes.</summary>
     private const int MaxLanDeviceLabelLength = 100;
 
     private readonly BroadcastService _broadcaster;
