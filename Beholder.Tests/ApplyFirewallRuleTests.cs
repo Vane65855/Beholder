@@ -62,6 +62,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeTrafficStore(),
             new FakeLanDeviceStore(),
             TestServiceFactory.CreateInactiveLanScannerService(),
+            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             _timeProvider,
             NullLogger<BeholderLocalService>.Instance);
     }
@@ -171,6 +172,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             _firewallController, new FakeFirewallEnforcementState(),
             failingEventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
+            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var request = MakeRequest();
@@ -247,6 +249,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             firewallController, new FakeFirewallEnforcementState(),
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
+            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var request = MakeRequest();

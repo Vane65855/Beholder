@@ -49,6 +49,52 @@ public sealed class ChainIntegrityMonitorTests {
     }
 
     [Fact]
+    public async Task VerifyOnce_Success_UpdatesChainStatusCache() {
+        // Phase 13.1: every successful verification snapshots the result +
+        // the wall-clock time into IChainStatusCache so the Settings tab's
+        // Maintenance section can render "last verified: 3m ago — valid".
+        var fixture = new Fixture();
+        fixture.EventStore.VerifyResult = ChainVerificationResult.Success(rowsVerified: 99);
+
+        await fixture.Monitor.VerifyOnceAsync(CancellationToken.None);
+
+        var update = Assert.Single(fixture.ChainStatusCache.UpdateCalls);
+        Assert.True(update.Result.IsValid);
+        Assert.Equal(99, update.Result.RowsVerified);
+        Assert.Equal(FixedTimestamp, update.VerifiedAt);
+    }
+
+    [Fact]
+    public async Task VerifyOnce_Failure_AlsoUpdatesChainStatusCache() {
+        // Phase 13.1: verification *failures* must also reach the cache so
+        // the Settings tab surfaces the most-recent outcome regardless of
+        // whether the chain was valid. (Distinct from VerifyAsync throwing,
+        // which is transient infra and is correctly skipped.)
+        var fixture = new Fixture();
+        fixture.EventStore.VerifyResult = ChainVerificationResult.Failure(
+            rowsVerified: 7, failedAtSeq: 8, errorMessage: "hash mismatch");
+
+        await fixture.Monitor.VerifyOnceAsync(CancellationToken.None);
+
+        var update = Assert.Single(fixture.ChainStatusCache.UpdateCalls);
+        Assert.False(update.Result.IsValid);
+        Assert.Equal(8, update.Result.FailedAtSeq);
+    }
+
+    [Fact]
+    public async Task VerifyOnce_VerifyThrows_DoesNotUpdateChainStatusCache() {
+        // Transient VerifyAsync failures must not overwrite the last real
+        // verification result — otherwise a 5-minute DB lock would
+        // discard a perfectly good "verified 3 minutes ago" snapshot.
+        var fixture = new Fixture();
+        fixture.EventStore.VerifyException = new InvalidOperationException("DB locked");
+
+        await fixture.Monitor.VerifyOnceAsync(CancellationToken.None);
+
+        Assert.Empty(fixture.ChainStatusCache.UpdateCalls);
+    }
+
+    [Fact]
     public async Task StartAsync_DetectionDisabled_DoesNotRun() {
         var fixture = new Fixture();
         fixture.Options.Set(new AlertOptions { EnableChainIntegrityMonitor = false });
@@ -71,6 +117,7 @@ public sealed class ChainIntegrityMonitorTests {
         Assert.Throws<ArgumentNullException>(() => new ChainIntegrityMonitor(
             eventStore: null!,
             alertEmitter: new FakeAlertEmitter(),
+            chainStatusCache: new FakeChainStatusCache(),
             options: new FakeOptionsMonitor<AlertOptions>(new AlertOptions()),
             timeProvider: new FakeTimeProvider(FixedTimestamp),
             logger: NullLogger<ChainIntegrityMonitor>.Instance));
@@ -78,13 +125,14 @@ public sealed class ChainIntegrityMonitorTests {
     private sealed class Fixture {
         public FakeEventStore EventStore { get; } = new();
         public FakeAlertEmitter Emitter { get; } = new();
+        public FakeChainStatusCache ChainStatusCache { get; } = new();
         public FakeOptionsMonitor<AlertOptions> Options { get; } = new(new AlertOptions());
         public FakeTimeProvider Time { get; } = new(FixedTimestamp);
         public ChainIntegrityMonitor Monitor { get; }
 
         public Fixture() {
             Monitor = new ChainIntegrityMonitor(
-                EventStore, Emitter, Options, Time,
+                EventStore, Emitter, ChainStatusCache, Options, Time,
                 NullLogger<ChainIntegrityMonitor>.Instance);
         }
     }

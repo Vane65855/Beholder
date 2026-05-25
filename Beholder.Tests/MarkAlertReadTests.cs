@@ -49,6 +49,7 @@ public sealed class MarkAlertReadTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
+            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 

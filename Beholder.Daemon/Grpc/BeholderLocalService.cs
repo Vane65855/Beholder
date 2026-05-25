@@ -40,6 +40,8 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     private readonly ITrafficStore _trafficStore;
     private readonly ILanDeviceStore _lanDeviceStore;
     private readonly LanScannerService _lanScannerService;
+    private readonly IChainStatusCache _chainStatusCache;
+    private readonly IStorageStatsProvider _storageStatsProvider;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<BeholderLocalService> _logger;
 
@@ -54,6 +56,8 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         ITrafficStore trafficStore,
         ILanDeviceStore lanDeviceStore,
         LanScannerService lanScannerService,
+        IChainStatusCache chainStatusCache,
+        IStorageStatsProvider storageStatsProvider,
         TimeProvider timeProvider,
         ILogger<BeholderLocalService> logger
     ) {
@@ -67,6 +71,8 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         ArgumentNullException.ThrowIfNull(trafficStore);
         ArgumentNullException.ThrowIfNull(lanDeviceStore);
         ArgumentNullException.ThrowIfNull(lanScannerService);
+        ArgumentNullException.ThrowIfNull(chainStatusCache);
+        ArgumentNullException.ThrowIfNull(storageStatsProvider);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _broadcaster = broadcaster;
@@ -79,6 +85,8 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         _trafficStore = trafficStore;
         _lanDeviceStore = lanDeviceStore;
         _lanScannerService = lanScannerService;
+        _chainStatusCache = chainStatusCache;
+        _storageStatsProvider = storageStatsProvider;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -344,6 +352,10 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         try {
             var result = await _eventStore.VerifyAsync(context.CancellationToken)
                 .ConfigureAwait(false);
+            // Mirror the ChainIntegrityMonitor cache write so user-triggered
+            // verifications also update the Settings tab's "last verified at"
+            // display. Either writer's most-recent result wins.
+            _chainStatusCache.Update(result, _timeProvider.GetUtcNow());
             return result.ToProto();
         } catch (Exception ex) {
             _logger.LogError(ex, "Chain verification failed unexpectedly");
@@ -351,6 +363,19 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
                 $"Chain verification error: {ex.Message}"));
         }
     }
+
+    /// <summary>
+    /// Phase 13.1: returns per-table row counts + the database file size +
+    /// the most-recent chain-verification result for the Settings tab's
+    /// Data Storage section. Single round-trip; called once on tab activate
+    /// and on every refresh-button press.
+    /// </summary>
+    public override Task<Local.GetStorageStatsResponse> GetStorageStats(
+        Local.GetStorageStatsRequest request, ServerCallContext context
+    ) => ExecuteQueryAsync(nameof(GetStorageStats), async cancellationToken => {
+        var stats = await _storageStatsProvider.GetAsync(cancellationToken).ConfigureAwait(false);
+        return stats.ToProto();
+    }, context);
 
     public override Task<Local.GetProcessTimelineResponse> GetProcessTimeline(
         Local.GetProcessTimelineRequest request, ServerCallContext context

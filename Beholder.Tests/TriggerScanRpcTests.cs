@@ -181,6 +181,7 @@ public sealed class TriggerScanRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             new FakeEventStore(), new FakeTrafficStore(),
             new FakeLanDeviceStore(), scanner,
+            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 }

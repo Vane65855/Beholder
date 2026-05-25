@@ -1,12 +1,272 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Beholder.Ui.ViewModels"
+             xmlns:controls="using:Beholder.Ui.Controls"
              x:Class="Beholder.Ui.Views.Tabs.SettingsTabView"
              x:DataType="vm:SettingsTabViewModel"
              Background="{DynamicResource BackgroundRoot}">
-    <TextBlock Text="Settings content (deferred)"
-               Foreground="{DynamicResource TextMuted}"
-               FontSize="{DynamicResource FontSizeHeading}"
-               HorizontalAlignment="Center"
-               VerticalAlignment="Center" />
+
+    <UserControl.Styles>
+        <!-- Section card outer container. One per section (Data Storage,
+             Maintenance, About). Mirrors the FirewallTabView header card
+             idiom: surface BackgroundPanel + thin divider border. -->
+        <Style Selector="Border.sectionCard">
+            <Setter Property="Background" Value="{DynamicResource BackgroundPanel}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource DividerHorizontal}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="24,20" />
+        </Style>
+
+        <!-- Section title — small-caps label matching the rest of the app. -->
+        <Style Selector="TextBlock.sectionTitle">
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="LetterSpacing" Value="2" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+        </Style>
+
+        <!-- Field label inside a section — same treatment as the Scanner
+             tab's detail-pane field labels. -->
+        <Style Selector="TextBlock.fieldLabel">
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="LetterSpacing" Value="2" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+        </Style>
+
+        <!-- Action button — mirrors the Scanner tab's scanButton style for
+             cross-tab consistency. -->
+        <Style Selector="Button.actionButton">
+            <Setter Property="MinWidth" Value="120" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentPrimary}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="LetterSpacing" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentPrimary}" />
+        </Style>
+        <Style Selector="Button.actionButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+        </Style>
+        <Style Selector="Button.actionButton:disabled">
+            <Setter Property="Opacity" Value="0.5" />
+            <Setter Property="Cursor" Value="Arrow" />
+        </Style>
+
+        <!-- Traffic-tier table row vs flat-schema table row. Just a subtle
+             tint to differentiate the two groupings; the order is whatever
+             sqlite_master returns (alphabetical). -->
+        <Style Selector="Border.tableRow">
+            <Setter Property="Padding" Value="0,6" />
+            <Setter Property="BorderBrush" Value="{DynamicResource DividerHorizontal}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <!-- Error banner — DockPanel.Dock="Top" so it floats above the
+             ScrollViewer content rather than scrolling with it. -->
+        <controls:ErrorBanner DockPanel.Dock="Top"
+                              Severity="Danger"
+                              Message="{Binding ErrorMessage}"
+                              IsVisible="{Binding HasError}"
+                              DismissCommand="{Binding DismissErrorCommand}" />
+
+        <!-- Loading state: shown only while the very first GetStorageStats
+             call is in flight. Subsequent refreshes leave the populated
+             sections visible. -->
+        <Panel IsVisible="{Binding ShowLoadingState}">
+            <TextBlock Text="Loading settings…"
+                       Foreground="{DynamicResource TextMuted}"
+                       FontSize="{DynamicResource FontSizeHeading}"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center" />
+        </Panel>
+
+        <!-- Populated state: ScrollViewer wrapping the three section cards. -->
+        <ScrollViewer IsVisible="{Binding ShowPopulatedState}"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <StackPanel Orientation="Vertical">
+
+                <!-- ────────────────  Data Storage  ──────────────── -->
+                <Border Classes="sectionCard">
+                    <StackPanel Orientation="Vertical" Spacing="16">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                                <TextBlock Classes="sectionTitle" Text="DATA STORAGE" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding DatabaseBytesTotalFormatted}"
+                                           FontSize="{DynamicResource FontSizeBody}"
+                                           Foreground="{DynamicResource TextPrimary}"
+                                           VerticalAlignment="Center"
+                                           ToolTip.Tip="On-disk size of the SQLite database file. The WAL sidecar files are not counted; SQLite periodically rolls their contents back into the main file." />
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Classes="actionButton"
+                                    Content="REFRESH"
+                                    MinWidth="100"
+                                    Command="{Binding RefreshStorageStatsCommand}"
+                                    IsEnabled="{Binding !IsRefreshing}"
+                                    ToolTip.Tip="Re-fetch per-table row counts and the database file size from the daemon." />
+                        </Grid>
+
+                        <!-- Per-table row count list. One row per table; the
+                             daemon returns them sorted alphabetically. -->
+                        <ItemsControl ItemsSource="{Binding Tables}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:TableStatsRow">
+                                    <Border Classes="tableRow">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding Name}"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}"
+                                                       FontFamily="Consolas, monospace" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding RowCountFormatted}"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextSecondary}" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- ────────────────  Maintenance  ──────────────── -->
+                <Border Classes="sectionCard">
+                    <StackPanel Orientation="Vertical" Spacing="20">
+                        <TextBlock Classes="sectionTitle" Text="MAINTENANCE" />
+
+                        <!-- Chain integrity row -->
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4" VerticalAlignment="Center">
+                                <TextBlock Text="Chain integrity"
+                                           FontSize="{DynamicResource FontSizeBody}"
+                                           Foreground="{DynamicResource TextPrimary}" />
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="{Binding ChainStatus.LastVerifiedAtLabel}"
+                                               FontSize="{DynamicResource FontSizeCaption}"
+                                               Foreground="{DynamicResource TextMuted}" />
+                                    <TextBlock Text="·"
+                                               FontSize="{DynamicResource FontSizeCaption}"
+                                               Foreground="{DynamicResource TextMuted}"
+                                               IsVisible="{Binding ChainStatus.HasResult}" />
+                                    <TextBlock Text="{Binding ChainStatus.ResultSummary}"
+                                               FontSize="{DynamicResource FontSizeCaption}"
+                                               Foreground="{DynamicResource TextMuted}"
+                                               IsVisible="{Binding ChainStatus.HasResult}" />
+                                </StackPanel>
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Classes="actionButton"
+                                    Content="{Binding VerifyButtonLabel}"
+                                    Command="{Binding VerifyChainCommand}"
+                                    IsEnabled="{Binding !IsVerifyingChain}"
+                                    ToolTip.Tip="Re-hash every row in the chain-audited event log and confirm the chain links are intact. Runs automatically on a periodic timer; this is the manual override." />
+                        </Grid>
+
+                        <!-- Open data folder row -->
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4" VerticalAlignment="Center">
+                                <TextBlock Text="Data folder"
+                                           FontSize="{DynamicResource FontSizeBody}"
+                                           Foreground="{DynamicResource TextPrimary}" />
+                                <SelectableTextBlock Text="{Binding DatabasePath}"
+                                                     FontSize="{DynamicResource FontSizeCaption}"
+                                                     Foreground="{DynamicResource TextMuted}"
+                                                     FontFamily="Consolas, monospace" />
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Classes="actionButton"
+                                    Content="OPEN FOLDER"
+                                    Command="{Binding OpenDataFolderCommand}"
+                                    IsEnabled="{Binding HasOpenableDataFolder}"
+                                    ToolTip.Tip="Open the file explorer at the directory containing the daemon's SQLite database file." />
+                        </Grid>
+
+                        <!-- Transient verify-status banner — surfaces the
+                             VerifyChain RPC result for ~4 seconds before
+                             auto-clearing. -->
+                        <controls:ErrorBanner Severity="Warn"
+                                              Message="{Binding VerifyStatusMessage}"
+                                              IsVisible="{Binding HasVerifyStatus}"
+                                              DismissCommand="{Binding DismissVerifyStatusCommand}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- ────────────────  About  ──────────────── -->
+                <Border Classes="sectionCard">
+                    <StackPanel Orientation="Vertical" Spacing="16">
+                        <TextBlock Classes="sectionTitle" Text="ABOUT" />
+
+                        <Grid ColumnDefinitions="160,*"
+                              RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                              RowSpacing="10">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="PROJECT" />
+                            <TextBlock Grid.Row="0" Grid.Column="1"
+                                       Text="{Binding AboutInfo.ProjectName}"
+                                       FontSize="{DynamicResource FontSizeBody}"
+                                       Foreground="{DynamicResource TextPrimary}" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Classes="fieldLabel" Text="VERSION" />
+                            <SelectableTextBlock Grid.Row="1" Grid.Column="1"
+                                                 Text="{Binding AboutInfo.Version}"
+                                                 FontSize="{DynamicResource FontSizeBody}"
+                                                 Foreground="{DynamicResource TextPrimary}" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Classes="fieldLabel" Text="BUILD" />
+                            <SelectableTextBlock Grid.Row="2" Grid.Column="1"
+                                                 Text="{Binding AboutInfo.BuildInfo}"
+                                                 FontSize="{DynamicResource FontSizeBody}"
+                                                 Foreground="{DynamicResource TextPrimary}" />
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Classes="fieldLabel" Text="LICENSE" />
+                            <SelectableTextBlock Grid.Row="3" Grid.Column="1"
+                                                 Text="{Binding AboutInfo.LicenseLabel}"
+                                                 FontSize="{DynamicResource FontSizeBody}"
+                                                 Foreground="{DynamicResource TextPrimary}" />
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" Classes="fieldLabel" Text="SOURCE" />
+                            <SelectableTextBlock Grid.Row="4" Grid.Column="1"
+                                                 Text="{Binding AboutInfo.ProjectUrl}"
+                                                 FontSize="{DynamicResource FontSizeBody}"
+                                                 Foreground="{DynamicResource TextPrimary}" />
+                        </Grid>
+
+                        <!-- Third-party attributions list. Each row: short
+                             label + license. -->
+                        <StackPanel Orientation="Vertical" Spacing="8" Margin="0,12,0,0">
+                            <TextBlock Classes="fieldLabel" Text="ATTRIBUTIONS" />
+                            <ItemsControl ItemsSource="{Binding AboutInfo.Attributions}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:Attribution">
+                                        <StackPanel Orientation="Vertical" Spacing="2" Margin="0,4">
+                                            <TextBlock Text="{Binding Label}"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}"
+                                                       TextWrapping="Wrap" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="{Binding LicenseLabel}"
+                                                           FontSize="{DynamicResource FontSizeCaption}"
+                                                           Foreground="{DynamicResource TextMuted}" />
+                                                <TextBlock Text="·"
+                                                           FontSize="{DynamicResource FontSizeCaption}"
+                                                           Foreground="{DynamicResource TextMuted}" />
+                                                <SelectableTextBlock Text="{Binding Url}"
+                                                                     FontSize="{DynamicResource FontSizeCaption}"
+                                                                     Foreground="{DynamicResource TextMuted}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
 </UserControl>

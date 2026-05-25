@@ -22,6 +22,7 @@ public sealed class VerifyChainTests : IDisposable {
     private readonly SqliteEventStore _eventStore;
     private readonly FakeTimeProvider _timeProvider;
     private readonly BroadcastService _broadcaster;
+    private readonly FakeChainStatusCache _chainStatusCache;
     private readonly BeholderLocalService _service;
 
     public VerifyChainTests() {
@@ -44,11 +45,14 @@ public sealed class VerifyChainTests : IDisposable {
             new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
 
+        _chainStatusCache = new FakeChainStatusCache();
+
         _service = new BeholderLocalService(
             _broadcaster, pipeline, firewallStore, alertStore,
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
+            _chainStatusCache, new FakeStorageStatsProvider(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
@@ -67,6 +71,21 @@ public sealed class VerifyChainTests : IDisposable {
         Assert.Equal(0, response.RowsVerified);
         Assert.Equal(0, response.FailedAtSeq);
         Assert.Equal("", response.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task VerifyChain_UpdatesChainStatusCache_WithResult() {
+        // Phase 13.1: the user-triggered VerifyChain RPC writes to the
+        // same IChainStatusCache the periodic ChainIntegrityMonitor uses,
+        // so the Settings tab's "last verified at" surfaces the most-
+        // recent outcome regardless of which path produced it.
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        await _service.VerifyChain(new Local.VerifyChainRequest(), context);
+
+        var update = Assert.Single(_chainStatusCache.UpdateCalls);
+        Assert.True(update.Result.IsValid);
+        Assert.Equal(FixedTimestamp, update.VerifiedAt);
     }
 
     [Fact]
@@ -153,6 +172,7 @@ public sealed class VerifyChainTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             throwingStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
+            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);

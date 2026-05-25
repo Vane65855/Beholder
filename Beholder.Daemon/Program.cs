@@ -78,6 +78,21 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton(new ConnectionFactory(databasePath));
     builder.Services.AddSingleton<SqliteEventStore>();
     builder.Services.AddSingleton<IEventStore>(sp => sp.GetRequiredService<SqliteEventStore>());
+
+    // Phase 13.1: in-memory cache of the most recent chain-verification
+    // outcome. Written by both ChainIntegrityMonitor (periodic) and the
+    // user-triggered VerifyChain RPC; read by the GetStorageStats RPC for
+    // the Settings tab's Maintenance section.
+    builder.Services.AddSingleton<IChainStatusCache, ChainStatusCache>();
+    // Phase 13.1: SQLite per-table row counts + database file size, bundled
+    // with the cached chain status, for the Settings tab's Data Storage
+    // section. The factory lambda passes databasePath directly (rather than
+    // resolving via DI) because the variable is already in scope and the
+    // single-use primitive doesn't earn a Configure<T> binding.
+    builder.Services.AddSingleton<IStorageStatsProvider>(sp => new SqliteStorageStatsProvider(
+        connectionFactory: sp.GetRequiredService<ConnectionFactory>(),
+        chainStatusCache: sp.GetRequiredService<IChainStatusCache>(),
+        databasePath: databasePath));
     builder.Services.AddSingleton<SqliteFirewallRuleStore>();
     builder.Services.AddSingleton<IFirewallRuleStore>(sp => sp.GetRequiredService<SqliteFirewallRuleStore>());
     builder.Services.AddSingleton<SqliteAlertStore>();

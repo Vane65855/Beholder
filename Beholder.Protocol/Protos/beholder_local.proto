@@ -422,6 +422,41 @@ message SetLanDeviceLabelResponse {
   string message = 2;
 }
 
+// ---- Storage stats (Phase 13.1) ----
+
+// Mirrors Beholder.Core.TableStats. Per-table on-disk byte size is not
+// surfaced — see the C# record's XML docs for why.
+message TableStats {
+  string name = 1;
+  int64 row_count = 2;
+}
+
+// Mirrors Beholder.Core.ChainStatus. Wraps the existing VerifyChainResponse
+// shape plus the wall-clock time at which the verification was captured.
+// last_verified_unix_ns = 0 when no verification has run yet this session;
+// the rest of the fields are then zero/empty as well.
+message ChainStatus {
+  int64 last_verified_unix_ns = 1;
+  bool is_valid = 2;
+  int64 rows_verified = 3;
+  int64 failed_at_seq = 4;       // 0 when is_valid = true
+  string error_message = 5;      // "" when is_valid = true
+}
+
+message GetStorageStatsRequest {}
+
+// has_chain_status = false when the cache hasn't been written yet this
+// session. Splitting the flag out keeps the wire shape unambiguous when
+// chain_status's primitive fields default to zero/empty (which would
+// otherwise be indistinguishable from a "real" never-failed result).
+message GetStorageStatsResponse {
+  string database_path = 1;
+  int64 database_bytes_total = 2;
+  repeated TableStats tables = 3;
+  bool has_chain_status = 4;
+  ChainStatus chain_status = 5;
+}
+
 // ---- Service ----
 
 service BeholderLocal {
@@ -445,4 +480,6 @@ service BeholderLocal {
   rpc TriggerScan(TriggerScanRequest) returns (TriggerScanResponse);
   // Phase 9.5 — user-supplied cosmetic label
   rpc SetLanDeviceLabel(SetLanDeviceLabelRequest) returns (SetLanDeviceLabelResponse);
+  // Phase 13.1 — Settings tab Data Storage section
+  rpc GetStorageStats(GetStorageStatsRequest) returns (GetStorageStatsResponse);
 }

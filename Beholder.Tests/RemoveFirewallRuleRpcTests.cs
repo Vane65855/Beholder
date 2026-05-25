@@ -53,6 +53,7 @@ public sealed class RemoveFirewallRuleRpcTests : IDisposable {
             _firewallController, _enforcementState,
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
+            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 

@@ -35,6 +35,7 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             new FakeEventStore(), new FakeTrafficStore(),
             _lanDeviceStore, TestServiceFactory.CreateInactiveLanScannerService(_lanDeviceStore),
+            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
@@ -177,6 +178,7 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             new FakeEventStore(), new FakeTrafficStore(),
             throwingStore, TestServiceFactory.CreateInactiveLanScannerService(),
+            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             TimeProvider.System, NullLogger<BeholderLocalService>.Instance);
 
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);

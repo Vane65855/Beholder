@@ -46,6 +46,7 @@ public sealed class GetProtocolBreakdownRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             eventStore, trafficStore,
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
+            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 

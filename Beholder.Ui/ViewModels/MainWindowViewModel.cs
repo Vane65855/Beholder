@@ -15,7 +15,7 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
     private readonly FirewallTabViewModel _firewallTab;
     private readonly AlertsTabViewModel _alertsTab;
     private readonly ScannerTabViewModel _scannerTab;
-    private readonly SettingsTabViewModel _settingsTab = new();
+    private readonly SettingsTabViewModel _settingsTab;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsTrafficActive))]
@@ -66,7 +66,8 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         StatusStripViewModel statusStripVm,
         HistoricalChartLoader historicalChartLoader,
         IDispatcher dispatcher,
-        INotificationService notifications) {
+        INotificationService notifications,
+        IFolderOpener folderOpener) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
@@ -74,6 +75,7 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         ArgumentNullException.ThrowIfNull(historicalChartLoader);
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(notifications);
+        ArgumentNullException.ThrowIfNull(folderOpener);
         _daemonClient = daemonClient;
         _dispatcher = dispatcher;
         _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader, dispatcher);
@@ -86,6 +88,8 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
             daemonClient, streamSubscriber, dispatcher, notifications, NavigateToFirewallRuleAsync);
         _scannerTab = new ScannerTabViewModel(
             daemonClient, streamSubscriber, dispatcher, TimeProvider.System);
+        _settingsTab = new SettingsTabViewModel(
+            daemonClient, dispatcher, folderOpener, TimeProvider.System);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         _daemonClient.StateChanged += OnDaemonStateChanged;
@@ -170,6 +174,8 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
             _ = _alertsTab.ActivateAsync(CancellationToken.None);
         } else if (value == TabKind.Scanner) {
             _ = _scannerTab.ActivateAsync(CancellationToken.None);
+        } else if (value == TabKind.Settings) {
+            _ = _settingsTab.ActivateAsync(CancellationToken.None);
         }
     }
 

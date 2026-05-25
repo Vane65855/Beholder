@@ -22,6 +22,7 @@ namespace Beholder.Daemon.Pipeline;
 internal sealed class ChainIntegrityMonitor : IHostedService, IDisposable {
     private readonly IEventStore _eventStore;
     private readonly IAlertEmitter _alertEmitter;
+    private readonly IChainStatusCache _chainStatusCache;
     private readonly IOptionsMonitor<AlertOptions> _options;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ChainIntegrityMonitor> _logger;
@@ -33,17 +34,20 @@ internal sealed class ChainIntegrityMonitor : IHostedService, IDisposable {
     public ChainIntegrityMonitor(
         IEventStore eventStore,
         IAlertEmitter alertEmitter,
+        IChainStatusCache chainStatusCache,
         IOptionsMonitor<AlertOptions> options,
         TimeProvider timeProvider,
         ILogger<ChainIntegrityMonitor> logger
     ) {
         ArgumentNullException.ThrowIfNull(eventStore);
         ArgumentNullException.ThrowIfNull(alertEmitter);
+        ArgumentNullException.ThrowIfNull(chainStatusCache);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _eventStore = eventStore;
         _alertEmitter = alertEmitter;
+        _chainStatusCache = chainStatusCache;
         _options = options;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -113,10 +117,19 @@ internal sealed class ChainIntegrityMonitor : IHostedService, IDisposable {
             // Verify itself threw — log and bail. The next periodic tick
             // will retry; we don't synthesize a ChainError alert here
             // because the failure may be transient (e.g., DB lock) rather
-            // than a chain corruption.
+            // than a chain corruption. We also don't update the cache —
+            // a transient "the verify call threw" is meaningless to surface
+            // alongside the last real verification result.
             _logger.LogError(ex, "ChainIntegrityMonitor: VerifyAsync threw");
             return;
         }
+
+        // Cache both success and verification-failure outcomes so the
+        // Settings tab's Maintenance section can show "last verified: N
+        // minutes ago" regardless of whether the chain was valid. The
+        // user-triggered VerifyChain RPC writes the same cache; either
+        // writer's most-recent result wins.
+        _chainStatusCache.Update(result, _timeProvider.GetUtcNow());
 
         if (result.IsValid) {
             _logger.LogDebug(

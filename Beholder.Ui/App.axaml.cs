@@ -70,9 +70,12 @@ public partial class App : Application {
             var statusStripVm = new StatusStripViewModel(_processStateService, dispatcher);
             var historicalChartLoader = new HistoricalChartLoader(_daemonClient);
 
+            var folderOpener = new FolderOpener();
+
             _mainWindowVm = new MainWindowViewModel(
                 _daemonClient, _processStateService, _streamSubscriber,
-                statusStripVm, historicalChartLoader, dispatcher, _notifications);
+                statusStripVm, historicalChartLoader, dispatcher, _notifications,
+                folderOpener);
             var mainWindow = new MainWindow { DataContext = _mainWindowVm };
             desktop.MainWindow = mainWindow;
 

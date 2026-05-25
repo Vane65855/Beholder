@@ -34,6 +34,8 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? ListLanDevicesException { get; set; }
     public Exception? TriggerScanException { get; set; }
     public Exception? SetLanDeviceLabelException { get; set; }
+    public Exception? VerifyChainException { get; set; }
+    public Exception? GetStorageStatsException { get; set; }
 
     // Optional canned snapshot/response bodies so tests can drive real data
     // through the seeding path. Existing callers that don't set these get the
@@ -74,6 +76,17 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Func<ListLanDevicesRequest, CancellationToken, Task<ListLanDevicesResponse>>? AsyncListLanDevicesResponder { get; set; }
     public Func<TriggerScanRequest, TriggerScanResponse>? TriggerScanResponder { get; set; }
     public Func<SetLanDeviceLabelRequest, SetLanDeviceLabelResponse>? SetLanDeviceLabelResponder { get; set; }
+    public Func<VerifyChainRequest, VerifyChainResponse>? VerifyChainResponder { get; set; }
+    public Func<GetStorageStatsRequest, GetStorageStatsResponse>? GetStorageStatsResponder { get; set; }
+    /// <summary>
+    /// Async responder for <see cref="GetStorageStatsAsync"/>. Lets tests gate
+    /// the response on a <see cref="TaskCompletionSource{T}"/> they signal
+    /// later, exercising the cold-start race in
+    /// <see cref="Beholder.Ui.ViewModels.SettingsTabViewModel.ActivateAsync"/>.
+    /// Takes precedence over the synchronous responder when both are set;
+    /// mirrors the <see cref="AsyncListLanDevicesResponder"/> precedent.
+    /// </summary>
+    public Func<GetStorageStatsRequest, CancellationToken, Task<GetStorageStatsResponse>>? AsyncGetStorageStatsResponder { get; set; }
 
     // Captured invocations for assertions.
     public List<ApplyFirewallRuleRequest> ApplyFirewallRuleCalls { get; } = new();
@@ -83,6 +96,8 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public List<ListLanDevicesRequest> ListLanDevicesCalls { get; } = new();
     public List<TriggerScanRequest> TriggerScanCalls { get; } = new();
     public List<SetLanDeviceLabelRequest> SetLanDeviceLabelCalls { get; } = new();
+    public List<VerifyChainRequest> VerifyChainCalls { get; } = new();
+    public List<GetStorageStatsRequest> GetStorageStatsCalls { get; } = new();
     // Responder variant for tests that need the CancellationToken the VM
     // passed (e.g., cancellation-plumbing tests). Takes precedence over
     // AggregateTimelineResponse when set.
@@ -158,8 +173,11 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     }
 
     public Task<VerifyChainResponse> VerifyChainAsync(
-        VerifyChainRequest request, CancellationToken cancellationToken) =>
-        Task.FromResult(new VerifyChainResponse());
+        VerifyChainRequest request, CancellationToken cancellationToken) {
+        VerifyChainCalls.Add(request);
+        if (VerifyChainException is not null) throw VerifyChainException;
+        return Task.FromResult(VerifyChainResponder?.Invoke(request) ?? new VerifyChainResponse());
+    }
 
     public Task<GetProcessTimelineResponse> GetProcessTimelineAsync(
         GetProcessTimelineRequest request, CancellationToken cancellationToken) {
@@ -229,6 +247,16 @@ internal sealed class FakeDaemonClient : IDaemonClient {
         if (SetLanDeviceLabelException is not null) throw SetLanDeviceLabelException;
         return Task.FromResult(SetLanDeviceLabelResponder?.Invoke(request)
             ?? new SetLanDeviceLabelResponse { Success = true });
+    }
+
+    public Task<GetStorageStatsResponse> GetStorageStatsAsync(
+        GetStorageStatsRequest request, CancellationToken cancellationToken) {
+        GetStorageStatsCalls.Add(request);
+        if (GetStorageStatsException is not null) throw GetStorageStatsException;
+        if (AsyncGetStorageStatsResponder is not null)
+            return AsyncGetStorageStatsResponder(request, cancellationToken);
+        return Task.FromResult(GetStorageStatsResponder?.Invoke(request)
+            ?? new GetStorageStatsResponse());
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

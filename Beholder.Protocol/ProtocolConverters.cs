@@ -153,6 +153,53 @@ internal static class ProtocolConverters {
         };
     }
 
+    /// <summary>
+    /// Maps a table stats row onto its wire equivalent.
+    /// </summary>
+    public static Local.TableStats ToProto(this Core.TableStats source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Local.TableStats {
+            Name = source.Name,
+            RowCount = source.RowCount,
+        };
+    }
+
+    /// <summary>
+    /// Maps a chain status snapshot onto its wire equivalent. Inverses are
+    /// straightforward: null becomes the all-zero/empty shape with
+    /// <c>has_chain_status = false</c> on the enclosing response (see
+    /// <see cref="ToProto(Core.StorageStats)"/>).
+    /// </summary>
+    public static Local.ChainStatus ToProto(this Core.ChainStatus source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Local.ChainStatus {
+            LastVerifiedUnixNs = source.LastVerifiedAt.ToUnixTimeNanoseconds(),
+            IsValid = source.Result.IsValid,
+            RowsVerified = source.Result.RowsVerified,
+            FailedAtSeq = source.Result.FailedAtSeq ?? 0,
+            ErrorMessage = source.Result.ErrorMessage ?? "",
+        };
+    }
+
+    /// <summary>
+    /// Maps a storage stats snapshot onto its wire equivalent. The
+    /// nullability of <see cref="Core.StorageStats.ChainStatus"/> is encoded
+    /// via the <c>has_chain_status</c> boolean on the response so the UI can
+    /// distinguish "never verified this session" (no value) from "verified
+    /// successfully with zero rows" (real value with zero seq).
+    /// </summary>
+    public static Local.GetStorageStatsResponse ToProto(this Core.StorageStats source) {
+        ArgumentNullException.ThrowIfNull(source);
+        var response = new Local.GetStorageStatsResponse {
+            DatabasePath = source.DatabasePath,
+            DatabaseBytesTotal = source.DatabaseBytesTotal,
+            HasChainStatus = source.ChainStatus is not null,
+        };
+        foreach (var table in source.Tables) response.Tables.Add(table.ToProto());
+        if (source.ChainStatus is not null) response.ChainStatus = source.ChainStatus.ToProto();
+        return response;
+    }
+
     // ---- Traffic query adapters (Core → Proto) ----
 
     /// <summary>Maps a traffic time point onto its wire equivalent.</summary>
