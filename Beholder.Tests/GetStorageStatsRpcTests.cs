@@ -56,7 +56,10 @@ public sealed class GetStorageStatsRpcTests : IDisposable {
                 new TableStats("event_log", 100),
                 new TableStats("traffic_raw", 50_000),
             },
-            ChainStatus: null);
+            ChainStatus: null,
+            ChainFirstEventAt: null,
+            DaemonStartedAt: FixedTimestamp,
+            LanDeviceCount: 0);
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
 
         var response = await _service.GetStorageStats(new Local.GetStorageStatsRequest(), context);
@@ -77,7 +80,10 @@ public sealed class GetStorageStatsRpcTests : IDisposable {
             DatabaseBytesTotal: 100,
             Tables: Array.Empty<TableStats>(),
             ChainStatus: new ChainStatus(verifiedAt,
-                ChainVerificationResult.Success(rowsVerified: 1247)));
+                ChainVerificationResult.Success(rowsVerified: 1247)),
+            ChainFirstEventAt: null,
+            DaemonStartedAt: FixedTimestamp,
+            LanDeviceCount: 0);
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
 
         var response = await _service.GetStorageStats(new Local.GetStorageStatsRequest(), context);

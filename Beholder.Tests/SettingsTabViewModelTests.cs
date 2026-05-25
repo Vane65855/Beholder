@@ -11,14 +11,15 @@ public class SettingsTabViewModelTests {
     private static readonly DateTimeOffset FixedTimestamp =
         new(2026, 5, 22, 12, 0, 0, TimeSpan.Zero);
 
-    private static (SettingsTabViewModel Vm, FakeDaemonClient Client, FakeFolderOpener Folder, FakeTimeProvider Time)
+    private static (SettingsTabViewModel Vm, FakeDaemonClient Client, FakeShellOpener Shell, FakeClipboardWriter Clipboard, FakeTimeProvider Time)
     CreateVm(GetStorageStatsResponse? canned = null) {
         var client = new FakeDaemonClient();
         if (canned is not null) client.GetStorageStatsResponder = _ => canned;
-        var folder = new FakeFolderOpener();
+        var shell = new FakeShellOpener();
+        var clipboard = new FakeClipboardWriter();
         var time = new FakeTimeProvider(FixedTimestamp);
-        var vm = new SettingsTabViewModel(client, new SyncDispatcher(), folder, time);
-        return (vm, client, folder, time);
+        var vm = new SettingsTabViewModel(client, new SyncDispatcher(), shell, clipboard, time);
+        return (vm, client, shell, clipboard, time);
     }
 
     private static GetStorageStatsResponse MakeStats(
@@ -26,15 +27,26 @@ public class SettingsTabViewModelTests {
         long totalBytes = 1024L * 1024 * 42,
         bool includeChainStatus = false,
         bool chainValid = true,
-        long rowsVerified = 1000
+        long rowsVerified = 1000,
+        long? chainFirstEventUnixNs = null,
+        long? daemonStartedUnixNs = null,
+        long lanDeviceCount = 0
     ) {
         var response = new GetStorageStatsResponse {
             DatabasePath = path,
             DatabaseBytesTotal = totalBytes,
             HasChainStatus = includeChainStatus,
+            ChainFirstEventUnixNs = chainFirstEventUnixNs ?? 0,
+            DaemonStartedUnixNs = daemonStartedUnixNs ?? FixedTimestamp.ToUnixTimeMilliseconds() * 1_000_000L,
+            LanDeviceCount = lanDeviceCount,
         };
         response.Tables.Add(new TableStats { Name = "event_log", RowCount = 50 });
         response.Tables.Add(new TableStats { Name = "traffic_raw", RowCount = 10_000 });
+        response.Tables.Add(new TableStats { Name = "traffic_buckets_10s", RowCount = 5_000 });
+        response.Tables.Add(new TableStats { Name = "traffic_buckets_1m", RowCount = 2_000 });
+        response.Tables.Add(new TableStats { Name = "traffic_buckets_10m", RowCount = 800 });
+        response.Tables.Add(new TableStats { Name = "traffic_buckets_1h", RowCount = 100 });
+        response.Tables.Add(new TableStats { Name = "lan_device", RowCount = lanDeviceCount });
         if (includeChainStatus) {
             response.ChainStatus = new ChainStatus {
                 LastVerifiedUnixNs = FixedTimestamp.ToUnixTimeMilliseconds() * 1_000_000L,
@@ -52,27 +64,38 @@ public class SettingsTabViewModelTests {
     [Fact]
     public void Constructor_NullDaemonClient_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
-            null!, new SyncDispatcher(), new FakeFolderOpener(), new FakeTimeProvider(FixedTimestamp)));
+            null!, new SyncDispatcher(), new FakeShellOpener(), new FakeClipboardWriter(),
+            new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullDispatcher_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
-            new FakeDaemonClient(), null!, new FakeFolderOpener(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeDaemonClient(), null!, new FakeShellOpener(), new FakeClipboardWriter(),
+            new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
-    public void Constructor_NullFolderOpener_Throws() =>
+    public void Constructor_NullShellOpener_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
-            new FakeDaemonClient(), new SyncDispatcher(), null!, new FakeTimeProvider(FixedTimestamp)));
+            new FakeDaemonClient(), new SyncDispatcher(), null!, new FakeClipboardWriter(),
+            new FakeTimeProvider(FixedTimestamp)));
+
+    [Fact]
+    public void Constructor_NullClipboardWriter_Throws() =>
+        Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
+            new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(), null!,
+            new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullTimeProvider_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
-            new FakeDaemonClient(), new SyncDispatcher(), new FakeFolderOpener(), null!));
+            new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
+            new FakeClipboardWriter(), null!));
 
     [Fact]
     public void InitialState_NoStorageStats_NoTables_DefaultPlaceholders() {
-        var (vm, _, _, _) = CreateVm();
-        Assert.Empty(vm.Tables);
+        var (vm, _, _, _, _) = CreateVm();
+        Assert.Empty(vm.TrafficTables);
+        Assert.Empty(vm.FlatTables);
         Assert.Null(vm.StorageStats);
         Assert.False(vm.IsLoading);
         Assert.False(vm.HasError);
@@ -84,21 +107,123 @@ public class SettingsTabViewModelTests {
 
     [Fact]
     public async Task ActivateAsync_LoadsStorageStats_AndPopulatesTables() {
-        var (vm, client, _, _) = CreateVm(MakeStats(includeChainStatus: true));
+        var (vm, client, _, _, _) = CreateVm(MakeStats(includeChainStatus: true));
 
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
 
         Assert.False(vm.IsLoading);
         Assert.NotNull(vm.StorageStats);
-        Assert.Equal(2, vm.Tables.Count);
+        Assert.Equal(5, vm.TrafficTables.Count);     // 5 traffic tiers
+        Assert.Equal(2, vm.FlatTables.Count);        // event_log + lan_device
         Assert.True(vm.ChainStatus.HasResult);
         Assert.True(vm.ChainStatus.IsValid);
         Assert.Single(client.GetStorageStatsCalls);
     }
 
     [Fact]
+    public async Task ActivateAsync_TrafficTables_OrderedByCascadeNotAlphabetically() {
+        // The proto returns tables alphabetically: traffic_buckets_10m,
+        // traffic_buckets_10s, traffic_buckets_1h, traffic_buckets_1m,
+        // traffic_raw. The VM must re-sort them in cascade order:
+        // raw → 10s → 1m → 10m → 1h.
+        var (vm, _, _, _, _) = CreateVm(MakeStats());
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        var names = vm.TrafficTables.Select(r => r.Name).ToArray();
+        Assert.Equal(
+            new[] { "traffic_raw", "traffic_buckets_10s", "traffic_buckets_1m", "traffic_buckets_10m", "traffic_buckets_1h" },
+            names);
+    }
+
+    [Fact]
+    public async Task ActivateAsync_RatioComputation_TrafficTierAndAuditChainShares() {
+        // Default MakeStats() rows: traffic tiers sum to 17_900, event_log
+        // is 50, lan_device is 0. Grand total 17_950. TrafficTierRatio is
+        // 17_900/17_950 ≈ 0.997; AuditChainRatio is 50/17_950 ≈ 0.003;
+        // OtherTablesRatio is 0 (lan_device has 0 rows).
+        var (vm, _, _, _, _) = CreateVm(MakeStats());
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        Assert.InRange(vm.TrafficTierRatio + vm.AuditChainRatio + vm.OtherTablesRatio, 0.99, 1.01);
+        Assert.True(vm.TrafficTierRatio > vm.AuditChainRatio);
+        Assert.True(vm.AuditChainRatio > 0);
+    }
+
+    [Fact]
+    public async Task ActivateAsync_CascadeRatios_NormalisedToTrafficMax() {
+        // traffic_raw=10000 is the max → its ratio is 1.0; others scaled.
+        var (vm, _, _, _, _) = CreateVm(MakeStats());
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(5, vm.CascadeRatios.Count);
+        Assert.Equal(1.0, vm.CascadeRatios[0]);       // traffic_raw (max)
+        Assert.Equal(0.5, vm.CascadeRatios[1]);       // _10s = 5000 / 10000
+        Assert.Equal(0.2, vm.CascadeRatios[2]);       // _1m  = 2000 / 10000
+        Assert.Equal(0.08, vm.CascadeRatios[3]);      // _10m =  800 / 10000
+        Assert.Equal(0.01, vm.CascadeRatios[4]);      // _1h  =  100 / 10000
+    }
+
+    [Fact]
+    public async Task ActivateAsync_WatchingSinceLabel_FormatsRelativeToFirstEvent() {
+        // Chain first event 5 days before the fixed timestamp.
+        var fiveDaysAgo = FixedTimestamp.AddDays(-5);
+        var stats = MakeStats(chainFirstEventUnixNs: fiveDaysAgo.ToUnixTimeMilliseconds() * 1_000_000L);
+        var (vm, _, _, _, _) = CreateVm(stats);
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("5 days", vm.WatchingSinceLabel);
+        Assert.Contains(fiveDaysAgo.LocalDateTime.ToString("yyyy-MM-dd"), vm.WatchingSinceLabel);
+    }
+
+    [Fact]
+    public async Task ActivateAsync_WatchingSinceLabel_EmptyWhenChainEmpty() {
+        var (vm, _, _, _, _) = CreateVm(MakeStats(chainFirstEventUnixNs: 0));
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.Empty(vm.WatchingSinceLabel);
+    }
+
+    [Fact]
+    public async Task ActivateAsync_UptimeLabel_FormatsCorrectly() {
+        // Daemon started 4 hours and 12 minutes before the fixed timestamp.
+        var startedAt = FixedTimestamp - TimeSpan.FromMinutes(252);
+        var stats = MakeStats(daemonStartedUnixNs: startedAt.ToUnixTimeMilliseconds() * 1_000_000L);
+        var (vm, _, _, _, _) = CreateVm(stats);
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("4h 12m", vm.UptimeLabel);
+    }
+
+    [Fact]
+    public async Task ActivateAsync_LanDeviceCountLabel_HandlesSingular() {
+        var (vm, _, _, _, _) = CreateVm(MakeStats(lanDeviceCount: 1));
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("1 LAN device tracked", vm.LanDeviceCountLabel);
+    }
+
+    [Fact]
+    public async Task ActivateAsync_LanDeviceCountLabel_HandlesPlural() {
+        var (vm, _, _, _, _) = CreateVm(MakeStats(lanDeviceCount: 12));
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("12 LAN devices tracked", vm.LanDeviceCountLabel);
+    }
+
+    [Fact]
+    public async Task ActivateAsync_LastRefreshedAt_SetOnLoad() {
+        var (vm, _, _, _, _) = CreateVm(MakeStats());
+        Assert.Null(vm.LastRefreshedAt);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(FixedTimestamp, vm.LastRefreshedAt);
+        Assert.Contains("Last refreshed", vm.LastRefreshedAtLabel);
+    }
+
+    [Fact]
     public async Task ActivateAsync_RpcThrowsRpcException_SetsErrorBanner() {
-        var (vm, client, _, _) = CreateVm();
+        var (vm, client, _, _, _) = CreateVm();
         client.GetStorageStatsException = new RpcException(
             new Status(StatusCode.Unavailable, "daemon offline"));
 
@@ -112,18 +237,13 @@ public class SettingsTabViewModelTests {
 
     [Fact]
     public async Task ActivateAsync_ConcurrentCallers_ShareSameTask() {
-        var (vm, client, _, _) = CreateVm();
+        var (vm, client, _, _, _) = CreateVm();
         var tcs = new TaskCompletionSource<GetStorageStatsResponse>();
-        // Hold the response until we observe both callers in flight. The
-        // async responder shape returns a Task so this awaits naturally
-        // rather than blocking the test thread synchronously.
         client.AsyncGetStorageStatsResponder = (_, _) => tcs.Task;
 
         var task1 = vm.ActivateAsync(TestContext.Current.CancellationToken);
         var task2 = vm.ActivateAsync(TestContext.Current.CancellationToken);
 
-        // Cold-start race contract: both callers must hand back the same
-        // Task instance so they observe the same load attempt.
         Assert.Same(task1, task2);
         tcs.SetResult(MakeStats());
         await task1;
@@ -134,7 +254,7 @@ public class SettingsTabViewModelTests {
 
     [Fact]
     public async Task RefreshCommand_ReFetches_AndRebuildsTables() {
-        var (vm, client, _, _) = CreateVm(MakeStats());
+        var (vm, client, _, _, _) = CreateVm(MakeStats());
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
 
         client.GetStorageStatsResponder = _ => {
@@ -145,8 +265,9 @@ public class SettingsTabViewModelTests {
         };
         await vm.RefreshStorageStatsCommand.ExecuteAsync(null);
 
-        var only = Assert.Single(vm.Tables);
-        Assert.Equal("lan_device", only.Name);
+        Assert.Empty(vm.TrafficTables);
+        Assert.Single(vm.FlatTables);
+        Assert.Equal("lan_device", vm.FlatTables[0].Name);
         Assert.False(vm.IsLoading);
         Assert.False(vm.IsRefreshing);
         Assert.Equal(2, client.GetStorageStatsCalls.Count);
@@ -154,7 +275,7 @@ public class SettingsTabViewModelTests {
 
     [Fact]
     public async Task RefreshCommand_RpcFails_SetsErrorBanner_WithoutClearingStats() {
-        var (vm, client, _, _) = CreateVm(MakeStats());
+        var (vm, client, _, _, _) = CreateVm(MakeStats());
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
 
         client.GetStorageStatsException = new RpcException(
@@ -163,17 +284,15 @@ public class SettingsTabViewModelTests {
 
         Assert.True(vm.HasError);
         Assert.Contains("disk full", vm.ErrorMessage);
-        // Stats from the successful initial load are preserved — the
-        // failed refresh shouldn't wipe what's already on screen.
         Assert.NotNull(vm.StorageStats);
-        Assert.Equal(2, vm.Tables.Count);
+        Assert.NotEmpty(vm.TrafficTables);
     }
 
     // ---- VerifyChainCommand ----
 
     [Fact]
     public async Task VerifyChainCommand_Success_UpdatesChainStatusRow() {
-        var (vm, client, _, _) = CreateVm(MakeStats());
+        var (vm, client, _, _, _) = CreateVm(MakeStats());
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
         client.VerifyChainResponder = _ => new VerifyChainResponse {
             IsValid = true, RowsVerified = 1247,
@@ -184,13 +303,15 @@ public class SettingsTabViewModelTests {
         Assert.True(vm.ChainStatus.HasResult);
         Assert.True(vm.ChainStatus.IsValid);
         Assert.Equal(1247, vm.ChainStatus.RowsVerified);
+        Assert.Equal("VALID", vm.ChainStatus.StatusPillLabel);
+        Assert.Equal("SeveritySuccess", vm.ChainStatus.StatusPillBrushKey);
         Assert.True(vm.HasVerifyStatus);
         Assert.False(vm.VerifyStatusIsError);
     }
 
     [Fact]
     public async Task VerifyChainCommand_Invalid_ShowsErrorBanner() {
-        var (vm, client, _, _) = CreateVm(MakeStats());
+        var (vm, client, _, _, _) = CreateVm(MakeStats());
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
         client.VerifyChainResponder = _ => new VerifyChainResponse {
             IsValid = false, RowsVerified = 99, FailedAtSeq = 50,
@@ -204,11 +325,13 @@ public class SettingsTabViewModelTests {
         Assert.Contains("seq 50", vm.VerifyStatusMessage);
         Assert.False(vm.ChainStatus.IsValid);
         Assert.Equal(50, vm.ChainStatus.FailedAtSeq);
+        Assert.Equal("INVALID", vm.ChainStatus.StatusPillLabel);
+        Assert.Equal("SeverityDanger", vm.ChainStatus.StatusPillBrushKey);
     }
 
     [Fact]
     public async Task VerifyChainCommand_RpcThrows_ShowsErrorBanner() {
-        var (vm, client, _, _) = CreateVm(MakeStats());
+        var (vm, client, _, _, _) = CreateVm(MakeStats());
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
         client.VerifyChainException = new RpcException(
             new Status(StatusCode.Internal, "verify exploded"));
@@ -223,28 +346,28 @@ public class SettingsTabViewModelTests {
     // ---- OpenDataFolderCommand ----
 
     [Fact]
-    public async Task OpenDataFolderCommand_CallsFolderOpener_WithParentDirectory() {
-        var (vm, _, folder, _) = CreateVm(MakeStats(path: @"C:\daemon\data\beholder.db"));
+    public async Task OpenDataFolderCommand_CallsShellOpener_WithParentDirectory() {
+        var (vm, _, shell, _, _) = CreateVm(MakeStats(path: @"C:\daemon\data\beholder.db"));
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
 
         vm.OpenDataFolderCommand.Execute(null);
 
-        var opened = Assert.Single(folder.OpenedPaths);
+        var opened = Assert.Single(shell.OpenedTargets);
         Assert.Equal(@"C:\daemon\data", opened);
     }
 
     [Fact]
     public void OpenDataFolderCommand_NoStatsLoaded_DoesNothing() {
-        var (vm, _, folder, _) = CreateVm();
+        var (vm, _, shell, _, _) = CreateVm();
         vm.OpenDataFolderCommand.Execute(null);
-        Assert.Empty(folder.OpenedPaths);
+        Assert.Empty(shell.OpenedTargets);
     }
 
     [Fact]
     public async Task OpenDataFolderCommand_OpenerThrows_SurfacesViaVerifyBanner() {
-        var (vm, _, folder, _) = CreateVm(MakeStats(path: @"C:\nonexistent\beholder.db"));
+        var (vm, _, shell, _, _) = CreateVm(MakeStats(path: @"C:\nonexistent\beholder.db"));
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
-        folder.Exception = new InvalidOperationException("shell failed");
+        shell.Exception = new InvalidOperationException("shell failed");
 
         vm.OpenDataFolderCommand.Execute(null);
 
@@ -253,11 +376,80 @@ public class SettingsTabViewModelTests {
         Assert.Contains("shell failed", vm.VerifyStatusMessage);
     }
 
+    // ---- OpenUrlCommand ----
+
+    [Fact]
+    public void OpenUrlCommand_HappyPath_CallsShellOpener() {
+        var (vm, _, shell, _, _) = CreateVm();
+
+        vm.OpenUrlCommand.Execute("https://github.com/Vane65855/Beholder");
+
+        var target = Assert.Single(shell.OpenedTargets);
+        Assert.Equal("https://github.com/Vane65855/Beholder", target);
+    }
+
+    [Fact]
+    public void OpenUrlCommand_NullOrEmpty_IsNoop() {
+        var (vm, _, shell, _, _) = CreateVm();
+        vm.OpenUrlCommand.Execute(null);
+        vm.OpenUrlCommand.Execute("");
+        vm.OpenUrlCommand.Execute("   ");
+        Assert.Empty(shell.OpenedTargets);
+    }
+
+    [Fact]
+    public void OpenUrlCommand_OpenerThrows_SurfacesViaVerifyBanner() {
+        var (vm, _, shell, _, _) = CreateVm();
+        shell.Exception = new InvalidOperationException("browser missing");
+
+        vm.OpenUrlCommand.Execute("https://example.com");
+
+        Assert.True(vm.HasVerifyStatus);
+        Assert.True(vm.VerifyStatusIsError);
+        Assert.Contains("browser missing", vm.VerifyStatusMessage);
+    }
+
+    // ---- CopyToClipboardCommand ----
+
+    [Fact]
+    public async Task CopyToClipboardCommand_HappyPath_WritesAndConfirms() {
+        var (vm, _, _, clipboard, _) = CreateVm();
+
+        await vm.CopyToClipboardCommand.ExecuteAsync(@"C:\daemon\data\beholder.db");
+
+        var written = Assert.Single(clipboard.Writes);
+        Assert.Equal(@"C:\daemon\data\beholder.db", written);
+        Assert.True(vm.HasVerifyStatus);
+        Assert.False(vm.VerifyStatusIsError);
+        Assert.Equal("Copied to clipboard", vm.VerifyStatusMessage);
+    }
+
+    [Fact]
+    public async Task CopyToClipboardCommand_NullOrEmpty_IsNoop() {
+        var (vm, _, _, clipboard, _) = CreateVm();
+        await vm.CopyToClipboardCommand.ExecuteAsync(null);
+        await vm.CopyToClipboardCommand.ExecuteAsync("");
+        Assert.Empty(clipboard.Writes);
+        Assert.False(vm.HasVerifyStatus);
+    }
+
+    [Fact]
+    public async Task CopyToClipboardCommand_WriterThrows_SurfacesViaVerifyBanner() {
+        var (vm, _, _, clipboard, _) = CreateVm();
+        clipboard.Exception = new InvalidOperationException("clipboard busy");
+
+        await vm.CopyToClipboardCommand.ExecuteAsync("test");
+
+        Assert.True(vm.HasVerifyStatus);
+        Assert.True(vm.VerifyStatusIsError);
+        Assert.Contains("clipboard busy", vm.VerifyStatusMessage);
+    }
+
     // ---- Dismiss commands ----
 
     [Fact]
     public async Task DismissErrorCommand_ClearsHasError() {
-        var (vm, client, _, _) = CreateVm();
+        var (vm, client, _, _, _) = CreateVm();
         client.GetStorageStatsException = new RpcException(
             new Status(StatusCode.Unavailable, "down"));
         await vm.ActivateAsync(TestContext.Current.CancellationToken);
@@ -280,11 +472,36 @@ public class SettingsTabViewModelTests {
     public void FormatBytes_FormatsHumanReadable(long bytes, string expected) =>
         Assert.Equal(expected, SettingsTabViewModel.FormatBytes(bytes));
 
+    // ---- FormatUptime helper ----
+
+    [Theory]
+    [InlineData(45.0, "45s")]
+    [InlineData(60.0, "1m")]
+    [InlineData(125.0, "2m")]
+    [InlineData(3700.0, "1h 1m")]
+    [InlineData(3600.0, "1h")]
+    [InlineData(252.0 * 60, "4h 12m")]
+    [InlineData(86400.0, "1d")]
+    [InlineData(90000.0, "1d 1h")]
+    [InlineData(7 * 86400.0, "7d")]
+    public void FormatUptime_FormatsCommonDurations(double elapsedSeconds, string expected) {
+        var start = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var now = start + TimeSpan.FromSeconds(elapsedSeconds);
+        Assert.Equal(expected, SettingsTabViewModel.FormatUptime(start, now));
+    }
+
+    [Fact]
+    public void FormatUptime_NegativeElapsed_ReturnsZero() {
+        var start = new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero);
+        var now = start - TimeSpan.FromMinutes(5);
+        Assert.Equal("0s", SettingsTabViewModel.FormatUptime(start, now));
+    }
+
     // ---- Dispose ----
 
     [Fact]
     public void Dispose_IsIdempotent() {
-        var (vm, _, _, _) = CreateVm();
+        var (vm, _, _, _, _) = CreateVm();
         vm.Dispose();
         vm.Dispose();   // second dispose is a no-op
     }

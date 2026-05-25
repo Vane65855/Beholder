@@ -67,7 +67,8 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         HistoricalChartLoader historicalChartLoader,
         IDispatcher dispatcher,
         INotificationService notifications,
-        IFolderOpener folderOpener) {
+        IShellOpener shellOpener,
+        IClipboardWriter clipboardWriter) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
@@ -75,7 +76,8 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         ArgumentNullException.ThrowIfNull(historicalChartLoader);
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(notifications);
-        ArgumentNullException.ThrowIfNull(folderOpener);
+        ArgumentNullException.ThrowIfNull(shellOpener);
+        ArgumentNullException.ThrowIfNull(clipboardWriter);
         _daemonClient = daemonClient;
         _dispatcher = dispatcher;
         _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader, dispatcher);
@@ -89,7 +91,7 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         _scannerTab = new ScannerTabViewModel(
             daemonClient, streamSubscriber, dispatcher, TimeProvider.System);
         _settingsTab = new SettingsTabViewModel(
-            daemonClient, dispatcher, folderOpener, TimeProvider.System);
+            daemonClient, dispatcher, shellOpener, clipboardWriter, TimeProvider.System);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         _daemonClient.StateChanged += OnDaemonStateChanged;

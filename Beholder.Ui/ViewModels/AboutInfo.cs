@@ -11,6 +11,18 @@ namespace Beholder.Ui.ViewModels;
 /// changes during the application's lifetime.
 /// </summary>
 internal sealed class AboutInfo {
+    /// <summary>
+    /// Multi-line ASCII art for the project's logo, rendered in the About
+    /// section's header. A pyramid-with-eye motif (the all-seeing eye, an
+    /// on-brand fit for a "Beholder" product). Designed to render correctly
+    /// in any monospace font; six lines tall, eleven characters wide.
+    /// </summary>
+    public const string AsciiEyeArt =
+        "      ▲      \n" +
+        "     ╱ ╲     \n" +
+        "    ╱ ◉ ╲    \n" +
+        "   ╱_____╲   \n";
+
     /// <summary>e.g. "0.13.1.0".</summary>
     public string Version { get; }
 

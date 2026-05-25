@@ -20,6 +20,12 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton(TimeProvider.System);
 
+// Phase 13.1.1: captures the daemon's start time so the Settings tab's
+// MOTD strip can render an uptime label. Registered before any consumer
+// so its StartedAt approximates "host builder ready, services about to
+// begin work."
+builder.Services.AddSingleton<IDaemonClock, DaemonClock>();
+
 var databasePath = Path.Combine(AppContext.BaseDirectory, "data", "beholder.db");
 new DatabaseInitializer(databasePath).Initialize();
 
@@ -92,6 +98,7 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<IStorageStatsProvider>(sp => new SqliteStorageStatsProvider(
         connectionFactory: sp.GetRequiredService<ConnectionFactory>(),
         chainStatusCache: sp.GetRequiredService<IChainStatusCache>(),
+        daemonClock: sp.GetRequiredService<IDaemonClock>(),
         databasePath: databasePath));
     builder.Services.AddSingleton<SqliteFirewallRuleStore>();
     builder.Services.AddSingleton<IFirewallRuleStore>(sp => sp.GetRequiredService<SqliteFirewallRuleStore>());

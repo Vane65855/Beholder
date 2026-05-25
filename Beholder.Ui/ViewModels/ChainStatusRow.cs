@@ -43,6 +43,23 @@ internal sealed partial class ChainStatusRow : ObservableObject {
     private string _resultSummary = string.Empty;
 
     /// <summary>
+    /// Theme-token key for the status pill's background brush:
+    /// <c>"SeveritySuccess"</c> when the chain is valid,
+    /// <c>"SeverityDanger"</c> when it failed, <c>"BorderStrong"</c> when
+    /// no verification has run yet. XAML binds to this via a
+    /// <c>DynamicResource</c>-shaped converter so the pill color reacts to
+    /// theme swaps without rebinding.
+    /// </summary>
+    [ObservableProperty]
+    private string _statusPillBrushKey = "BorderStrong";
+
+    /// <summary>
+    /// Short pill label: <c>"VALID"</c> / <c>"INVALID"</c> / <c>"NEVER VERIFIED"</c>.
+    /// </summary>
+    [ObservableProperty]
+    private string _statusPillLabel = "NEVER VERIFIED";
+
+    /// <summary>
     /// Builds a row from a wire <see cref="ChainStatus"/> snapshot. Pass
     /// <c>null</c> to render the "never verified" placeholder (used when
     /// <c>GetStorageStatsResponse.HasChainStatus == false</c>).
@@ -71,6 +88,8 @@ internal sealed partial class ChainStatusRow : ObservableObject {
             ErrorMessage = null;
             LastVerifiedAtLabel = NeverVerifiedLabel;
             ResultSummary = string.Empty;
+            StatusPillBrushKey = "BorderStrong";
+            StatusPillLabel = "NEVER VERIFIED";
             return;
         }
         LastVerifiedAt = DateTimeOffset.FromUnixTimeMilliseconds(proto.LastVerifiedUnixNs / 1_000_000L);
@@ -81,10 +100,12 @@ internal sealed partial class ChainStatusRow : ObservableObject {
         ErrorMessage = string.IsNullOrEmpty(proto.ErrorMessage) ? null : proto.ErrorMessage;
         RefreshRelativeLabel(timeProvider);
         ResultSummary = IsValid
-            ? $"valid ({RowsVerified.ToString("N0", CultureInfo.InvariantCulture)} rows)"
+            ? $"{RowsVerified.ToString("N0", CultureInfo.InvariantCulture)} rows"
             : FailedAtSeq.HasValue
                 ? $"failed at seq {FailedAtSeq.Value}: {ErrorMessage}"
                 : $"failed: {ErrorMessage}";
+        StatusPillBrushKey = IsValid ? "SeveritySuccess" : "SeverityDanger";
+        StatusPillLabel = IsValid ? "VALID" : "INVALID";
     }
 
     /// <summary>

@@ -20,6 +20,7 @@
             <converters:EnumToIntConverter x:Key="EnumToIntConverter" />
             <converters:StringEqualsConverter x:Key="StringEqualsConverter" />
             <converters:CountToSeverityBrushConverter x:Key="CountToSeverityBrushConverter" />
+            <converters:BrushKeyConverter x:Key="BrushKeyConverter" />
 
             <!-- Avalonia 12's WindowDrawnDecorations replaced the removed
                  ExtendClientAreaChromeHints="NoChrome" flag. Overriding its

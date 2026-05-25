@@ -194,6 +194,9 @@ internal static class ProtocolConverters {
             DatabasePath = source.DatabasePath,
             DatabaseBytesTotal = source.DatabaseBytesTotal,
             HasChainStatus = source.ChainStatus is not null,
+            ChainFirstEventUnixNs = source.ChainFirstEventAt?.ToUnixTimeNanoseconds() ?? 0,
+            DaemonStartedUnixNs = source.DaemonStartedAt.ToUnixTimeNanoseconds(),
+            LanDeviceCount = source.LanDeviceCount,
         };
         foreach (var table in source.Tables) response.Tables.Add(table.ToProto());
         if (source.ChainStatus is not null) response.ChainStatus = source.ChainStatus.ToProto();

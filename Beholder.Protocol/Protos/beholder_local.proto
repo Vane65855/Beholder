@@ -455,6 +455,18 @@ message GetStorageStatsResponse {
   repeated TableStats tables = 3;
   bool has_chain_status = 4;
   ChainStatus chain_status = 5;
+  // Phase 13.1.1: backs the Settings tab About section's "Watching since"
+  // row and the MOTD strip's status fields.
+  // 0 when the chain is empty (fresh install). Otherwise the Unix-ns
+  // timestamp of the earliest row in event_log.
+  int64 chain_first_event_unix_ns = 6;
+  // Wall-clock time at which the daemon process started. The Settings tab
+  // derives "uptime 4h 12m" by subtracting from the current clock.
+  int64 daemon_started_unix_ns = 7;
+  // Duplicates the lan_device table's row count as a top-level field for
+  // convenience. The Settings tab's MOTD strip uses this to render
+  // "N LAN devices tracked" without re-scanning the per-table list.
+  int64 lan_device_count = 8;
 }
 
 // ---- Service ----

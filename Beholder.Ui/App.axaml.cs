@@ -70,13 +70,21 @@ public partial class App : Application {
             var statusStripVm = new StatusStripViewModel(_processStateService, dispatcher);
             var historicalChartLoader = new HistoricalChartLoader(_daemonClient);
 
-            var folderOpener = new FolderOpener();
+            var shellOpener = new ShellOpener();
+            // The clipboard writer needs a TopLevel to reach the OS clipboard,
+            // but TopLevel is the MainWindow we're about to construct. Pass a
+            // Func that returns the live window — the lambda captures the
+            // local by reference, so updating `mainWindow` after this point
+            // makes the Func resolve to the constructed window when invoked.
+            MainWindow? mainWindowRef = null;
+            var clipboardWriter = new AvaloniaClipboardWriter(() => mainWindowRef);
 
             _mainWindowVm = new MainWindowViewModel(
                 _daemonClient, _processStateService, _streamSubscriber,
                 statusStripVm, historicalChartLoader, dispatcher, _notifications,
-                folderOpener);
+                shellOpener, clipboardWriter);
             var mainWindow = new MainWindow { DataContext = _mainWindowVm };
+            mainWindowRef = mainWindow;
             desktop.MainWindow = mainWindow;
 
             // Notification click → restore window + deep-link to alert. App

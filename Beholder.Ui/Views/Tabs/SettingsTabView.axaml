@@ -7,33 +7,69 @@
              Background="{DynamicResource BackgroundRoot}">
 
     <UserControl.Styles>
-        <!-- Section card outer container. One per section (Data Storage,
-             Maintenance, About). Mirrors the FirewallTabView header card
-             idiom: surface BackgroundPanel + thin divider border. -->
+        <!-- ═════ Section card chrome ═════
+             3-px left-edge stripe (Severity Rail pattern from UI_DESIGN
+             §5.1, applied at section level) + 1-px outline on the other
+             three sides. Each section adds an "accent*" class that
+             overrides the stripe color. -->
         <Style Selector="Border.sectionCard">
             <Setter Property="Background" Value="{DynamicResource BackgroundPanel}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource DividerHorizontal}" />
-            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+            <Setter Property="BorderThickness" Value="1,1,1,1" />
             <Setter Property="Padding" Value="24,20" />
+            <Setter Property="CornerRadius" Value="2" />
+        </Style>
+        <!-- The accent stripe is a dedicated thin Border placed inside
+             each section so the card's own border can stay 1px on all
+             sides; pure XAML doesn't let us set a per-edge BorderBrush. -->
+        <Style Selector="Border.accentStripe">
+            <Setter Property="Width" Value="3" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="Margin" Value="-24,-20,0,-20" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+        </Style>
+        <Style Selector="Border.accentStripe.cyan">
+            <Setter Property="Background" Value="{DynamicResource AccentPrimary}" />
+        </Style>
+        <Style Selector="Border.accentStripe.amber">
+            <Setter Property="Background" Value="{DynamicResource SeverityWarn}" />
+        </Style>
+        <Style Selector="Border.accentStripe.neutral">
+            <Setter Property="Background" Value="{DynamicResource BorderStrong}" />
         </Style>
 
-        <!-- Section title — small-caps label matching the rest of the app. -->
+        <!-- ═════ Section notch (#16) ═════
+             A small "label notch" overlaid on the top edge of each
+             section card. Sits above the card's top border with a
+             background matching the page so it visually punches through
+             the border, like the title tab on a Unix terminal panel. -->
+        <Style Selector="Border.sectionNotch">
+            <Setter Property="Background" Value="{DynamicResource BackgroundRoot}" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="Margin" Value="20,-10,0,0" />
+        </Style>
+
+        <!-- ═════ Typography ═════ -->
         <Style Selector="TextBlock.sectionTitle">
             <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
             <Setter Property="LetterSpacing" Value="2" />
             <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
         </Style>
-
-        <!-- Field label inside a section — same treatment as the Scanner
-             tab's detail-pane field labels. -->
+        <Style Selector="TextBlock.subsectionTitle">
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="LetterSpacing" Value="2" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+        </Style>
         <Style Selector="TextBlock.fieldLabel">
             <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
             <Setter Property="LetterSpacing" Value="2" />
             <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
         </Style>
 
-        <!-- Action button — mirrors the Scanner tab's scanButton style for
-             cross-tab consistency. -->
+        <!-- ═════ Action button (mirrors Scanner tab's scanButton) ═════ -->
         <Style Selector="Button.actionButton">
             <Setter Property="MinWidth" Value="120" />
             <Setter Property="Padding" Value="12,6" />
@@ -54,219 +90,567 @@
             <Setter Property="Cursor" Value="Arrow" />
         </Style>
 
-        <!-- Traffic-tier table row vs flat-schema table row. Just a subtle
-             tint to differentiate the two groupings; the order is whatever
-             sqlite_master returns (alphabetical). -->
-        <Style Selector="Border.tableRow">
-            <Setter Property="Padding" Value="0,6" />
-            <Setter Property="BorderBrush" Value="{DynamicResource DividerHorizontal}" />
+        <!-- ═════ Icon button (copy-to-clipboard) ═════ -->
+        <Style Selector="Button.iconButton">
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="2" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="FontFamily" Value="Cascadia Code, Consolas, monospace" />
+        </Style>
+        <Style Selector="Button.iconButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+        </Style>
+
+        <!-- ═════ Inline link (clickable URL) ═════ -->
+        <Style Selector="Button.link">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentPrimary}" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+        </Style>
+        <Style Selector="Button.link:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource AccentHover}" />
+        </Style>
+        <Style Selector="Button.link:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
+        <!-- ═════ Chain-status pill (#7) ═════
+             Background brush comes from a string key on the VM resolved
+             at bind time via BrushKeyConverter. BrushTransition makes
+             the color change smooth when verify flips state — pulse
+             without scripting (#25). -->
+        <Style Selector="Border.statusPill">
+            <Setter Property="CornerRadius" Value="2" />
+            <Setter Property="Padding" Value="8,2" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.3" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Border.statusPill TextBlock">
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="LetterSpacing" Value="1" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextOnAccent}" />
+        </Style>
+
+        <!-- ═════ Stacked total bar / per-row bar ═════ -->
+        <Style Selector="Border.barSegment">
+            <Setter Property="Height" Value="8" />
+            <Setter Property="CornerRadius" Value="1" />
+        </Style>
+        <Style Selector="Border.barTrack">
+            <Setter Property="Height" Value="6" />
+            <Setter Property="CornerRadius" Value="1" />
+            <Setter Property="Background" Value="{DynamicResource BorderSubtle}" />
+            <Setter Property="ClipToBounds" Value="True" />
+        </Style>
+
+        <!-- ═════ MOTD-style top strip (#20) ═════ -->
+        <Style Selector="Border.motdStrip">
+            <Setter Property="Background" Value="{DynamicResource BackgroundNavBar}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="24,8" />
+            <Setter Property="Margin" Value="0,0,0,16" />
+        </Style>
+        <Style Selector="Border.motdStrip TextBlock">
+            <Setter Property="FontFamily" Value="Cascadia Code, Consolas, monospace" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+        </Style>
+        <Style Selector="Border.motdPill">
+            <Setter Property="CornerRadius" Value="2" />
+            <Setter Property="Padding" Value="6,1" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.3" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Border.motdPill TextBlock">
+            <Setter Property="FontSize" Value="9" />
+            <Setter Property="LetterSpacing" Value="1" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextOnAccent}" />
+        </Style>
+
+        <!-- ═════ Cascade sparkline (#19) ═════
+             Five thin vertical bars inline next to the TRAFFIC ROLLUP
+             subheader. Each bar is bound to one of the five
+             CascadeRatios via the SparklineBar style and a positional
+             ContentControl in the data template. -->
+        <Style Selector="Border.sparklineBar">
+            <Setter Property="Width" Value="4" />
+            <Setter Property="Background" Value="{DynamicResource AccentPrimary}" />
+            <Setter Property="VerticalAlignment" Value="Bottom" />
+            <Setter Property="CornerRadius" Value="1" />
+            <Setter Property="Opacity" Value="0.7" />
+        </Style>
+
+        <!-- ═════ Responsive layout (#12) ═════
+             Default (narrow): all three section cards span both columns,
+             stacked vertically. When the UserControl has the "wide"
+             class (Bounds.Width >= 1400), Maintenance and About each
+             take one column in row 1, side by side. -->
+        <Style Selector="Border#MaintenanceCard">
+            <Setter Property="Grid.Row" Value="1" />
+            <Setter Property="Grid.Column" Value="0" />
+            <Setter Property="Grid.ColumnSpan" Value="2" />
+        </Style>
+        <Style Selector="Border#AboutCard">
+            <Setter Property="Grid.Row" Value="2" />
+            <Setter Property="Grid.Column" Value="0" />
+            <Setter Property="Grid.ColumnSpan" Value="2" />
+        </Style>
+        <Style Selector="UserControl.wide Border#MaintenanceCard">
+            <Setter Property="Grid.Row" Value="1" />
+            <Setter Property="Grid.Column" Value="0" />
+            <Setter Property="Grid.ColumnSpan" Value="1" />
+        </Style>
+        <Style Selector="UserControl.wide Border#AboutCard">
+            <Setter Property="Grid.Row" Value="1" />
+            <Setter Property="Grid.Column" Value="1" />
+            <Setter Property="Grid.ColumnSpan" Value="1" />
         </Style>
     </UserControl.Styles>
 
-    <DockPanel>
-        <!-- Error banner — DockPanel.Dock="Top" so it floats above the
-             ScrollViewer content rather than scrolling with it. -->
-        <controls:ErrorBanner DockPanel.Dock="Top"
-                              Severity="Danger"
-                              Message="{Binding ErrorMessage}"
-                              IsVisible="{Binding HasError}"
-                              DismissCommand="{Binding DismissErrorCommand}" />
+    <Grid>
+        <!-- ═════ Sticky-header overlay (#13) ═════
+             Sits on top of the ScrollViewer in z-order. Visibility +
+             text managed by SettingsTabView.axaml.cs's ScrollChanged
+             handler. -->
+        <Border x:Name="StickyHeader"
+                ZIndex="10"
+                VerticalAlignment="Top"
+                Background="{DynamicResource BackgroundElevated}"
+                BorderBrush="{DynamicResource DividerHorizontal}"
+                BorderThickness="0,0,0,1"
+                Padding="24,10"
+                IsVisible="False">
+            <TextBlock x:Name="StickyHeaderText" Classes="sectionTitle" Text="DATA STORAGE" />
+        </Border>
 
-        <!-- Loading state: shown only while the very first GetStorageStats
-             call is in flight. Subsequent refreshes leave the populated
-             sections visible. -->
-        <Panel IsVisible="{Binding ShowLoadingState}">
-            <TextBlock Text="Loading settings…"
-                       Foreground="{DynamicResource TextMuted}"
-                       FontSize="{DynamicResource FontSizeHeading}"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center" />
-        </Panel>
+        <DockPanel>
+            <controls:ErrorBanner DockPanel.Dock="Top"
+                                  Severity="Danger"
+                                  Message="{Binding ErrorMessage}"
+                                  IsVisible="{Binding HasError}"
+                                  DismissCommand="{Binding DismissErrorCommand}" />
 
-        <!-- Populated state: ScrollViewer wrapping the three section cards. -->
-        <ScrollViewer IsVisible="{Binding ShowPopulatedState}"
-                      HorizontalScrollBarVisibility="Disabled"
-                      VerticalScrollBarVisibility="Auto">
-            <StackPanel Orientation="Vertical">
+            <Panel IsVisible="{Binding ShowLoadingState}">
+                <TextBlock Text="Loading settings…"
+                           Foreground="{DynamicResource TextMuted}"
+                           FontSize="{DynamicResource FontSizeHeading}"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center" />
+            </Panel>
 
-                <!-- ────────────────  Data Storage  ──────────────── -->
-                <Border Classes="sectionCard">
-                    <StackPanel Orientation="Vertical" Spacing="16">
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                                <TextBlock Classes="sectionTitle" Text="DATA STORAGE" VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding DatabaseBytesTotalFormatted}"
-                                           FontSize="{DynamicResource FontSizeBody}"
-                                           Foreground="{DynamicResource TextPrimary}"
-                                           VerticalAlignment="Center"
-                                           ToolTip.Tip="On-disk size of the SQLite database file. The WAL sidecar files are not counted; SQLite periodically rolls their contents back into the main file." />
-                            </StackPanel>
-                            <Button Grid.Column="1"
-                                    Classes="actionButton"
-                                    Content="REFRESH"
-                                    MinWidth="100"
-                                    Command="{Binding RefreshStorageStatsCommand}"
-                                    IsEnabled="{Binding !IsRefreshing}"
-                                    ToolTip.Tip="Re-fetch per-table row counts and the database file size from the daemon." />
-                        </Grid>
+            <ScrollViewer x:Name="SettingsScrollViewer"
+                          IsVisible="{Binding ShowPopulatedState}"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <StackPanel Orientation="Vertical">
 
-                        <!-- Per-table row count list. One row per table; the
-                             daemon returns them sorted alphabetically. -->
-                        <ItemsControl ItemsSource="{Binding Tables}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:TableStatsRow">
-                                    <Border Classes="tableRow">
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Grid.Column="0"
-                                                       Text="{Binding Name}"
-                                                       FontSize="{DynamicResource FontSizeBody}"
+                    <!-- ════════════════  MOTD strip (#20)  ════════════════ -->
+                    <Border Classes="motdStrip">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <TextBlock Text="BEHOLDER NMT"
+                                       Foreground="{DynamicResource AccentPrimary}"
+                                       FontWeight="SemiBold"
+                                       LetterSpacing="1" />
+                            <TextBlock Text="·" Foreground="{DynamicResource TextMuted}" />
+                            <TextBlock Text="{Binding AboutInfo.Version, StringFormat='v{0}'}" />
+                            <TextBlock Text="·" Foreground="{DynamicResource TextMuted}" />
+                            <TextBlock Text="{Binding UptimeLabel, StringFormat='uptime {0}'}" />
+                            <TextBlock Text="·" Foreground="{DynamicResource TextMuted}" />
+                            <TextBlock Text="chain" />
+                            <Border Classes="motdPill"
+                                    Background="{Binding ChainStatus.StatusPillBrushKey,
+                                        Converter={StaticResource BrushKeyConverter}}">
+                                <TextBlock Text="{Binding ChainStatus.StatusPillLabel}" />
+                            </Border>
+                            <TextBlock Text="·" Foreground="{DynamicResource TextMuted}" />
+                            <TextBlock Text="{Binding LanDeviceCountLabel}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ════════════════  Sections grid (responsive 2-col)  ════════════════ -->
+                    <Grid x:Name="SectionsGrid"
+                          ColumnDefinitions="*,*"
+                          RowDefinitions="Auto,Auto,Auto"
+                          RowSpacing="24"
+                          ColumnSpacing="24">
+
+                        <!-- ──────────  DATA STORAGE  ────────── -->
+                        <Border x:Name="DataStorageCard" Classes="sectionCard">
+                            <Grid>
+                                <Border Classes="accentStripe cyan" />
+                                <StackPanel Orientation="Vertical" Spacing="16">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal"
+                                                    Spacing="14" VerticalAlignment="Center">
+                                            <TextBlock Classes="sectionTitle" Text="DATA STORAGE"
+                                                       VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding DatabaseBytesTotalFormatted}"
+                                                       FontSize="{DynamicResource FontSizeHeading}"
                                                        Foreground="{DynamicResource TextPrimary}"
-                                                       FontFamily="Consolas, monospace" />
-                                            <TextBlock Grid.Column="1"
-                                                       Text="{Binding RowCountFormatted}"
-                                                       FontSize="{DynamicResource FontSizeBody}"
-                                                       Foreground="{DynamicResource TextSecondary}" />
+                                                       FontFamily="Cascadia Code, Consolas, monospace"
+                                                       VerticalAlignment="Center"
+                                                       ToolTip.Tip="On-disk size of the SQLite database file. WAL sidecars are not counted; SQLite periodically rolls their contents back into the main file." />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Vertical" Spacing="2"
+                                                    HorizontalAlignment="Right">
+                                            <Button Classes="actionButton"
+                                                    Content="REFRESH"
+                                                    MinWidth="100"
+                                                    Command="{Binding RefreshStorageStatsCommand}"
+                                                    IsEnabled="{Binding !IsRefreshing}"
+                                                    ToolTip.Tip="Re-fetch per-table row counts and the database file size from the daemon." />
+                                            <TextBlock Text="{Binding LastRefreshedAtLabel}"
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       HorizontalAlignment="Right" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- Stacked total bar (#11) — 3 colored segments
+                                         using star-unit grid columns bound to ratios. -->
+                                    <Border Classes="barTrack">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="{Binding TrafficTierRatio,
+                                                    Converter={StaticResource RatioToGridLength}}" />
+                                                <ColumnDefinition Width="{Binding AuditChainRatio,
+                                                    Converter={StaticResource RatioToGridLength}}" />
+                                                <ColumnDefinition Width="{Binding OtherTablesRatio,
+                                                    Converter={StaticResource RatioToGridLength}}" />
+                                            </Grid.ColumnDefinitions>
+                                            <Rectangle Grid.Column="0"
+                                                       Fill="{DynamicResource AccentPrimary}" />
+                                            <Rectangle Grid.Column="1"
+                                                       Fill="{DynamicResource ChartInboundStroke}" />
+                                            <Rectangle Grid.Column="2"
+                                                       Fill="{DynamicResource BorderStrong}" />
                                         </Grid>
                                     </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </Border>
 
-                <!-- ────────────────  Maintenance  ──────────────── -->
-                <Border Classes="sectionCard">
-                    <StackPanel Orientation="Vertical" Spacing="20">
-                        <TextBlock Classes="sectionTitle" Text="MAINTENANCE" />
+                                    <!-- TRAFFIC ROLLUP subheader + cascade sparkline (#19) -->
+                                    <StackPanel Orientation="Horizontal" Spacing="14" Margin="0,8,0,0">
+                                        <TextBlock Classes="subsectionTitle"
+                                                   Text="TRAFFIC ROLLUP"
+                                                   VerticalAlignment="Center" />
+                                        <Border Height="16" Width="32" VerticalAlignment="Center">
+                                            <Grid ColumnDefinitions="*,*,*,*,*"
+                                                  ColumnSpacing="2"
+                                                  VerticalAlignment="Bottom">
+                                                <Border Grid.Column="0" Classes="sparklineBar"
+                                                        Height="{Binding CascadeRatios[0],
+                                                            Converter={StaticResource RatioToGridLength}}" />
+                                                <Border Grid.Column="1" Classes="sparklineBar"
+                                                        Height="{Binding CascadeRatios[1],
+                                                            Converter={StaticResource RatioToGridLength}}" />
+                                                <Border Grid.Column="2" Classes="sparklineBar"
+                                                        Height="{Binding CascadeRatios[2],
+                                                            Converter={StaticResource RatioToGridLength}}" />
+                                                <Border Grid.Column="3" Classes="sparklineBar"
+                                                        Height="{Binding CascadeRatios[3],
+                                                            Converter={StaticResource RatioToGridLength}}" />
+                                                <Border Grid.Column="4" Classes="sparklineBar"
+                                                        Height="{Binding CascadeRatios[4],
+                                                            Converter={StaticResource RatioToGridLength}}" />
+                                            </Grid>
+                                        </Border>
+                                    </StackPanel>
 
-                        <!-- Chain integrity row -->
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                            <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4" VerticalAlignment="Center">
-                                <TextBlock Text="Chain integrity"
-                                           FontSize="{DynamicResource FontSizeBody}"
-                                           Foreground="{DynamicResource TextPrimary}" />
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <TextBlock Text="{Binding ChainStatus.LastVerifiedAtLabel}"
-                                               FontSize="{DynamicResource FontSizeCaption}"
-                                               Foreground="{DynamicResource TextMuted}" />
-                                    <TextBlock Text="·"
-                                               FontSize="{DynamicResource FontSizeCaption}"
-                                               Foreground="{DynamicResource TextMuted}"
-                                               IsVisible="{Binding ChainStatus.HasResult}" />
-                                    <TextBlock Text="{Binding ChainStatus.ResultSummary}"
-                                               FontSize="{DynamicResource FontSizeCaption}"
-                                               Foreground="{DynamicResource TextMuted}"
-                                               IsVisible="{Binding ChainStatus.HasResult}" />
+                                    <!-- Traffic-tier rows -->
+                                    <ItemsControl ItemsSource="{Binding TrafficTables}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:TableStatsRow">
+                                                <Grid ColumnDefinitions="*,80,140,Auto"
+                                                      ColumnSpacing="16"
+                                                      Margin="0,6">
+                                                    <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="1">
+                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                   FontSize="{DynamicResource FontSizeBody}"
+                                                                   Foreground="{DynamicResource TextPrimary}"
+                                                                   ToolTip.Tip="{Binding Description}" />
+                                                        <TextBlock Text="{Binding Name}"
+                                                                   FontSize="{DynamicResource FontSizeCaption}"
+                                                                   Foreground="{DynamicResource TextMuted}"
+                                                                   FontFamily="Cascadia Code, Consolas, monospace" />
+                                                    </StackPanel>
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding Retention}"
+                                                               FontSize="{DynamicResource FontSizeCaption}"
+                                                               Foreground="{DynamicResource TextSecondary}"
+                                                               VerticalAlignment="Center" />
+                                                    <Border Grid.Column="2" Classes="barTrack" VerticalAlignment="Center">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="{Binding RowCountShareRatio,
+                                                                    Converter={StaticResource RatioToGridLength}}" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <Rectangle Grid.Column="0"
+                                                                       Fill="{DynamicResource AccentPrimary}" />
+                                                        </Grid>
+                                                    </Border>
+                                                    <TextBlock Grid.Column="3"
+                                                               Text="{Binding RowCountFormatted}"
+                                                               FontSize="{DynamicResource FontSizeBody}"
+                                                               Foreground="{DynamicResource TextSecondary}"
+                                                               FontFamily="Cascadia Code, Consolas, monospace"
+                                                               VerticalAlignment="Center"
+                                                               HorizontalAlignment="Right"
+                                                               MinWidth="80" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <!-- AUDIT & STATE subheader -->
+                                    <TextBlock Classes="subsectionTitle"
+                                               Text="AUDIT &amp; STATE"
+                                               Margin="0,16,0,0" />
+
+                                    <!-- Flat-table rows (same template shape but tinted differently) -->
+                                    <ItemsControl ItemsSource="{Binding FlatTables}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:TableStatsRow">
+                                                <Grid ColumnDefinitions="*,80,140,Auto"
+                                                      ColumnSpacing="16"
+                                                      Margin="0,6">
+                                                    <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="1">
+                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                   FontSize="{DynamicResource FontSizeBody}"
+                                                                   Foreground="{DynamicResource TextPrimary}"
+                                                                   ToolTip.Tip="{Binding Description}" />
+                                                        <TextBlock Text="{Binding Name}"
+                                                                   FontSize="{DynamicResource FontSizeCaption}"
+                                                                   Foreground="{DynamicResource TextMuted}"
+                                                                   FontFamily="Cascadia Code, Consolas, monospace" />
+                                                    </StackPanel>
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding Retention}"
+                                                               FontSize="{DynamicResource FontSizeCaption}"
+                                                               Foreground="{DynamicResource TextSecondary}"
+                                                               VerticalAlignment="Center" />
+                                                    <Border Grid.Column="2" Classes="barTrack" VerticalAlignment="Center">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="{Binding RowCountShareRatio,
+                                                                    Converter={StaticResource RatioToGridLength}}" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <Rectangle Grid.Column="0"
+                                                                       Fill="{DynamicResource ChartInboundStroke}" />
+                                                        </Grid>
+                                                    </Border>
+                                                    <TextBlock Grid.Column="3"
+                                                               Text="{Binding RowCountFormatted}"
+                                                               FontSize="{DynamicResource FontSizeBody}"
+                                                               Foreground="{DynamicResource TextSecondary}"
+                                                               FontFamily="Cascadia Code, Consolas, monospace"
+                                                               VerticalAlignment="Center"
+                                                               HorizontalAlignment="Right"
+                                                               MinWidth="80" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                 </StackPanel>
-                            </StackPanel>
-                            <Button Grid.Column="1"
-                                    Classes="actionButton"
-                                    Content="{Binding VerifyButtonLabel}"
-                                    Command="{Binding VerifyChainCommand}"
-                                    IsEnabled="{Binding !IsVerifyingChain}"
-                                    ToolTip.Tip="Re-hash every row in the chain-audited event log and confirm the chain links are intact. Runs automatically on a periodic timer; this is the manual override." />
-                        </Grid>
+                            </Grid>
+                        </Border>
 
-                        <!-- Open data folder row -->
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                            <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4" VerticalAlignment="Center">
-                                <TextBlock Text="Data folder"
-                                           FontSize="{DynamicResource FontSizeBody}"
-                                           Foreground="{DynamicResource TextPrimary}" />
-                                <SelectableTextBlock Text="{Binding DatabasePath}"
-                                                     FontSize="{DynamicResource FontSizeCaption}"
-                                                     Foreground="{DynamicResource TextMuted}"
-                                                     FontFamily="Consolas, monospace" />
-                            </StackPanel>
-                            <Button Grid.Column="1"
-                                    Classes="actionButton"
-                                    Content="OPEN FOLDER"
-                                    Command="{Binding OpenDataFolderCommand}"
-                                    IsEnabled="{Binding HasOpenableDataFolder}"
-                                    ToolTip.Tip="Open the file explorer at the directory containing the daemon's SQLite database file." />
-                        </Grid>
+                        <!-- ──────────  MAINTENANCE  ────────── -->
+                        <Border x:Name="MaintenanceCard" Classes="sectionCard">
+                            <Grid>
+                                <Border Classes="accentStripe amber" />
+                                <StackPanel Orientation="Vertical" Spacing="20">
+                                    <TextBlock Classes="sectionTitle" Text="MAINTENANCE" />
 
-                        <!-- Transient verify-status banner — surfaces the
-                             VerifyChain RPC result for ~4 seconds before
-                             auto-clearing. -->
-                        <controls:ErrorBanner Severity="Warn"
-                                              Message="{Binding VerifyStatusMessage}"
-                                              IsVisible="{Binding HasVerifyStatus}"
-                                              DismissCommand="{Binding DismissVerifyStatusCommand}" />
-                    </StackPanel>
-                </Border>
-
-                <!-- ────────────────  About  ──────────────── -->
-                <Border Classes="sectionCard">
-                    <StackPanel Orientation="Vertical" Spacing="16">
-                        <TextBlock Classes="sectionTitle" Text="ABOUT" />
-
-                        <Grid ColumnDefinitions="160,*"
-                              RowDefinitions="Auto,Auto,Auto,Auto,Auto"
-                              RowSpacing="10">
-                            <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="PROJECT" />
-                            <TextBlock Grid.Row="0" Grid.Column="1"
-                                       Text="{Binding AboutInfo.ProjectName}"
-                                       FontSize="{DynamicResource FontSizeBody}"
-                                       Foreground="{DynamicResource TextPrimary}" />
-
-                            <TextBlock Grid.Row="1" Grid.Column="0" Classes="fieldLabel" Text="VERSION" />
-                            <SelectableTextBlock Grid.Row="1" Grid.Column="1"
-                                                 Text="{Binding AboutInfo.Version}"
-                                                 FontSize="{DynamicResource FontSizeBody}"
-                                                 Foreground="{DynamicResource TextPrimary}" />
-
-                            <TextBlock Grid.Row="2" Grid.Column="0" Classes="fieldLabel" Text="BUILD" />
-                            <SelectableTextBlock Grid.Row="2" Grid.Column="1"
-                                                 Text="{Binding AboutInfo.BuildInfo}"
-                                                 FontSize="{DynamicResource FontSizeBody}"
-                                                 Foreground="{DynamicResource TextPrimary}" />
-
-                            <TextBlock Grid.Row="3" Grid.Column="0" Classes="fieldLabel" Text="LICENSE" />
-                            <SelectableTextBlock Grid.Row="3" Grid.Column="1"
-                                                 Text="{Binding AboutInfo.LicenseLabel}"
-                                                 FontSize="{DynamicResource FontSizeBody}"
-                                                 Foreground="{DynamicResource TextPrimary}" />
-
-                            <TextBlock Grid.Row="4" Grid.Column="0" Classes="fieldLabel" Text="SOURCE" />
-                            <SelectableTextBlock Grid.Row="4" Grid.Column="1"
-                                                 Text="{Binding AboutInfo.ProjectUrl}"
-                                                 FontSize="{DynamicResource FontSizeBody}"
-                                                 Foreground="{DynamicResource TextPrimary}" />
-                        </Grid>
-
-                        <!-- Third-party attributions list. Each row: short
-                             label + license. -->
-                        <StackPanel Orientation="Vertical" Spacing="8" Margin="0,12,0,0">
-                            <TextBlock Classes="fieldLabel" Text="ATTRIBUTIONS" />
-                            <ItemsControl ItemsSource="{Binding AboutInfo.Attributions}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="vm:Attribution">
-                                        <StackPanel Orientation="Vertical" Spacing="2" Margin="0,4">
-                                            <TextBlock Text="{Binding Label}"
+                                    <!-- Chain integrity row -->
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="6"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="Chain integrity"
                                                        FontSize="{DynamicResource FontSizeBody}"
-                                                       Foreground="{DynamicResource TextPrimary}"
-                                                       TextWrapping="Wrap" />
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <TextBlock Text="{Binding LicenseLabel}"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                <Border Classes="statusPill"
+                                                        Background="{Binding ChainStatus.StatusPillBrushKey,
+                                                            Converter={StaticResource BrushKeyConverter}}">
+                                                    <TextBlock Text="{Binding ChainStatus.StatusPillLabel}" />
+                                                </Border>
+                                                <TextBlock Text="{Binding ChainStatus.ResultSummary}"
                                                            FontSize="{DynamicResource FontSizeCaption}"
-                                                           Foreground="{DynamicResource TextMuted}" />
+                                                           Foreground="{DynamicResource TextMuted}"
+                                                           VerticalAlignment="Center"
+                                                           IsVisible="{Binding ChainStatus.HasResult}" />
                                                 <TextBlock Text="·"
                                                            FontSize="{DynamicResource FontSizeCaption}"
-                                                           Foreground="{DynamicResource TextMuted}" />
-                                                <SelectableTextBlock Text="{Binding Url}"
-                                                                     FontSize="{DynamicResource FontSizeCaption}"
-                                                                     Foreground="{DynamicResource TextMuted}" />
+                                                           Foreground="{DynamicResource TextMuted}"
+                                                           VerticalAlignment="Center"
+                                                           IsVisible="{Binding ChainStatus.HasResult}" />
+                                                <TextBlock Text="{Binding ChainStatus.LastVerifiedAtLabel}"
+                                                           FontSize="{DynamicResource FontSizeCaption}"
+                                                           Foreground="{DynamicResource TextMuted}"
+                                                           VerticalAlignment="Center" />
                                             </StackPanel>
                                         </StackPanel>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
-            </StackPanel>
-        </ScrollViewer>
-    </DockPanel>
+                                        <Button Grid.Column="1"
+                                                Classes="actionButton"
+                                                Content="{Binding VerifyButtonLabel}"
+                                                Command="{Binding VerifyChainCommand}"
+                                                IsEnabled="{Binding !IsVerifyingChain}"
+                                                ToolTip.Tip="Re-hash every row in the chain-audited event log and confirm the chain links are intact. Runs automatically on a periodic timer; this is the manual override." />
+                                    </Grid>
+
+                                    <!-- Open data folder row -->
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="Data folder"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <SelectableTextBlock Text="{Binding DatabasePath}"
+                                                                     FontSize="{DynamicResource FontSizeCaption}"
+                                                                     Foreground="{DynamicResource TextMuted}"
+                                                                     FontFamily="Cascadia Code, Consolas, monospace"
+                                                                     VerticalAlignment="Center" />
+                                                <Button Classes="iconButton"
+                                                        Content="⎘"
+                                                        Command="{Binding CopyToClipboardCommand}"
+                                                        CommandParameter="{Binding DatabasePath}"
+                                                        ToolTip.Tip="Copy path to clipboard" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <Button Grid.Column="1"
+                                                Classes="actionButton"
+                                                Content="OPEN FOLDER"
+                                                Command="{Binding OpenDataFolderCommand}"
+                                                IsEnabled="{Binding HasOpenableDataFolder}"
+                                                ToolTip.Tip="Open the file explorer at the directory containing the daemon's SQLite database file." />
+                                    </Grid>
+
+                                    <controls:ErrorBanner Severity="Warn"
+                                                          Message="{Binding VerifyStatusMessage}"
+                                                          IsVisible="{Binding HasVerifyStatus}"
+                                                          DismissCommand="{Binding DismissVerifyStatusCommand}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- ──────────  ABOUT  ────────── -->
+                        <Border x:Name="AboutCard" Classes="sectionCard">
+                            <Grid>
+                                <Border Classes="accentStripe neutral" />
+                                <StackPanel Orientation="Vertical" Spacing="16">
+                                    <TextBlock Classes="sectionTitle" Text="ABOUT" />
+
+                                    <!-- Brand block: ASCII eye on left, project identity on right -->
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="24">
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{x:Static vm:AboutInfo.AsciiEyeArt}"
+                                                   FontFamily="Cascadia Code, Consolas, monospace"
+                                                   FontSize="{DynamicResource FontSizeBody}"
+                                                   Foreground="{DynamicResource AccentPrimary}"
+                                                   LineHeight="14"
+                                                   VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" Orientation="Vertical" Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding AboutInfo.ProjectName}"
+                                                       FontSize="{DynamicResource FontSizeHeading}"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <SelectableTextBlock Text="{Binding AboutInfo.Version, StringFormat='v{0}'}"
+                                                                     FontSize="{DynamicResource FontSizeBody}"
+                                                                     Foreground="{DynamicResource TextSecondary}"
+                                                                     FontFamily="Cascadia Code, Consolas, monospace" />
+                                                <TextBlock Text="·"
+                                                           FontSize="{DynamicResource FontSizeBody}"
+                                                           Foreground="{DynamicResource TextMuted}" />
+                                                <TextBlock Text="{Binding AboutInfo.LicenseLabel}"
+                                                           FontSize="{DynamicResource FontSizeBody}"
+                                                           Foreground="{DynamicResource TextSecondary}" />
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding AboutInfo.BuildInfo}"
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       FontFamily="Cascadia Code, Consolas, monospace" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                                                <Button Classes="link"
+                                                        Content="{Binding AboutInfo.ProjectUrl}"
+                                                        Command="{Binding OpenUrlCommand}"
+                                                        CommandParameter="{Binding AboutInfo.ProjectUrl}"
+                                                        FontSize="{DynamicResource FontSizeCaption}" />
+                                                <Button Classes="iconButton"
+                                                        Content="⎘"
+                                                        Command="{Binding CopyToClipboardCommand}"
+                                                        CommandParameter="{Binding AboutInfo.ProjectUrl}"
+                                                        ToolTip.Tip="Copy URL to clipboard" />
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding WatchingSinceLabel,
+                                                StringFormat='Watching this machine {0}'}"
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       IsVisible="{Binding WatchingSinceLabel, Converter={StaticResource StringEqualsConverter}, ConverterParameter=__non_empty__, FallbackValue=False}"
+                                                       Margin="0,8,0,0" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- Attributions -->
+                                    <StackPanel Orientation="Vertical" Spacing="8" Margin="0,12,0,0">
+                                        <TextBlock Classes="fieldLabel" Text="ATTRIBUTIONS" />
+                                        <ItemsControl ItemsSource="{Binding AboutInfo.Attributions}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:Attribution">
+                                                    <StackPanel Orientation="Vertical" Spacing="2" Margin="0,4">
+                                                        <TextBlock Text="{Binding Label}"
+                                                                   FontSize="{DynamicResource FontSizeBody}"
+                                                                   Foreground="{DynamicResource TextPrimary}"
+                                                                   TextWrapping="Wrap" />
+                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <TextBlock Text="{Binding LicenseLabel}"
+                                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                                       Foreground="{DynamicResource TextMuted}"
+                                                                       VerticalAlignment="Center" />
+                                                            <TextBlock Text="·"
+                                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                                       Foreground="{DynamicResource TextMuted}"
+                                                                       VerticalAlignment="Center" />
+                                                            <Button Classes="link"
+                                                                    Content="{Binding Url}"
+                                                                    Command="{Binding $parent[UserControl].((vm:SettingsTabViewModel)DataContext).OpenUrlCommand}"
+                                                                    CommandParameter="{Binding Url}"
+                                                                    FontSize="{DynamicResource FontSizeCaption}" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Grid>
 </UserControl>

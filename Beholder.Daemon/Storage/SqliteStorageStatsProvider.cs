@@ -18,20 +18,27 @@ namespace Beholder.Daemon.Storage;
 /// "is this thing eating my disk?" question.
 /// </remarks>
 internal sealed class SqliteStorageStatsProvider : IStorageStatsProvider {
+    private const string LanDeviceTableName = "lan_device";
+    private const string EventLogTableName = "event_log";
+
     private readonly ConnectionFactory _connectionFactory;
     private readonly IChainStatusCache _chainStatusCache;
+    private readonly IDaemonClock _daemonClock;
     private readonly string _databasePath;
 
     public SqliteStorageStatsProvider(
         ConnectionFactory connectionFactory,
         IChainStatusCache chainStatusCache,
+        IDaemonClock daemonClock,
         string databasePath
     ) {
         ArgumentNullException.ThrowIfNull(connectionFactory);
         ArgumentNullException.ThrowIfNull(chainStatusCache);
+        ArgumentNullException.ThrowIfNull(daemonClock);
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         _connectionFactory = connectionFactory;
         _chainStatusCache = chainStatusCache;
+        _daemonClock = daemonClock;
         _databasePath = databasePath;
     }
 
@@ -41,10 +48,12 @@ internal sealed class SqliteStorageStatsProvider : IStorageStatsProvider {
         using var connection = _connectionFactory.CreateConnection();
 
         var tables = new List<TableStats>();
+        long lanDeviceCount = 0;
         var names = await ListUserTablesAsync(connection, cancellationToken).ConfigureAwait(false);
         foreach (var name in names) {
             var count = await CountRowsAsync(connection, name, cancellationToken).ConfigureAwait(false);
             tables.Add(new TableStats(name, count));
+            if (name == LanDeviceTableName) lanDeviceCount = count;
         }
 
         // FileInfo.Length is the size of the .db file itself; WAL and SHM
@@ -56,11 +65,39 @@ internal sealed class SqliteStorageStatsProvider : IStorageStatsProvider {
         // -wal and -shm sidecars too but adds complexity for marginal gain.
         var totalBytes = new FileInfo(_databasePath).Length;
 
+        var chainFirstEventAt = await QueryChainFirstEventAtAsync(
+            connection, cancellationToken).ConfigureAwait(false);
+
         return new StorageStats(
             DatabasePath: _databasePath,
             DatabaseBytesTotal: totalBytes,
             Tables: tables,
-            ChainStatus: _chainStatusCache.Current);
+            ChainStatus: _chainStatusCache.Current,
+            ChainFirstEventAt: chainFirstEventAt,
+            DaemonStartedAt: _daemonClock.StartedAt,
+            LanDeviceCount: lanDeviceCount);
+    }
+
+    /// <summary>
+    /// Returns the timestamp of the earliest row in <c>event_log</c>, or
+    /// null when the chain is empty (fresh install, no events yet) or when
+    /// the table is somehow absent (defensive — shouldn't happen against a
+    /// daemon-initialized database).
+    /// </summary>
+    private static async Task<DateTimeOffset?> QueryChainFirstEventAtAsync(
+        SqliteConnection connection, CancellationToken cancellationToken
+    ) {
+        // The event_log table is the chain-audited log; ts_unix_ns is the
+        // column name per DatabaseInitializer.CreateTables. MIN() over an
+        // indexed integer column on a typical-sized chain (<100k rows) is
+        // negligibly cheap.
+        const string sql = $"SELECT MIN(ts_unix_ns) FROM \"{EventLogTableName}\";";
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        if (result is null || result is DBNull) return null;
+        var unixNs = Convert.ToInt64(result);
+        return DateTimeOffset.FromUnixTimeMilliseconds(unixNs / 1_000_000L);
     }
 
     private static async Task<List<string>> ListUserTablesAsync(

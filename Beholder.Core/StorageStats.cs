@@ -24,9 +24,28 @@ namespace Beholder.Core;
 /// user-triggered <c>VerifyChain</c> RPC), or null when no verification
 /// has run yet this daemon session.
 /// </param>
+/// <param name="ChainFirstEventAt">
+/// Timestamp of the earliest row in <c>event_log</c> — the moment the
+/// audit chain began for this installation. Surfaced in the Settings tab's
+/// About section as "Watching this machine since DATE (N days)". Null when
+/// the chain is empty (fresh install with no events yet).
+/// </param>
+/// <param name="DaemonStartedAt">
+/// Wall-clock time at which the daemon process started, captured by
+/// <see cref="IDaemonClock"/>. Settings tab derives "uptime 4h 12m" from
+/// this against the current clock.
+/// </param>
+/// <param name="LanDeviceCount">
+/// Count of rows in the <c>lan_device</c> table — duplicated as a top-level
+/// field for convenience so the Settings tab's MOTD strip can render
+/// "N LAN devices tracked" without a second lookup over <see cref="Tables"/>.
+/// </param>
 public sealed record StorageStats(
     string DatabasePath,
     long DatabaseBytesTotal,
     IReadOnlyList<TableStats> Tables,
-    ChainStatus? ChainStatus
+    ChainStatus? ChainStatus,
+    DateTimeOffset? ChainFirstEventAt,
+    DateTimeOffset DaemonStartedAt,
+    long LanDeviceCount
 );

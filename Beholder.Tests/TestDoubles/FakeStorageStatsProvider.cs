@@ -14,7 +14,10 @@ internal sealed class FakeStorageStatsProvider : IStorageStatsProvider {
         DatabasePath: string.Empty,
         DatabaseBytesTotal: 0,
         Tables: Array.Empty<TableStats>(),
-        ChainStatus: null);
+        ChainStatus: null,
+        ChainFirstEventAt: null,
+        DaemonStartedAt: new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+        LanDeviceCount: 0);
 
     public Exception? Exception { get; set; }
     public int CallCount { get; private set; }
