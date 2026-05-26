@@ -13,15 +13,21 @@ namespace Beholder.Ui.ViewModels;
 internal sealed class AboutInfo {
     /// <summary>
     /// Multi-line ASCII art for the project's logo, rendered in the About
-    /// section's header. A pyramid-with-eye motif (the all-seeing eye, an
-    /// on-brand fit for a "Beholder" product). Designed to render correctly
-    /// in any monospace font; six lines tall, eleven characters wide.
+    /// section's header. A big-circle-with-eye motif (the all-seeing eye,
+    /// an on-brand fit for a "Beholder" product). Designed to render
+    /// correctly in any monospace font; seven lines tall, 21 characters
+    /// wide. Uses Unicode box-drawing characters for the curved corners,
+    /// diagonal "shoulders", and straight sides — the combination reads
+    /// as a circle when rendered in a typical monospace cell ratio.
     /// </summary>
     public const string AsciiEyeArt =
-        "      ▲      \n" +
-        "     ╱ ╲     \n" +
-        "    ╱ ◉ ╲    \n" +
-        "   ╱_____╲   \n";
+        "      ╭─────────╮    \n" +
+        "     ╱           ╲   \n" +
+        "    │             │  \n" +
+        "    │      ◉      │  \n" +
+        "    │             │  \n" +
+        "     ╲           ╱   \n" +
+        "      ╰─────────╯    \n";
 
     /// <summary>e.g. "0.13.1.0".</summary>
     public string Version { get; }
