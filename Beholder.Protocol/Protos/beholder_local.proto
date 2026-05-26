@@ -422,6 +422,57 @@ message SetLanDeviceLabelResponse {
   string message = 2;
 }
 
+// ---- Settings (Phase 13.2) ----
+
+// Mirrors Beholder.Core.RecordingSettingsSnapshot. One value message shared
+// across the get + set surface for the Recording section.
+message RecordingSettingsValues {
+  bool filter_self_traffic = 1;
+}
+
+// Mirrors Beholder.Core.HostnameResolutionSettingsSnapshot. Shared across
+// the get + set surface for the Hostname Resolution section.
+message HostnameResolutionSettingsValues {
+  bool enable_preload = 1;
+  bool enable_reverse_dns_fallback = 2;
+  bool enable_sni_capture = 3;
+}
+
+message GetSettingsRequest {}
+
+// Bulk-read of every Settings section the UI renders. Future sub-phases
+// (13.3 Alerts, 13.4 Scanner, 13.5 Storage) add their own value sub-messages
+// here; existing fields stay stable.
+message GetSettingsResponse {
+  RecordingSettingsValues recording = 1;
+  HostnameResolutionSettingsValues hostname_resolution = 2;
+}
+
+message SetRecordingSettingsRequest {
+  RecordingSettingsValues values = 1;
+}
+
+// success=false for recoverable failures (persistence threw, etc.). Hard
+// validation errors throw InvalidArgument. Mirrors the SetLanDeviceLabel /
+// TriggerScan soft-failure precedent. `values` echoes the resulting state
+// after the operation — clients can use this to confirm the daemon's view
+// matches what they intended.
+message SetRecordingSettingsResponse {
+  bool success = 1;
+  string message = 2;
+  RecordingSettingsValues values = 3;
+}
+
+message SetHostnameResolutionSettingsRequest {
+  HostnameResolutionSettingsValues values = 1;
+}
+
+message SetHostnameResolutionSettingsResponse {
+  bool success = 1;
+  string message = 2;
+  HostnameResolutionSettingsValues values = 3;
+}
+
 // ---- Storage stats (Phase 13.1) ----
 
 // Mirrors Beholder.Core.TableStats. Per-table on-disk byte size is not
@@ -494,4 +545,8 @@ service BeholderLocal {
   rpc SetLanDeviceLabel(SetLanDeviceLabelRequest) returns (SetLanDeviceLabelResponse);
   // Phase 13.1 — Settings tab Data Storage section
   rpc GetStorageStats(GetStorageStatsRequest) returns (GetStorageStatsResponse);
+  // Phase 13.2 — Settings tab Recording + Hostname Resolution sections
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
+  rpc SetRecordingSettings(SetRecordingSettingsRequest) returns (SetRecordingSettingsResponse);
+  rpc SetHostnameResolutionSettings(SetHostnameResolutionSettingsRequest) returns (SetHostnameResolutionSettingsResponse);
 }

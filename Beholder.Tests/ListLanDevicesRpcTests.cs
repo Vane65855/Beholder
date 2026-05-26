@@ -26,7 +26,7 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
             new FakeFlowSource(), timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
-            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
+            new FakeRecordingSettingsState(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
 
         _service = new BeholderLocalService(
@@ -36,6 +36,8 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
             new FakeEventStore(), new FakeTrafficStore(),
             _lanDeviceStore, TestServiceFactory.CreateInactiveLanScannerService(_lanDeviceStore),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeSettingsOverridesStore(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
@@ -170,7 +172,7 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
             new FakeFlowSource(), TimeProvider.System,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
-            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
+            new FakeRecordingSettingsState(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         var service = new BeholderLocalService(
             broadcaster, pipeline,
@@ -179,6 +181,8 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
             new FakeEventStore(), new FakeTrafficStore(),
             throwingStore, TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeSettingsOverridesStore(),
             TimeProvider.System, NullLogger<BeholderLocalService>.Instance);
 
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);

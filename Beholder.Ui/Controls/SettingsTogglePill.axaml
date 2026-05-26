@@ -1,0 +1,44 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Beholder.Ui.Controls.SettingsTogglePill">
+
+    <UserControl.Styles>
+        <!-- Two-state ON/OFF pill for Settings toggles. Same visual language as
+             FirewallActionPill (monospace caps, fixed width, semantic color)
+             but a distinct class so future style tweaks don't leak across
+             surfaces. ON uses SeveritySuccess (green), OFF uses TextMuted
+             (neutral grey) — OFF is not "danger" because disabling these
+             toggles is a legitimate user choice, not an error. -->
+        <Style Selector="Button.settingsPill">
+            <Setter Property="Width" Value="56" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+        </Style>
+        <Style Selector="Button.settingsPill.on">
+            <Setter Property="Foreground" Value="{DynamicResource SeveritySuccess}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SeveritySuccess}" />
+        </Style>
+        <Style Selector="Button.settingsPill.off">
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+        </Style>
+        <Style Selector="Button.settingsPill:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+        </Style>
+        <Style Selector="Button.settingsPill:disabled">
+            <Setter Property="Opacity" Value="0.55" />
+            <Setter Property="Cursor" Value="Arrow" />
+        </Style>
+    </UserControl.Styles>
+
+    <Button x:Name="PillButton"
+            Classes="settingsPill"
+            Click="OnClick" />
+</UserControl>

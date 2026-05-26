@@ -67,7 +67,7 @@ if (OperatingSystem.IsWindows()) {
         ingest: sp.GetRequiredService<IDnsCacheIngest>(),
         backfill: sp.GetRequiredService<IDnsHostnameBackfill>(),
         resolver: sp.GetRequiredService<IReverseDnsResolver>(),
-        options: sp.GetRequiredService<IOptionsMonitor<DnsOptions>>(),
+        state: sp.GetRequiredService<IHostnameResolutionSettingsState>(),
         timeProvider: sp.GetRequiredService<TimeProvider>(),
         logger: sp.GetRequiredService<ILogger<ReverseDnsFallbackCache>>()));
     builder.Services.AddSingleton<IDnsCache>(sp => sp.GetRequiredService<ReverseDnsFallbackCache>());
@@ -192,6 +192,18 @@ if (OperatingSystem.IsWindows()) {
 
     builder.Services.AddSingleton<IFirewallEnforcementState, FirewallEnforcementState>();
     builder.Services.AddHostedService<Beholder.Daemon.Pipeline.FirewallEnforcementService>();
+
+    // Phase 13.2: runtime-mutable Settings state.
+    // - State singletons seed from IOptions<T> defaults at construction.
+    // - SqliteSettingsOverridesStore is the persistence layer.
+    // - SettingsOverridesService runs FIRST among hosted services to apply
+    //   persisted overrides to the singletons before any consumer reads them.
+    builder.Services.AddSingleton<IRecordingSettingsState, RecordingSettingsState>();
+    builder.Services.AddSingleton<IHostnameResolutionSettingsState, HostnameResolutionSettingsState>();
+    builder.Services.AddSingleton<ISettingsOverridesStore>(sp => new SqliteSettingsOverridesStore(
+        sp.GetRequiredService<ConnectionFactory>(),
+        sp.GetRequiredService<TimeProvider>()));
+    builder.Services.AddHostedService<Beholder.Daemon.Pipeline.SettingsOverridesService>();
 
     // Broadcast service must be registered BEFORE the pipeline so its StartAsync
     // runs first and subscribes to ISnapshotBatchSource.OnSnapshotBatch before

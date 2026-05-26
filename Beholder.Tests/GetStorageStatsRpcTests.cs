@@ -28,7 +28,7 @@ public sealed class GetStorageStatsRpcTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
-            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
+            new FakeRecordingSettingsState(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         _storageStatsProvider = new FakeStorageStatsProvider();
         _chainStatusCache = new FakeChainStatusCache();
@@ -40,6 +40,8 @@ public sealed class GetStorageStatsRpcTests : IDisposable {
             new FakeEventStore(), new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             _chainStatusCache, _storageStatsProvider,
+            new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 

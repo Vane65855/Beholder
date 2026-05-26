@@ -9,7 +9,8 @@ namespace Beholder.Tests;
 public class EtwDnsCacheExtractAddressesTests {
     private static EtwDnsCache CreateCache(int queueCapacity = 1024) =>
         new(NullLogger<EtwDnsCache>.Instance,
-            new FakeOptionsMonitor<DnsOptions>(new DnsOptions { QueueCapacity = queueCapacity }));
+            new FakeOptionsMonitor<DnsOptions>(new DnsOptions { QueueCapacity = queueCapacity }),
+            new FakeHostnameResolutionSettingsState());
 
     [Fact]
     public void ExtractAddresses_EmptyInput_ReturnsEmpty() {

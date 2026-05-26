@@ -18,7 +18,7 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5);
 
     private readonly IFlowSource _flowSource;
-    private readonly IOptionsMonitor<RecordingOptions> _recordingOptions;
+    private readonly IRecordingSettingsState _recordingSettings;
     private readonly ILogger<FlowEventPipeline> _logger;
     private readonly Channel<FlowEvent> _channel;
     private readonly TrafficEngine _engine;
@@ -59,7 +59,7 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
         IDnsCacheStore dnsCacheStore,
         IDnsCache dnsCache,
         IOptionsMonitor<TrafficStorageOptions> options,
-        IOptionsMonitor<RecordingOptions> recordingOptions,
+        IRecordingSettingsState recordingSettings,
         ILogger<FlowEventPipeline> logger,
         ILoggerFactory loggerFactory
     ) {
@@ -69,12 +69,12 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
         ArgumentNullException.ThrowIfNull(dnsCacheStore);
         ArgumentNullException.ThrowIfNull(dnsCache);
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(recordingOptions);
+        ArgumentNullException.ThrowIfNull(recordingSettings);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(loggerFactory);
 
         _flowSource = flowSource;
-        _recordingOptions = recordingOptions;
+        _recordingSettings = recordingSettings;
         _logger = logger;
 
         _channel = Channel.CreateBounded<FlowEvent>(new BoundedChannelOptions(ChannelCapacity) {
@@ -174,9 +174,12 @@ internal sealed class FlowEventPipeline : IHostedService, IAsyncDisposable, ISna
 
     private void OnFlowEventReceived(FlowEvent flowEvent) {
         // Drop Beholder's own traffic before it enters any pipeline stage.
-        // CurrentValue is read per-event so flipping the flag in appsettings
-        // takes effect on the next event without a daemon restart.
-        if (_recordingOptions.CurrentValue.FilterSelfTraffic
+        // The state singleton is read per-event so flipping the toggle in
+        // Settings (or in appsettings.json + restart) takes effect on the
+        // next event. Phase 13.2 routes this through IRecordingSettingsState
+        // instead of IOptionsMonitor<RecordingOptions> so the toggle can be
+        // mutated at runtime via the SetRecordingSettings RPC.
+        if (_recordingSettings.FilterSelfTraffic
             && SelfTrafficFilter.IsSelfProcess(flowEvent.ProcessPath))
             return;
 

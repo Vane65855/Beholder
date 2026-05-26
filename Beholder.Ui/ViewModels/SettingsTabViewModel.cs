@@ -125,6 +125,16 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
     public ChainStatusRow ChainStatus { get; }
     public AboutInfo AboutInfo { get; }
 
+    /// <summary>
+    /// Phase 13.2: Recording section state. Populated on activate from the
+    /// daemon's <c>GetSettings</c> RPC; mutated optimistically on toggle clicks
+    /// and reconciled with the daemon's echoed response.
+    /// </summary>
+    public RecordingSettingsRow Recording { get; } = new();
+
+    /// <summary>Phase 13.2: Hostname Resolution section state.</summary>
+    public HostnameResolutionSettingsRow HostnameResolution { get; } = new();
+
     /// <summary>Cyan-tinted share of the stacked total bar — sum of all
     /// traffic-tier rows divided by grand total. Falls back to 0 when the
     /// database has no rows.</summary>
@@ -300,20 +310,39 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         HasError = false;
         ErrorMessage = string.Empty;
         try {
-            var response = await _daemonClient.GetStorageStatsAsync(
+            // Phase 13.2: parallel-fetch storage stats + settings. Both feed
+            // independent regions of the tab; a single round-trip per RPC
+            // would serialise unnecessarily. Either failure surfaces as the
+            // tab-wide error banner — the user can retry by clicking REFRESH.
+            var storageTask = _daemonClient.GetStorageStatsAsync(
                 new GetStorageStatsRequest(), cancellationToken);
-            ApplyStorageStats(response);
+            var settingsTask = _daemonClient.GetSettingsAsync(
+                new GetSettingsRequest(), cancellationToken);
+            await Task.WhenAll(storageTask, settingsTask).ConfigureAwait(false);
+            ApplyStorageStats(storageTask.Result);
+            ApplySettings(settingsTask.Result);
         } catch (OperationCanceledException) {
             // Tab disposed mid-load — drop silently.
         } catch (RpcException ex) {
             HasError = true;
-            ErrorMessage = $"Failed to load storage stats: {ex.Status.Detail}";
+            ErrorMessage = $"Failed to load settings: {ex.Status.Detail}";
         } catch (Exception ex) {
             HasError = true;
-            ErrorMessage = $"Failed to load storage stats: {ex.Message}";
+            ErrorMessage = $"Failed to load settings: {ex.Message}";
         } finally {
             if (isInitialLoad) IsLoading = false;
             else IsRefreshing = false;
+        }
+    }
+
+    private void ApplySettings(GetSettingsResponse response) {
+        if (response.Recording is not null) {
+            Recording.FilterSelfTraffic = response.Recording.FilterSelfTraffic;
+        }
+        if (response.HostnameResolution is not null) {
+            HostnameResolution.EnablePreload = response.HostnameResolution.EnablePreload;
+            HostnameResolution.EnableReverseDnsFallback = response.HostnameResolution.EnableReverseDnsFallback;
+            HostnameResolution.EnableSniCapture = response.HostnameResolution.EnableSniCapture;
         }
     }
 
@@ -388,6 +417,138 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
 
     [RelayCommand]
     private Task RefreshStorageStats() => LoadStorageStatsAsync(CancellationToken.None, isInitialLoad: false);
+
+    /// <summary>
+    /// Phase 13.2: optimistic-flip pattern for the FilterSelfTraffic pill.
+    /// The pill flips locally before the RPC fires; on success we reconcile
+    /// with the daemon's echoed value (idempotent set returns the current
+    /// state, so re-asserting matches); on failure we revert and surface
+    /// the reason via the tab-wide error banner.
+    /// </summary>
+    [RelayCommand]
+    private async Task ToggleFilterSelfTraffic() {
+        if (Recording.IsSaving) return;
+        var previous = Recording.FilterSelfTraffic;
+        var next = !previous;
+        Recording.FilterSelfTraffic = next;
+        Recording.IsSaving = true;
+        try {
+            var response = await _daemonClient.SetRecordingSettingsAsync(
+                new SetRecordingSettingsRequest {
+                    Values = new RecordingSettingsValues { FilterSelfTraffic = next },
+                },
+                CancellationToken.None);
+            if (response.Success && response.Values is not null) {
+                Recording.FilterSelfTraffic = response.Values.FilterSelfTraffic;
+            } else {
+                Recording.FilterSelfTraffic = previous;
+                HasError = true;
+                ErrorMessage = string.IsNullOrEmpty(response.Message)
+                    ? "Failed to save Recording settings."
+                    : response.Message;
+            }
+        } catch (RpcException ex) {
+            Recording.FilterSelfTraffic = previous;
+            HasError = true;
+            ErrorMessage = $"Failed to save Recording settings: {ex.Status.Detail}";
+        } catch (Exception ex) {
+            Recording.FilterSelfTraffic = previous;
+            HasError = true;
+            ErrorMessage = $"Failed to save Recording settings: {ex.Message}";
+        } finally {
+            Recording.IsSaving = false;
+        }
+    }
+
+    [RelayCommand]
+    private Task ToggleEnablePreload() => ToggleHostnameResolution(HostnameToggle.Preload);
+
+    [RelayCommand]
+    private Task ToggleEnableReverseDnsFallback() => ToggleHostnameResolution(HostnameToggle.ReverseDnsFallback);
+
+    [RelayCommand]
+    private Task ToggleEnableSniCapture() => ToggleHostnameResolution(HostnameToggle.SniCapture);
+
+    private enum HostnameToggle { Preload, ReverseDnsFallback, SniCapture }
+
+    /// <summary>
+    /// Shared optimistic-flip implementation for the three Hostname Resolution
+    /// toggles. They all hit the same atomic Set RPC (the daemon bundles the
+    /// three bools), so a single helper avoids duplicating the
+    /// flip/RPC/revert/save-flag dance three times.
+    /// </summary>
+    private async Task ToggleHostnameResolution(HostnameToggle which) {
+        var saving = which switch {
+            HostnameToggle.Preload => HostnameResolution.IsSavingPreload,
+            HostnameToggle.ReverseDnsFallback => HostnameResolution.IsSavingReverseDnsFallback,
+            HostnameToggle.SniCapture => HostnameResolution.IsSavingSniCapture,
+            _ => false,
+        };
+        if (saving) return;
+
+        var previousPreload = HostnameResolution.EnablePreload;
+        var previousRdns = HostnameResolution.EnableReverseDnsFallback;
+        var previousSni = HostnameResolution.EnableSniCapture;
+        var nextPreload = which == HostnameToggle.Preload ? !previousPreload : previousPreload;
+        var nextRdns = which == HostnameToggle.ReverseDnsFallback ? !previousRdns : previousRdns;
+        var nextSni = which == HostnameToggle.SniCapture ? !previousSni : previousSni;
+
+        SetHostnameRowState(nextPreload, nextRdns, nextSni);
+        SetHostnameSavingFlag(which, true);
+        try {
+            var response = await _daemonClient.SetHostnameResolutionSettingsAsync(
+                new SetHostnameResolutionSettingsRequest {
+                    Values = new HostnameResolutionSettingsValues {
+                        EnablePreload = nextPreload,
+                        EnableReverseDnsFallback = nextRdns,
+                        EnableSniCapture = nextSni,
+                    },
+                },
+                CancellationToken.None);
+            if (response.Success && response.Values is not null) {
+                SetHostnameRowState(
+                    response.Values.EnablePreload,
+                    response.Values.EnableReverseDnsFallback,
+                    response.Values.EnableSniCapture);
+            } else {
+                SetHostnameRowState(previousPreload, previousRdns, previousSni);
+                HasError = true;
+                ErrorMessage = string.IsNullOrEmpty(response.Message)
+                    ? "Failed to save Hostname Resolution settings."
+                    : response.Message;
+            }
+        } catch (RpcException ex) {
+            SetHostnameRowState(previousPreload, previousRdns, previousSni);
+            HasError = true;
+            ErrorMessage = $"Failed to save Hostname Resolution settings: {ex.Status.Detail}";
+        } catch (Exception ex) {
+            SetHostnameRowState(previousPreload, previousRdns, previousSni);
+            HasError = true;
+            ErrorMessage = $"Failed to save Hostname Resolution settings: {ex.Message}";
+        } finally {
+            SetHostnameSavingFlag(which, false);
+        }
+    }
+
+    private void SetHostnameRowState(bool preload, bool rdns, bool sni) {
+        HostnameResolution.EnablePreload = preload;
+        HostnameResolution.EnableReverseDnsFallback = rdns;
+        HostnameResolution.EnableSniCapture = sni;
+    }
+
+    private void SetHostnameSavingFlag(HostnameToggle which, bool value) {
+        switch (which) {
+            case HostnameToggle.Preload:
+                HostnameResolution.IsSavingPreload = value;
+                break;
+            case HostnameToggle.ReverseDnsFallback:
+                HostnameResolution.IsSavingReverseDnsFallback = value;
+                break;
+            case HostnameToggle.SniCapture:
+                HostnameResolution.IsSavingSniCapture = value;
+                break;
+        }
+    }
 
     [RelayCommand]
     private async Task VerifyChain() {

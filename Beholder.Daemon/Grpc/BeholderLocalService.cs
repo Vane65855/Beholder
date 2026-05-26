@@ -42,6 +42,9 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     private readonly LanScannerService _lanScannerService;
     private readonly IChainStatusCache _chainStatusCache;
     private readonly IStorageStatsProvider _storageStatsProvider;
+    private readonly IRecordingSettingsState _recordingSettings;
+    private readonly IHostnameResolutionSettingsState _hostnameResolutionSettings;
+    private readonly ISettingsOverridesStore _settingsOverridesStore;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<BeholderLocalService> _logger;
 
@@ -58,6 +61,9 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         LanScannerService lanScannerService,
         IChainStatusCache chainStatusCache,
         IStorageStatsProvider storageStatsProvider,
+        IRecordingSettingsState recordingSettings,
+        IHostnameResolutionSettingsState hostnameResolutionSettings,
+        ISettingsOverridesStore settingsOverridesStore,
         TimeProvider timeProvider,
         ILogger<BeholderLocalService> logger
     ) {
@@ -73,6 +79,9 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         ArgumentNullException.ThrowIfNull(lanScannerService);
         ArgumentNullException.ThrowIfNull(chainStatusCache);
         ArgumentNullException.ThrowIfNull(storageStatsProvider);
+        ArgumentNullException.ThrowIfNull(recordingSettings);
+        ArgumentNullException.ThrowIfNull(hostnameResolutionSettings);
+        ArgumentNullException.ThrowIfNull(settingsOverridesStore);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _broadcaster = broadcaster;
@@ -87,6 +96,9 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         _lanScannerService = lanScannerService;
         _chainStatusCache = chainStatusCache;
         _storageStatsProvider = storageStatsProvider;
+        _recordingSettings = recordingSettings;
+        _hostnameResolutionSettings = hostnameResolutionSettings;
+        _settingsOverridesStore = settingsOverridesStore;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -376,6 +388,163 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         var stats = await _storageStatsProvider.GetAsync(cancellationToken).ConfigureAwait(false);
         return stats.ToProto();
     }, context);
+
+    /// <summary>
+    /// Phase 13.2: returns the current values for every Settings section the
+    /// UI renders. Single round-trip; called once on Settings tab activate.
+    /// Future sub-phases (13.3 Alerts, 13.4 Scanner, 13.5 Storage) add their
+    /// own value sub-messages here.
+    /// </summary>
+    public override Task<Local.GetSettingsResponse> GetSettings(
+        Local.GetSettingsRequest request, ServerCallContext context
+    ) => ExecuteQueryAsync(nameof(GetSettings), _ => {
+        var response = new Local.GetSettingsResponse {
+            Recording = new RecordingSettingsSnapshot(_recordingSettings.FilterSelfTraffic).ToProto(),
+            HostnameResolution = new HostnameResolutionSettingsSnapshot(
+                EnablePreload: _hostnameResolutionSettings.EnablePreload,
+                EnableReverseDnsFallback: _hostnameResolutionSettings.EnableReverseDnsFallback,
+                EnableSniCapture: _hostnameResolutionSettings.EnableSniCapture).ToProto(),
+        };
+        return Task.FromResult(response);
+    }, context);
+
+    /// <summary>
+    /// Phase 13.2: atomically updates the Recording section's settings.
+    /// On a real transition (state actually changed), persists the new value
+    /// to <c>settings_overrides</c> and appends a
+    /// <see cref="EventKind.RecordingSettingsChanged"/> chain event so the
+    /// change is audit-trailed. Idempotent: re-asserting the current value
+    /// is a no-op (no persistence, no chain write). Recoverable failures
+    /// surface as <c>success=false</c> with a human-readable message; hard
+    /// validation errors throw <see cref="StatusCode.InvalidArgument"/>.
+    /// </summary>
+    public override async Task<Local.SetRecordingSettingsResponse> SetRecordingSettings(
+        Local.SetRecordingSettingsRequest request, ServerCallContext context
+    ) {
+        if (request.Values is null) {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "values is required"));
+        }
+
+        var ct = context.CancellationToken;
+        var requested = request.Values.FilterSelfTraffic;
+        var changed = _recordingSettings.SetSettings(requested);
+
+        if (changed) {
+            try {
+                await _settingsOverridesStore.UpsertAsync(
+                    SettingsKeys.RecordingFilterSelfTraffic,
+                    requested ? "true" : "false",
+                    ct).ConfigureAwait(false);
+            } catch (OperationCanceledException) {
+                throw;
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to persist Recording settings override; in-memory state is updated but the change will not survive restart");
+                return new Local.SetRecordingSettingsResponse {
+                    Success = false,
+                    Message = $"Failed to persist settings: {ex.Message}",
+                    Values = new RecordingSettingsSnapshot(_recordingSettings.FilterSelfTraffic).ToProto(),
+                };
+            }
+
+            try {
+                var payload = RecordingSettingsPayloadEncoder.Encode(requested, _timeProvider.GetUtcNow());
+                await _eventStore.AppendAsync(
+                    EventKind.RecordingSettingsChanged, payload, ct).ConfigureAwait(false);
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to append Recording settings change to chain — change is applied but unaudited");
+            }
+            _logger.LogInformation(
+                "Recording settings updated (FilterSelfTraffic={FilterSelfTraffic})", requested);
+        }
+
+        return new Local.SetRecordingSettingsResponse {
+            Success = true,
+            Message = changed ? "Settings updated." : "Settings unchanged.",
+            Values = new RecordingSettingsSnapshot(_recordingSettings.FilterSelfTraffic).ToProto(),
+        };
+    }
+
+    /// <summary>
+    /// Phase 13.2: atomically updates the Hostname Resolution section's
+    /// settings. Same idempotency / persistence / chain-audit contract as
+    /// <see cref="SetRecordingSettings"/>. Note that only
+    /// <c>EnableReverseDnsFallback</c> takes effect immediately; the other
+    /// two values are persisted but their consumers
+    /// (<c>EtwDnsCache</c> / <c>PktmonSniSource</c>) read them once at
+    /// startup, so toggles surface in behaviour only on the next daemon
+    /// start — the UI renders a caption to make the timing honest.
+    /// </summary>
+    public override async Task<Local.SetHostnameResolutionSettingsResponse> SetHostnameResolutionSettings(
+        Local.SetHostnameResolutionSettingsRequest request, ServerCallContext context
+    ) {
+        if (request.Values is null) {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "values is required"));
+        }
+
+        var ct = context.CancellationToken;
+        var values = request.Values;
+        var changed = _hostnameResolutionSettings.SetSettings(
+            enablePreload: values.EnablePreload,
+            enableReverseDnsFallback: values.EnableReverseDnsFallback,
+            enableSniCapture: values.EnableSniCapture);
+
+        if (changed) {
+            try {
+                await _settingsOverridesStore.UpsertAsync(
+                    SettingsKeys.DnsEnablePreload,
+                    values.EnablePreload ? "true" : "false",
+                    ct).ConfigureAwait(false);
+                await _settingsOverridesStore.UpsertAsync(
+                    SettingsKeys.DnsEnableReverseDnsFallback,
+                    values.EnableReverseDnsFallback ? "true" : "false",
+                    ct).ConfigureAwait(false);
+                await _settingsOverridesStore.UpsertAsync(
+                    SettingsKeys.SniEnableSniCapture,
+                    values.EnableSniCapture ? "true" : "false",
+                    ct).ConfigureAwait(false);
+            } catch (OperationCanceledException) {
+                throw;
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to persist Hostname Resolution settings override; in-memory state is updated but the change will not survive restart");
+                return new Local.SetHostnameResolutionSettingsResponse {
+                    Success = false,
+                    Message = $"Failed to persist settings: {ex.Message}",
+                    Values = new HostnameResolutionSettingsSnapshot(
+                        EnablePreload: _hostnameResolutionSettings.EnablePreload,
+                        EnableReverseDnsFallback: _hostnameResolutionSettings.EnableReverseDnsFallback,
+                        EnableSniCapture: _hostnameResolutionSettings.EnableSniCapture).ToProto(),
+                };
+            }
+
+            try {
+                var payload = HostnameResolutionSettingsPayloadEncoder.Encode(
+                    values.EnablePreload,
+                    values.EnableReverseDnsFallback,
+                    values.EnableSniCapture,
+                    _timeProvider.GetUtcNow());
+                await _eventStore.AppendAsync(
+                    EventKind.HostnameResolutionSettingsChanged, payload, ct).ConfigureAwait(false);
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to append Hostname Resolution settings change to chain — change is applied but unaudited");
+            }
+            _logger.LogInformation(
+                "Hostname Resolution settings updated (EnablePreload={Preload}, EnableReverseDnsFallback={Rdns}, EnableSniCapture={Sni})",
+                values.EnablePreload, values.EnableReverseDnsFallback, values.EnableSniCapture);
+        }
+
+        return new Local.SetHostnameResolutionSettingsResponse {
+            Success = true,
+            Message = changed ? "Settings updated." : "Settings unchanged.",
+            Values = new HostnameResolutionSettingsSnapshot(
+                EnablePreload: _hostnameResolutionSettings.EnablePreload,
+                EnableReverseDnsFallback: _hostnameResolutionSettings.EnableReverseDnsFallback,
+                EnableSniCapture: _hostnameResolutionSettings.EnableSniCapture).ToProto(),
+        };
+    }
 
     public override Task<Local.GetProcessTimelineResponse> GetProcessTimeline(
         Local.GetProcessTimelineRequest request, ServerCallContext context

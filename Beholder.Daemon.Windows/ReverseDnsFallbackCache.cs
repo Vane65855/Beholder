@@ -55,7 +55,7 @@ public sealed class ReverseDnsFallbackCache
     private readonly IDnsCacheIngest _ingest;
     private readonly IDnsHostnameBackfill _backfill;
     private readonly IReverseDnsResolver _resolver;
-    private readonly DnsOptions _options;
+    private readonly IHostnameResolutionSettingsState _state;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ReverseDnsFallbackCache> _logger;
 
@@ -83,7 +83,7 @@ public sealed class ReverseDnsFallbackCache
         IDnsCacheIngest ingest,
         IDnsHostnameBackfill backfill,
         IReverseDnsResolver resolver,
-        IOptionsMonitor<DnsOptions> options,
+        IHostnameResolutionSettingsState state,
         TimeProvider timeProvider,
         ILogger<ReverseDnsFallbackCache> logger
     ) {
@@ -91,17 +91,17 @@ public sealed class ReverseDnsFallbackCache
         ArgumentNullException.ThrowIfNull(ingest);
         ArgumentNullException.ThrowIfNull(backfill);
         ArgumentNullException.ThrowIfNull(resolver);
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _inner = inner;
         _ingest = ingest;
         _backfill = backfill;
         _resolver = resolver;
-        // Snapshot at construction. EnableReverseDnsFallback can't be
-        // hot-reloaded — matches EnablePreload's contract on the same options
-        // object; a config flip requires daemon restart.
-        _options = options.CurrentValue;
+        // Phase 13.2: read from the live state singleton instead of the
+        // snapshotted IOptions. EnableReverseDnsFallback now takes effect
+        // immediately when toggled via the SetHostnameResolutionSettings RPC.
+        _state = state;
         _timeProvider = timeProvider;
         _logger = logger;
         _queue = Channel.CreateBounded<IPAddress>(new BoundedChannelOptions(QueueCapacity) {
@@ -122,7 +122,7 @@ public sealed class ReverseDnsFallbackCache
         var inner = _inner.Resolve(address);
         if (inner is not null) return inner;
 
-        if (!_options.EnableReverseDnsFallback) return null;
+        if (!_state.EnableReverseDnsFallback) return null;
         if (address.IsPrivateOrReserved()) return null;
         if (_pending.ContainsKey(address)) return null;
 
@@ -149,7 +149,7 @@ public sealed class ReverseDnsFallbackCache
         _workerTask = Task.Run(() => WorkerLoopAsync(_cts.Token), CancellationToken.None);
         _logger.LogInformation(
             "Reverse-DNS fallback worker started (enabled={Enabled})",
-            _options.EnableReverseDnsFallback);
+            _state.EnableReverseDnsFallback);
         return Task.CompletedTask;
     }
 

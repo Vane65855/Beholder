@@ -173,7 +173,7 @@ public sealed class TriggerScanRpcTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
-            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
+            new FakeRecordingSettingsState(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         return new BeholderLocalService(
             _broadcaster, pipeline,
@@ -182,6 +182,8 @@ public sealed class TriggerScanRpcTests : IDisposable {
             new FakeEventStore(), new FakeTrafficStore(),
             new FakeLanDeviceStore(), scanner,
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 }

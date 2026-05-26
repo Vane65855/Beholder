@@ -36,6 +36,9 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? SetLanDeviceLabelException { get; set; }
     public Exception? VerifyChainException { get; set; }
     public Exception? GetStorageStatsException { get; set; }
+    public Exception? GetSettingsException { get; set; }
+    public Exception? SetRecordingSettingsException { get; set; }
+    public Exception? SetHostnameResolutionSettingsException { get; set; }
 
     // Optional canned snapshot/response bodies so tests can drive real data
     // through the seeding path. Existing callers that don't set these get the
@@ -87,6 +90,16 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     /// mirrors the <see cref="AsyncListLanDevicesResponder"/> precedent.
     /// </summary>
     public Func<GetStorageStatsRequest, CancellationToken, Task<GetStorageStatsResponse>>? AsyncGetStorageStatsResponder { get; set; }
+    public Func<GetSettingsRequest, GetSettingsResponse>? GetSettingsResponder { get; set; }
+    public GetSettingsResponse? GetSettingsResponse { get; set; }
+    /// <summary>
+    /// Async responder for <see cref="GetSettingsAsync"/>. Lets tests gate the
+    /// response on a <see cref="TaskCompletionSource{T}"/> they signal later,
+    /// mirroring the <see cref="AsyncGetStorageStatsResponder"/> precedent.
+    /// </summary>
+    public Func<GetSettingsRequest, CancellationToken, Task<GetSettingsResponse>>? AsyncGetSettingsResponder { get; set; }
+    public Func<SetRecordingSettingsRequest, SetRecordingSettingsResponse>? SetRecordingSettingsResponder { get; set; }
+    public Func<SetHostnameResolutionSettingsRequest, SetHostnameResolutionSettingsResponse>? SetHostnameResolutionSettingsResponder { get; set; }
 
     // Captured invocations for assertions.
     public List<ApplyFirewallRuleRequest> ApplyFirewallRuleCalls { get; } = new();
@@ -98,6 +111,9 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public List<SetLanDeviceLabelRequest> SetLanDeviceLabelCalls { get; } = new();
     public List<VerifyChainRequest> VerifyChainCalls { get; } = new();
     public List<GetStorageStatsRequest> GetStorageStatsCalls { get; } = new();
+    public List<GetSettingsRequest> GetSettingsCalls { get; } = new();
+    public List<SetRecordingSettingsRequest> SetRecordingSettingsCalls { get; } = new();
+    public List<SetHostnameResolutionSettingsRequest> SetHostnameResolutionSettingsCalls { get; } = new();
     // Responder variant for tests that need the CancellationToken the VM
     // passed (e.g., cancellation-plumbing tests). Takes precedence over
     // AggregateTimelineResponse when set.
@@ -257,6 +273,38 @@ internal sealed class FakeDaemonClient : IDaemonClient {
             return AsyncGetStorageStatsResponder(request, cancellationToken);
         return Task.FromResult(GetStorageStatsResponder?.Invoke(request)
             ?? new GetStorageStatsResponse());
+    }
+
+    public Task<GetSettingsResponse> GetSettingsAsync(
+        GetSettingsRequest request, CancellationToken cancellationToken) {
+        GetSettingsCalls.Add(request);
+        if (GetSettingsException is not null) throw GetSettingsException;
+        if (AsyncGetSettingsResponder is not null)
+            return AsyncGetSettingsResponder(request, cancellationToken);
+        return Task.FromResult(GetSettingsResponder?.Invoke(request)
+            ?? GetSettingsResponse ?? new GetSettingsResponse());
+    }
+
+    public Task<SetRecordingSettingsResponse> SetRecordingSettingsAsync(
+        SetRecordingSettingsRequest request, CancellationToken cancellationToken) {
+        SetRecordingSettingsCalls.Add(request);
+        if (SetRecordingSettingsException is not null) throw SetRecordingSettingsException;
+        return Task.FromResult(SetRecordingSettingsResponder?.Invoke(request)
+            ?? new SetRecordingSettingsResponse {
+                Success = true,
+                Values = request.Values ?? new RecordingSettingsValues(),
+            });
+    }
+
+    public Task<SetHostnameResolutionSettingsResponse> SetHostnameResolutionSettingsAsync(
+        SetHostnameResolutionSettingsRequest request, CancellationToken cancellationToken) {
+        SetHostnameResolutionSettingsCalls.Add(request);
+        if (SetHostnameResolutionSettingsException is not null) throw SetHostnameResolutionSettingsException;
+        return Task.FromResult(SetHostnameResolutionSettingsResponder?.Invoke(request)
+            ?? new SetHostnameResolutionSettingsResponse {
+                Success = true,
+                Values = request.Values ?? new HostnameResolutionSettingsValues(),
+            });
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

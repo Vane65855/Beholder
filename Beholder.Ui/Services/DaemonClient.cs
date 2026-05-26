@@ -242,6 +242,27 @@ internal sealed class DaemonClient : IDaemonClient {
         return await client.GetStorageStatsAsync(request, cancellationToken: cancellationToken);
     }
 
+    public async Task<GetSettingsResponse> GetSettingsAsync(
+        GetSettingsRequest request, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(request);
+        var client = GetConnectedClient();
+        return await client.GetSettingsAsync(request, cancellationToken: cancellationToken);
+    }
+
+    public async Task<SetRecordingSettingsResponse> SetRecordingSettingsAsync(
+        SetRecordingSettingsRequest request, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(request);
+        var client = GetConnectedClient();
+        return await client.SetRecordingSettingsAsync(request, cancellationToken: cancellationToken);
+    }
+
+    public async Task<SetHostnameResolutionSettingsResponse> SetHostnameResolutionSettingsAsync(
+        SetHostnameResolutionSettingsRequest request, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(request);
+        var client = GetConnectedClient();
+        return await client.SetHostnameResolutionSettingsAsync(request, cancellationToken: cancellationToken);
+    }
+
     public AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken cancellationToken) {
         var client = GetConnectedClient();
         return client.Subscribe(new SubscribeRequest(), cancellationToken: cancellationToken);

@@ -29,13 +29,13 @@ public sealed class ReverseDnsFallbackCacheTests {
         bool enabled = true
     ) {
         backfill ??= new FakeDnsHostnameBackfill();
-        var options = new DnsOptions { EnableReverseDnsFallback = enabled };
         return new ReverseDnsFallbackCache(
             inner: inner,
             ingest: inner,
             backfill: backfill,
             resolver: resolver,
-            options: new FakeOptionsMonitor<DnsOptions>(options),
+            state: new FakeHostnameResolutionSettingsState(
+                initialEnableReverseDnsFallback: enabled),
             timeProvider: timeProvider,
             logger: NullLogger<ReverseDnsFallbackCache>.Instance);
     }

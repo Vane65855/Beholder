@@ -42,7 +42,7 @@ public sealed class VerifyChainTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
-            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
+            new FakeRecordingSettingsState(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
 
         _chainStatusCache = new FakeChainStatusCache();
@@ -53,6 +53,8 @@ public sealed class VerifyChainTests : IDisposable {
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             _chainStatusCache, new FakeStorageStatsProvider(),
+            new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
@@ -164,7 +166,7 @@ public sealed class VerifyChainTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
-            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
+            new FakeRecordingSettingsState(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
 
         var service = new BeholderLocalService(
@@ -173,6 +175,8 @@ public sealed class VerifyChainTests : IDisposable {
             throwingStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);

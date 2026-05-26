@@ -74,6 +74,7 @@ public sealed class PktmonSniSource
     private readonly IDnsCacheIngest _ingest;
     private readonly IDnsHostnameBackfill _backfill;
     private readonly SniOptions _options;
+    private readonly IHostnameResolutionSettingsState _state;
     private readonly ILogger<PktmonSniSource> _logger;
 
     private static readonly TimeSpan StatsInterval = TimeSpan.FromSeconds(30);
@@ -100,25 +101,33 @@ public sealed class PktmonSniSource
         IDnsCacheIngest ingest,
         IDnsHostnameBackfill backfill,
         IOptionsMonitor<SniOptions> options,
+        IHostnameResolutionSettingsState state,
         ILogger<PktmonSniSource> logger
     ) {
         ArgumentNullException.ThrowIfNull(ingest);
         ArgumentNullException.ThrowIfNull(backfill);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(logger);
         _ingest = ingest;
         _backfill = backfill;
-        // Snapshot at construction. EnableSniCapture isn't hot-reloadable —
-        // matches the EnableReverseDnsFallback contract on DnsOptions.
+        // Snapshot the construction-time-only sizing knobs (QueueCapacity,
+        // SessionBufferSizeMB, DedupCapacity) from SniOptions — JSON-only
+        // tuning values not exposed in the Settings UI.
         _options = options.CurrentValue;
+        // EnableSniCapture is exposed in Settings (Phase 13.2). Read at
+        // StartAsync only — toggling at runtime takes effect on the next
+        // daemon start since this source's lifecycle isn't designed for
+        // mid-run start/stop of its pktmon ETW session.
+        _state = state;
         _logger = logger;
     }
 
     public Task StartAsync(CancellationToken cancellationToken) {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (!_options.EnableSniCapture) {
-            _logger.LogInformation("SNI capture disabled by config");
+        if (!_state.EnableSniCapture) {
+            _logger.LogInformation("SNI capture disabled (HostnameResolutionSettings.EnableSniCapture=false)");
             return Task.CompletedTask;
         }
 

@@ -182,6 +182,48 @@ internal static class ProtocolConverters {
     }
 
     /// <summary>
+    /// Maps a Recording settings snapshot onto its wire value message.
+    /// </summary>
+    public static Local.RecordingSettingsValues ToProto(this Core.RecordingSettingsSnapshot source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Local.RecordingSettingsValues {
+            FilterSelfTraffic = source.FilterSelfTraffic,
+        };
+    }
+
+    /// <summary>
+    /// Maps a wire Recording settings value message back to the domain snapshot.
+    /// </summary>
+    public static Core.RecordingSettingsSnapshot ToDomain(this Local.RecordingSettingsValues source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Core.RecordingSettingsSnapshot(source.FilterSelfTraffic);
+    }
+
+    /// <summary>
+    /// Maps a Hostname Resolution settings snapshot onto its wire value message.
+    /// </summary>
+    public static Local.HostnameResolutionSettingsValues ToProto(this Core.HostnameResolutionSettingsSnapshot source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Local.HostnameResolutionSettingsValues {
+            EnablePreload = source.EnablePreload,
+            EnableReverseDnsFallback = source.EnableReverseDnsFallback,
+            EnableSniCapture = source.EnableSniCapture,
+        };
+    }
+
+    /// <summary>
+    /// Maps a wire Hostname Resolution settings value message back to the
+    /// domain snapshot.
+    /// </summary>
+    public static Core.HostnameResolutionSettingsSnapshot ToDomain(this Local.HostnameResolutionSettingsValues source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Core.HostnameResolutionSettingsSnapshot(
+            EnablePreload: source.EnablePreload,
+            EnableReverseDnsFallback: source.EnableReverseDnsFallback,
+            EnableSniCapture: source.EnableSniCapture);
+    }
+
+    /// <summary>
     /// Maps a storage stats snapshot onto its wire equivalent. The
     /// nullability of <see cref="Core.StorageStats.ChainStatus"/> is encoded
     /// via the <c>has_chain_status</c> boolean on the response so the UI can

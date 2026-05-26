@@ -18,7 +18,8 @@ namespace Beholder.Tests;
 public class EtwDnsCachePreloadTests {
     private static EtwDnsCache CreateCache() =>
         new(NullLogger<EtwDnsCache>.Instance,
-            new FakeOptionsMonitor<DnsOptions>(new DnsOptions()));
+            new FakeOptionsMonitor<DnsOptions>(new DnsOptions()),
+            new FakeHostnameResolutionSettingsState());
 
     [Fact]
     public void IngestResolved_PopulatesCacheForIpv4() {

@@ -46,4 +46,20 @@ public enum EventKind {
     /// kind only.
     /// </summary>
     LanDeviceMacChanged = 10,
+
+    /// <summary>
+    /// User toggled one or more values in the Settings tab's Recording section
+    /// (Phase 13.2). Chain-audit kind only — captures the new bundle of values
+    /// + the wall-clock time of the change so the audit log can reconstruct
+    /// "who set what when" without the daemon having to query the
+    /// <c>settings_overrides</c> table.
+    /// </summary>
+    RecordingSettingsChanged = 11,
+
+    /// <summary>
+    /// User toggled one or more values in the Settings tab's Hostname Resolution
+    /// section (Phase 13.2). Same chain-audit semantics as
+    /// <see cref="RecordingSettingsChanged"/>.
+    /// </summary>
+    HostnameResolutionSettingsChanged = 12,
 }

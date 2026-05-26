@@ -17,7 +17,8 @@ namespace Beholder.Tests;
 public class EtwDnsCacheChannelTests {
     private static EtwDnsCache CreateCache(int queueCapacity = 1024) =>
         new(NullLogger<EtwDnsCache>.Instance,
-            new FakeOptionsMonitor<DnsOptions>(new DnsOptions { QueueCapacity = queueCapacity }));
+            new FakeOptionsMonitor<DnsOptions>(new DnsOptions { QueueCapacity = queueCapacity }),
+            new FakeHostnameResolutionSettingsState());
 
     /// <summary>
     /// Polls <paramref name="predicate"/> until it returns true or

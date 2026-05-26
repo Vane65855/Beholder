@@ -63,17 +63,21 @@ public sealed class DnsOptions {
     /// <summary>
     /// Whether the daemon issues PTR (reverse-DNS) queries as a final
     /// fallback for IPs that have no hostname from the Windows DNS resolver
-    /// cache or the live ETW capture path. Default <c>true</c>.
+    /// cache or the live ETW capture path. Default <c>false</c> — fresh
+    /// installs do not emit outbound DNS until the user opts in via the
+    /// Settings tab.
     /// </summary>
     /// <remarks>
     /// This is the last line before raw IPs are surfaced as the displayed
     /// "hostname" in the UI — it covers the residual class of direct-IP
     /// connections (BitTorrent peers, P2P services, hardcoded IPs in apps)
-    /// that never went through Windows DNS. Set to <c>false</c> in
-    /// <c>appsettings.json</c> under section <c>"Dns"</c> (or via env var
-    /// <c>Dns__EnableReverseDnsFallback=false</c>) to honour ADR 004's
-    /// strict "no outbound DNS" rule. See ADR 005 for the policy and the
-    /// implementation seam (<c>ReverseDnsFallbackCache</c>).
+    /// that never went through Windows DNS. The default flipped to off in
+    /// Phase 13.2 to honour ADR 004's "no outbound DNS without opt-in" stance
+    /// — the Settings tab's Hostname Resolution toggle is now the explicit
+    /// opt-in. Set to <c>true</c> in <c>appsettings.json</c> under section
+    /// <c>"Dns"</c> (or via env var <c>Dns__EnableReverseDnsFallback=true</c>)
+    /// to flip the default back at the appsettings layer. See ADR 005 for the
+    /// policy and the implementation seam (<c>ReverseDnsFallbackCache</c>).
     /// </remarks>
-    public bool EnableReverseDnsFallback { get; set; } = true;
+    public bool EnableReverseDnsFallback { get; set; } = false;
 }

@@ -438,6 +438,109 @@
                             </Grid>
                         </Border>
 
+                        <!-- ──────────  RECORDING  ────────── -->
+                        <Border x:Name="RecordingCard" Classes="sectionCard">
+                            <Grid>
+                                <Border Classes="accentStripe cyan" />
+                                <StackPanel Orientation="Vertical" Spacing="16">
+                                    <TextBlock Classes="sectionTitle" Text="RECORDING" />
+
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="Filter own traffic"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <TextBlock Text="When on, Beholder's daemon and UI processes are excluded from the flow event pipeline so their traffic doesn't pollute charts."
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <controls:SettingsTogglePill Grid.Column="1"
+                                                                     IsOn="{Binding Recording.FilterSelfTraffic}"
+                                                                     IsSaving="{Binding Recording.IsSaving}"
+                                                                     Command="{Binding ToggleFilterSelfTrafficCommand}"
+                                                                     VerticalAlignment="Center" />
+                                    </Grid>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- ──────────  HOSTNAME RESOLUTION  ────────── -->
+                        <Border x:Name="HostnameResolutionCard" Classes="sectionCard">
+                            <Grid>
+                                <Border Classes="accentStripe cyan" />
+                                <StackPanel Orientation="Vertical" Spacing="16">
+                                    <TextBlock Classes="sectionTitle" Text="HOSTNAME RESOLUTION" />
+
+                                    <!-- EnableReverseDnsFallback (LIVE) -->
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="Reverse-DNS fallback"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <TextBlock Text="On a DNS-cache miss, issue a reverse-DNS lookup so direct-IP destinations show a hostname when one is available."
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <controls:SettingsTogglePill Grid.Column="1"
+                                                                     IsOn="{Binding HostnameResolution.EnableReverseDnsFallback}"
+                                                                     IsSaving="{Binding HostnameResolution.IsSavingReverseDnsFallback}"
+                                                                     Command="{Binding ToggleEnableReverseDnsFallbackCommand}"
+                                                                     VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <!-- EnablePreload (RESTART REQUIRED) -->
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="Preload from Windows DNS cache"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <TextBlock Text="At daemon start, seed the in-memory DNS cache from Windows's own resolver cache so historical lookups don't need a fresh query."
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Text="(takes effect on next daemon start)"
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource SeverityWarn}"
+                                                       FontStyle="Italic" />
+                                        </StackPanel>
+                                        <controls:SettingsTogglePill Grid.Column="1"
+                                                                     IsOn="{Binding HostnameResolution.EnablePreload}"
+                                                                     IsSaving="{Binding HostnameResolution.IsSavingPreload}"
+                                                                     Command="{Binding ToggleEnablePreloadCommand}"
+                                                                     VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <!-- EnableSniCapture (RESTART REQUIRED) -->
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="SNI capture"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <TextBlock Text="Run the PktMon ETW session that extracts SNI hostnames from TLS ClientHello packets — useful when DNS over HTTPS hides resolver traffic."
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Text="(takes effect on next daemon start)"
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource SeverityWarn}"
+                                                       FontStyle="Italic" />
+                                        </StackPanel>
+                                        <controls:SettingsTogglePill Grid.Column="1"
+                                                                     IsOn="{Binding HostnameResolution.EnableSniCapture}"
+                                                                     IsSaving="{Binding HostnameResolution.IsSavingSniCapture}"
+                                                                     Command="{Binding ToggleEnableSniCaptureCommand}"
+                                                                     VerticalAlignment="Center" />
+                                    </Grid>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
                         <!-- ──────────  MAINTENANCE  ────────── -->
                         <Border x:Name="MaintenanceCard" Classes="sectionCard">
                             <Grid>

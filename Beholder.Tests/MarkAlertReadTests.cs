@@ -41,7 +41,7 @@ public sealed class MarkAlertReadTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
-            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
+            new FakeRecordingSettingsState(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
 
         _service = new BeholderLocalService(
@@ -50,6 +50,8 @@ public sealed class MarkAlertReadTests : IDisposable {
             eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 

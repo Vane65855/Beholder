@@ -78,6 +78,7 @@ public sealed class EtwDnsCache : IDnsCache, IDnsCacheIngest, IHostedService, IA
 
     private readonly ILogger<EtwDnsCache> _logger;
     private readonly DnsOptions _options;
+    private readonly IHostnameResolutionSettingsState _state;
     private readonly ConcurrentDictionary<IPAddress, string> _cache = new();
     private readonly object _lifecycleLock = new();
 
@@ -101,14 +102,25 @@ public sealed class EtwDnsCache : IDnsCache, IDnsCacheIngest, IHostedService, IA
     // has a fixed event table.
     private readonly ConcurrentDictionary<int, byte> _schemaDumped = new();
 
-    public EtwDnsCache(ILogger<EtwDnsCache> logger, IOptionsMonitor<DnsOptions> options) {
+    public EtwDnsCache(
+        ILogger<EtwDnsCache> logger,
+        IOptionsMonitor<DnsOptions> options,
+        IHostnameResolutionSettingsState state
+    ) {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(state);
         _logger = logger;
-        // Snapshot at construction: channel capacity can't change after
-        // CreateBounded, and the ETW session's BufferSizeMB is set at session
-        // construction. No hot-reload would be honoured anyway.
+        // Snapshot the construction-time-only sizing knobs (QueueCapacity,
+        // SessionBufferSizeMB) from DnsOptions — these are JSON-only tuning
+        // values not exposed in the Settings UI.
         _options = options.CurrentValue;
+        // EnablePreload is exposed in Settings (Phase 13.2) so it's read
+        // from the state singleton, which the SettingsOverridesService has
+        // already populated with any persisted user override by the time
+        // StartAsync runs. Read-at-startup remains the contract — toggling
+        // EnablePreload at runtime takes effect on the next daemon start.
+        _state = state;
     }
 
     public string? Resolve(IPAddress address) {
@@ -560,8 +572,8 @@ public sealed class EtwDnsCache : IDnsCache, IDnsCacheIngest, IHostedService, IA
     /// enumeration — the daemon still starts successfully.
     /// </summary>
     private void PreloadFromWindowsDnsCache() {
-        if (!_options.EnablePreload) {
-            _logger.LogInformation("DNS cache preload disabled by config (DnsOptions.EnablePreload=false)");
+        if (!_state.EnablePreload) {
+            _logger.LogInformation("DNS cache preload disabled (HostnameResolutionSettings.EnablePreload=false)");
             return;
         }
 

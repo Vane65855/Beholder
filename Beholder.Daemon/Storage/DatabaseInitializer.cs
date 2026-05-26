@@ -146,6 +146,14 @@ public sealed class DatabaseInitializer {
             """);
 
         Execute(connection, """
+            CREATE TABLE IF NOT EXISTS settings_overrides (
+                name       TEXT    PRIMARY KEY,
+                value_json TEXT    NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            """);
+
+        Execute(connection, """
             CREATE TABLE IF NOT EXISTS event_log (
                 seq           INTEGER PRIMARY KEY AUTOINCREMENT,
                 ts_unix_ns    INTEGER NOT NULL,

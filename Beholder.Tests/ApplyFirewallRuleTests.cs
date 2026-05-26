@@ -47,7 +47,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
-            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
+            new FakeRecordingSettingsState(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         var alertStore = new SqliteAlertStore(connectionFactory, NullLogger<SqliteAlertStore>.Instance);
 
@@ -63,6 +63,8 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeLanDeviceStore(),
             TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeSettingsOverridesStore(),
             _timeProvider,
             NullLogger<BeholderLocalService>.Instance);
     }
@@ -162,7 +164,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
-            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
+            new FakeRecordingSettingsState(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         var connectionFactory = new ConnectionFactory(_databasePath, pooling: false);
         var alertStore = new SqliteAlertStore(connectionFactory, NullLogger<SqliteAlertStore>.Instance);
@@ -173,6 +175,8 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             failingEventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var request = MakeRequest();
@@ -239,7 +243,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeFlowSource(), _timeProvider,
             new FakeTrafficStore(), new FakeDnsCacheStore(), new FakeDnsCache(),
             new FakeOptionsMonitor<TrafficStorageOptions>(new TrafficStorageOptions()),
-            new FakeOptionsMonitor<RecordingOptions>(new RecordingOptions()),
+            new FakeRecordingSettingsState(),
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
         var alertStore = new SqliteAlertStore(
             new ConnectionFactory(_databasePath, pooling: false), NullLogger<SqliteAlertStore>.Instance);
@@ -250,6 +254,8 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var request = MakeRequest();
