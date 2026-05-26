@@ -8,26 +8,15 @@ using Avalonia.Markup.Xaml;
 namespace Beholder.Ui.Views.Tabs;
 
 /// <summary>
-/// Code-behind for the Settings tab. Two behaviors that don't have clean
-/// pure-XAML equivalents in Avalonia 12:
-/// <list type="number">
-/// <item>Responsive layout (#12) — toggles a <c>"wide"</c> CSS-style class
-///   on the root <see cref="UserControl"/> when <see cref="Visual.Bounds"/>
-///   crosses <see cref="WideLayoutThresholdPx"/>, which XAML styles
-///   consume to rearrange the section cards into a two-column layout
-///   above the threshold.</item>
-/// <item>Sticky section headers (#13) — keeps the floating
-///   <c>StickyHeader</c> border in sync with which section card is
-///   currently at the top of the scroll viewport.</item>
-/// </list>
+/// Code-behind for the Settings tab. Implements the sticky section
+/// header overlay (#13 from the Phase 13.1.1 brainstorm) — a single
+/// concern that doesn't have a clean pure-XAML equivalent in Avalonia 12.
+/// The responsive 2-column layout (#12) was dropped in Phase 13.1.2 in
+/// favor of a single-column full-width layout; the corresponding
+/// <c>ArrangeOverride</c> / class-toggling logic was removed at the
+/// same time.
 /// </summary>
 public partial class SettingsTabView : UserControl {
-    /// <summary>Window width threshold (in DIPs) at which the section
-    /// cards switch from a single-column stack to a two-column grid.
-    /// Chosen for a typical desktop monitor where two cards side-by-side
-    /// stay readable without each becoming overly narrow.</summary>
-    private const double WideLayoutThresholdPx = 1400;
-
     /// <summary>Above this scroll offset, the sticky header overlay
     /// becomes visible. A small buffer (rather than zero) avoids the
     /// header flashing in and out as the user scrolls past the natural
@@ -60,7 +49,6 @@ public partial class SettingsTabView : UserControl {
         if (_scrollViewer is not null) {
             _scrollViewer.ScrollChanged += OnScrollChanged;
         }
-        UpdateLayoutClass();
     }
 
     protected override void OnUnloaded(RoutedEventArgs e) {
@@ -70,27 +58,9 @@ public partial class SettingsTabView : UserControl {
         base.OnUnloaded(e);
     }
 
-    protected override Size ArrangeOverride(Size finalSize) {
-        UpdateLayoutClass();
-        return base.ArrangeOverride(finalSize);
-    }
-
     private void TryAddCard(string label, string controlName) {
         var card = this.FindControl<Border>(controlName);
         if (card is not null) _sectionCards.Add((label, card));
-    }
-
-    /// <summary>
-    /// Adds or removes the <c>"wide"</c> class based on the current
-    /// <see cref="Visual.Bounds"/> width. XAML styles consume the class
-    /// to flip the section-card layout between single-column (narrow)
-    /// and two-column (wide) modes.
-    /// </summary>
-    private void UpdateLayoutClass() {
-        var isWide = Bounds.Width >= WideLayoutThresholdPx;
-        var hasWide = Classes.Contains("wide");
-        if (isWide && !hasWide) Classes.Add("wide");
-        else if (!isWide && hasWide) Classes.Remove("wide");
     }
 
     /// <summary>

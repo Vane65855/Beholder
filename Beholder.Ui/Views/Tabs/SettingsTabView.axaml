@@ -39,19 +39,6 @@
             <Setter Property="Background" Value="{DynamicResource BorderStrong}" />
         </Style>
 
-        <!-- ═════ Section notch (#16) ═════
-             A small "label notch" overlaid on the top edge of each
-             section card. Sits above the card's top border with a
-             background matching the page so it visually punches through
-             the border, like the title tab on a Unix terminal panel. -->
-        <Style Selector="Border.sectionNotch">
-            <Setter Property="Background" Value="{DynamicResource BackgroundRoot}" />
-            <Setter Property="Padding" Value="8,0" />
-            <Setter Property="VerticalAlignment" Value="Top" />
-            <Setter Property="HorizontalAlignment" Value="Left" />
-            <Setter Property="Margin" Value="20,-10,0,0" />
-        </Style>
-
         <!-- ═════ Typography ═════ -->
         <Style Selector="TextBlock.sectionTitle">
             <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
@@ -200,31 +187,6 @@
             <Setter Property="Opacity" Value="0.7" />
         </Style>
 
-        <!-- ═════ Responsive layout (#12) ═════
-             Default (narrow): all three section cards span both columns,
-             stacked vertically. When the UserControl has the "wide"
-             class (Bounds.Width >= 1400), Maintenance and About each
-             take one column in row 1, side by side. -->
-        <Style Selector="Border#MaintenanceCard">
-            <Setter Property="Grid.Row" Value="1" />
-            <Setter Property="Grid.Column" Value="0" />
-            <Setter Property="Grid.ColumnSpan" Value="2" />
-        </Style>
-        <Style Selector="Border#AboutCard">
-            <Setter Property="Grid.Row" Value="2" />
-            <Setter Property="Grid.Column" Value="0" />
-            <Setter Property="Grid.ColumnSpan" Value="2" />
-        </Style>
-        <Style Selector="UserControl.wide Border#MaintenanceCard">
-            <Setter Property="Grid.Row" Value="1" />
-            <Setter Property="Grid.Column" Value="0" />
-            <Setter Property="Grid.ColumnSpan" Value="1" />
-        </Style>
-        <Style Selector="UserControl.wide Border#AboutCard">
-            <Setter Property="Grid.Row" Value="1" />
-            <Setter Property="Grid.Column" Value="1" />
-            <Setter Property="Grid.ColumnSpan" Value="1" />
-        </Style>
     </UserControl.Styles>
 
     <Grid>
@@ -287,12 +249,13 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- ════════════════  Sections grid (responsive 2-col)  ════════════════ -->
-                    <Grid x:Name="SectionsGrid"
-                          ColumnDefinitions="*,*"
-                          RowDefinitions="Auto,Auto,Auto"
-                          RowSpacing="24"
-                          ColumnSpacing="24">
+                    <!-- ════════════════  Sections (full-width single column)  ════════════════
+                         Phase 13.1.2 dropped the 2-column responsive layout
+                         (Phase 13.1.1 item #12) — Settings is read top-to-
+                         bottom and the full-width Data Storage card gives
+                         the proportional bars the horizontal space they need
+                         to communicate proportion. -->
+                    <StackPanel Orientation="Vertical" Spacing="24">
 
                         <!-- ──────────  DATA STORAGE  ────────── -->
                         <Border x:Name="DataStorageCard" Classes="sectionCard">
@@ -379,7 +342,7 @@
                                     <ItemsControl ItemsSource="{Binding TrafficTables}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="vm:TableStatsRow">
-                                                <Grid ColumnDefinitions="*,80,140,Auto"
+                                                <Grid ColumnDefinitions="2*,80,3*,Auto"
                                                       ColumnSpacing="16"
                                                       Margin="0,6">
                                                     <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="1">
@@ -397,7 +360,7 @@
                                                                FontSize="{DynamicResource FontSizeCaption}"
                                                                Foreground="{DynamicResource TextSecondary}"
                                                                VerticalAlignment="Center" />
-                                                    <Border Grid.Column="2" Classes="barTrack" VerticalAlignment="Center">
+                                                    <Border Grid.Column="2" Classes="barTrack" VerticalAlignment="Center" MinWidth="120">
                                                         <Grid>
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="{Binding RowCountShareRatio,
@@ -430,7 +393,7 @@
                                     <ItemsControl ItemsSource="{Binding FlatTables}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="vm:TableStatsRow">
-                                                <Grid ColumnDefinitions="*,80,140,Auto"
+                                                <Grid ColumnDefinitions="2*,80,3*,Auto"
                                                       ColumnSpacing="16"
                                                       Margin="0,6">
                                                     <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="1">
@@ -448,7 +411,7 @@
                                                                FontSize="{DynamicResource FontSizeCaption}"
                                                                Foreground="{DynamicResource TextSecondary}"
                                                                VerticalAlignment="Center" />
-                                                    <Border Grid.Column="2" Classes="barTrack" VerticalAlignment="Center">
+                                                    <Border Grid.Column="2" Classes="barTrack" VerticalAlignment="Center" MinWidth="120">
                                                         <Grid>
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="{Binding RowCountShareRatio,
@@ -648,7 +611,7 @@
                                 </StackPanel>
                             </Grid>
                         </Border>
-                    </Grid>
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
         </DockPanel>

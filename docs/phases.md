@@ -1,8 +1,8 @@
 # Beholder NMT — Project Status & Phase Plan
 
 **Last updated:** 2026-05-25
-**Current checkpoint:** Phase 13.1.1 (Settings tab visual polish — 24 of 25 brainstormed items shipped in one atomic commit. New: pretty-named + retention-annotated tables sorted in cascade order, per-row proportional bars + stacked total breakdown + 5-tier cascade sparkline, chain-integrity pill badge with smooth color transition, MOTD-style status strip at the top, ASCII-eye brand mark, clickable URLs + copy-to-clipboard buttons in About, responsive 2-column layout above 1400px, sticky section header on scroll, left-edge accent stripes per section. Three new daemon-side fields on `GetStorageStatsResponse` (`chain_first_event_unix_ns`, `daemon_started_unix_ns`, `lan_device_count`) drive the "Watching this machine since…" / "uptime 4h 12m" / "N LAN devices tracked" MOTD labels. New `IDaemonClock` singleton captures process start time. `IFolderOpener` renamed to `IShellOpener` (one method, opens folders OR URLs via `Process.Start { UseShellExecute = true }`) and a new `IClipboardWriter` wraps Avalonia's `IClipboard`. ASCII box-drawing-frame notches (#16) deferred — section title headers inside each card serve the same purpose without the geometric complexity. No new RPCs; the three new wire fields are additive on `GetStorageStatsResponse`.)
-**Test count:** 1226
+**Current checkpoint:** Phase 13.1.2 (Settings tab layout flex fix — dropped the 2-column responsive layout from Phase 13.1.1 in favor of a single full-width column. The 2-column design had a real runtime bug: Data Storage occupied only the LEFT half of a 2-column Grid because no style set its `Grid.ColumnSpan`, while Maintenance + About correctly spanned both columns. The wide-mode style selectors (`UserControl.wide Border#…`) also didn't activate at runtime, so the responsive flip never happened. Both issues are sidestepped by the simpler design: replace `SectionsGrid` with a vertical `StackPanel`, drop the class-toggling code-behind, change the per-row column widths to `2*,80,3*,Auto` with `MinWidth="120"` on the bar so the proportional bars flex genuinely with window width. The sticky-header overlay (Phase 13.1.1 item #13) stays unchanged. Documented in `UI_QUALITY_STANDARDS.md` §10 as a precedent: pure-XAML responsive layouts driven by programmatically-toggled `Classes` on a root control should not be used in Avalonia 12 without a verified runtime test.)
+**Test count:** 1231
 
 ---
 
@@ -1174,6 +1174,33 @@ Two new test doubles in `Beholder.Tests/TestDoubles/`: `FakeLanDeviceStore` (in-
 **Reference comparison (UI_QUALITY_STANDARDS §7):** The closest visual analog is the Unix system-status display genre — `htop` / `btop` for density + section layout, `neofetch` for the ASCII-logo + key-facts framing. Visual target: "control panel the operator wants to leave open on a second monitor." Beholder's Settings tab now hits that bar (per real-LAN smoke screenshot review): the MOTD strip + ASCII eye + colored section stripes + chain pill give the tab a strong machine-status identity within seconds of first activation.
 
 **Build clean. 1187 → 1226 tests pass deterministically.**
+
+---
+
+### Phase 13.1.2 — Settings tab layout flex fix ✅
+
+**Purpose:** A user smoke-test screenshot at a wide window surfaced a real layout bug in Phase 13.1.1's 2-column responsive section design. Data Storage occupied only the LEFT half of the viewport with empty space on the right, while Maintenance + About below it correctly spanned the full width. Root cause: the `SectionsGrid` was `ColumnDefinitions="*,*"` and `MaintenanceCard` / `AboutCard` had explicit `Grid.ColumnSpan="2"` styles, but `DataStorageCard` had no equivalent style — so it defaulted to span 1, taking only column 0. The wide-mode style overrides (`UserControl.wide Border#…`) also weren't firing at runtime even on wide windows, suggesting the descendant style selector pattern combined with a programmatically-toggled `Classes` collection doesn't reliably re-evaluate in Avalonia 12.
+
+**Decision:** Drop the responsive 2-column layout (Phase 13.1.1 brainstorm item #12) entirely rather than patch around the bugs. Settings is read top-to-bottom; full-width single column is a better fit for the content shape AND eliminates an entire class of layout fragility. The original brainstorm's #12 is now an explicit non-goal rather than a deferred item — the single-column layout IS the design.
+
+**Changes:**
+- `SettingsTabView.axaml`:
+  - Replaced `<Grid x:Name="SectionsGrid" ColumnDefinitions="*,*" ...>` with `<StackPanel Orientation="Vertical" Spacing="24">`.
+  - Deleted the four `Border#…Card` style blocks that set `Grid.Row` / `Grid.Column` / `Grid.ColumnSpan` (both narrow and wide variants).
+  - Changed the row data template's column widths from `*,80,140,Auto` to `2*,80,3*,Auto` so the proportional-bar column flexes with window width (gets 3/5 of the available row width, vs the name's 2/5). Added `MinWidth="120"` to the bar's `Border.barTrack` so at narrow widths it stays visibly proportional.
+  - Removed the unused `Border.sectionNotch` style (orphaned from Phase 13.1.1 when the notch overlay was deferred).
+- `SettingsTabView.axaml.cs`:
+  - Removed `WideLayoutThresholdPx`, `UpdateLayoutClass`, the `ArrangeOverride` override, and the `UpdateLayoutClass()` call from `OnLoaded`. The class-toggling responsive code path is gone.
+  - Kept the sticky-header `OnScrollChanged` handler, section-card name caching, and subscribe/unsubscribe lifecycle. Sticky header is independent of layout direction.
+
+**Tests:** None. The 2-column layout was visual-only — no unit tests asserted anything about it. The 1231-test suite is test-neutral across the transition.
+
+**Docs:**
+- `UI_QUALITY_STANDARDS.md` §10 (the evolution log): new bullet documenting the Avalonia-12-class-toggle-selector gotcha as a precedent.
+- `phases.md`: header bumped; this entry; the original 13.1.1 entry is unchanged (history preserves the over-reach).
+- `README.md`: status line refresh.
+
+**Build clean. 1231 tests pass deterministically (test count unchanged from 13.1.1).**
 
 ---
 
