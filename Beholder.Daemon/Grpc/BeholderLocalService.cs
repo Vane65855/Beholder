@@ -702,13 +702,19 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         if (request.ResolutionMs <= 0)
             throw new RpcException(new Status(StatusCode.InvalidArgument, "resolution_ms must be positive"));
 
+
         return ExecuteQueryAsync(nameof(GetProcessTimeline), async cancellationToken => {
             var from = request.FromUnixNs.FromUnixTimeNanoseconds();
             var to = request.ToUnixNs.FromUnixTimeNanoseconds();
             var resolution = TimeSpan.FromMilliseconds(request.ResolutionMs);
+            // Phase 9.6 fix: empty string = no filter (preserves pre-9.6 contract).
+            var remoteAddress = string.IsNullOrEmpty(request.RemoteAddress)
+                ? null
+                : request.RemoteAddress;
 
             var points = await _trafficStore.GetProcessTimelineAsync(
-                request.ProcessPath, from, to, resolution, cancellationToken)
+                request.ProcessPath, from, to, resolution, cancellationToken,
+                remoteAddress)
                 .ConfigureAwait(false);
 
             var response = new Local.GetProcessTimelineResponse();
@@ -748,9 +754,13 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
             var from = request.FromUnixNs.FromUnixTimeNanoseconds();
             var to = request.ToUnixNs.FromUnixTimeNanoseconds();
             var resolution = TimeSpan.FromMilliseconds(request.ResolutionMs);
+            // Phase 9.6 fix: empty string = no filter (preserves pre-9.6 contract).
+            var remoteAddress = string.IsNullOrEmpty(request.RemoteAddress)
+                ? null
+                : request.RemoteAddress;
 
             var points = await _trafficStore.GetAggregateTimelineAsync(
-                from, to, resolution, cancellationToken)
+                from, to, resolution, cancellationToken, remoteAddress)
                 .ConfigureAwait(false);
 
             var response = new Local.GetAggregateTimelineResponse();

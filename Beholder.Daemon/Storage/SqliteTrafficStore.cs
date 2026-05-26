@@ -148,7 +148,8 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
         DateTimeOffset from,
         DateTimeOffset to,
         TimeSpan resolution,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        string? remoteAddress = null
     ) {
         ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
         ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
@@ -159,7 +160,8 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
         using var connection = _connectionFactory.CreateConnection();
         return await TimelineStitcher.StitchAsync(
             connection, _options.CurrentValue.Tiers,
-            from, to, SnapNowMsToMinute(), processPath, cancellationToken).ConfigureAwait(false);
+            from, to, SnapNowMsToMinute(), processPath, cancellationToken,
+            remoteAddress).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<DestinationSummary>> GetDestinationsAsync(
@@ -234,7 +236,8 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
         DateTimeOffset from,
         DateTimeOffset to,
         TimeSpan resolution,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        string? remoteAddress = null
     ) {
         ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
 
@@ -244,7 +247,8 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
         using var connection = _connectionFactory.CreateConnection();
         return await TimelineStitcher.StitchAsync(
             connection, _options.CurrentValue.Tiers,
-            from, to, SnapNowMsToMinute(), processPath: null, cancellationToken).ConfigureAwait(false);
+            from, to, SnapNowMsToMinute(), processPath: null, cancellationToken,
+            remoteAddress).ConfigureAwait(false);
     }
 
     /// <summary>

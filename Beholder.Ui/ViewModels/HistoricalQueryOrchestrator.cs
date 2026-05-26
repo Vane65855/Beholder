@@ -51,15 +51,18 @@ internal sealed class HistoricalQueryOrchestrator : IDisposable {
     /// <summary>
     /// Runs a per-process chart load for the current range + selected process.
     /// Cancels any prior in-flight query first. <paramref name="processPath"/>
-    /// is <c>null</c> for the aggregate-across-all-processes chart.
+    /// is <c>null</c> for the aggregate-across-all-processes chart. Phase 9.6:
+    /// <paramref name="remoteAddress"/> is the optional IP filter (null/empty
+    /// = no filter) — restricts the timeline to traffic exchanged with that
+    /// IP regardless of process scope.
     /// </summary>
     public async Task<HistoricalChartResult> LoadProcessChartAsync(
-        TimeRangeSelection range, string? processPath
+        TimeRangeSelection range, string? processPath, string? remoteAddress = null
     ) {
         ArgumentNullException.ThrowIfNull(range);
         var cancellationToken = StartNew();
         try {
-            return await _loader.LoadProcessChartAsync(range, processPath, cancellationToken)
+            return await _loader.LoadProcessChartAsync(range, processPath, cancellationToken, remoteAddress)
                 .ConfigureAwait(false);
         } catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled) {
             throw new OperationCanceledException("Cancelled via gRPC status", ex);

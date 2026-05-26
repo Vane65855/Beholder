@@ -218,6 +218,11 @@ message GetProcessTimelineRequest {
   int64 from_unix_ns = 2;
   int64 to_unix_ns = 3;
   int64 resolution_ms = 4;
+  // Phase 9.6 fix: optional remote-address filter. Empty string = no filter.
+  // Backs the Scanner → Traffic cross-link's chart-update path so the
+  // per-process timeline reflects the active IP filter (not just the
+  // per-process LIST). Same shape as remote_address on GetProcessSummariesRequest.
+  string remote_address = 5;
 }
 
 message GetProcessTimelineResponse {
@@ -250,6 +255,10 @@ message GetAggregateTimelineRequest {
   int64 from_unix_ns = 1;
   int64 to_unix_ns = 2;
   int64 resolution_ms = 3;
+  // Phase 9.6 fix: optional remote-address filter. Empty string = no filter.
+  // Backs the Scanner → Traffic cross-link's chart-update path so the
+  // aggregate timeline reflects the active IP filter.
+  string remote_address = 4;
 }
 
 message GetAggregateTimelineResponse {

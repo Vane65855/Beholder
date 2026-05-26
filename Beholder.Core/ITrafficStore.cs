@@ -41,12 +41,18 @@ public interface ITrafficStore {
     /// The store picks the most efficient tier internally based on
     /// <paramref name="from"/>, <paramref name="to"/>, and <paramref name="resolution"/>.
     /// </summary>
+    /// <param name="remoteAddress">
+    /// Phase 9.6 fix: optional remote-IP filter. Null/empty = no filter.
+    /// Restricts the timeline to traffic exchanged with the given IP — backs
+    /// the Scanner → Traffic cross-link's per-process chart-update path.
+    /// </param>
     Task<IReadOnlyList<TrafficTimePoint>> GetProcessTimelineAsync(
         string processPath,
         DateTimeOffset from,
         DateTimeOffset to,
         TimeSpan resolution,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? remoteAddress = null);
 
     /// <summary>
     /// Returns all distinct destinations contacted in a time range, with
@@ -63,13 +69,17 @@ public interface ITrafficStore {
     /// <summary>
     /// Returns a time series of traffic across all processes, re-aggregated into
     /// intervals of <paramref name="resolution"/>. Tier selection matches
-    /// <see cref="GetProcessTimelineAsync"/>.
+    /// <see cref="GetProcessTimelineAsync"/>. Phase 9.6 fix:
+    /// <paramref name="remoteAddress"/> is the optional remote-IP filter
+    /// (null/empty = no filter) — restricts the aggregate timeline to traffic
+    /// exchanged with the given IP.
     /// </summary>
     Task<IReadOnlyList<TrafficTimePoint>> GetAggregateTimelineAsync(
         DateTimeOffset from,
         DateTimeOffset to,
         TimeSpan resolution,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? remoteAddress = null);
 
     /// <summary>
     /// Returns all distinct processes with traffic in the given time range,

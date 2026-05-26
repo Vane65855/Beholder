@@ -460,6 +460,58 @@ public class SqliteTrafficStoreTests : IDisposable {
     }
 
     [Fact]
+    public async Task GetAggregateTimelineAsync_FiltersByRemoteAddress() {
+        // Phase 9.6 fix: the chart timeline must reflect the IP filter too,
+        // so it stays visually coherent with the per-process list.
+        var buckets = new[] {
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         bytesIn: 100, bytesOut: 50, remoteAddress: "192.168.1.10"),
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         bytesIn: 999, bytesOut: 999, remoteAddress: "8.8.8.8"),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var points = await _store.GetAggregateTimelineAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            TimeSpan.FromSeconds(1), CancellationToken.None,
+            remoteAddress: "192.168.1.10");
+
+        // The 8.8.8.8 bucket must NOT appear in the totals.
+        var totalIn = points.Sum(p => p.BytesIn);
+        var totalOut = points.Sum(p => p.BytesOut);
+        Assert.Equal(100, totalIn);
+        Assert.Equal(50, totalOut);
+    }
+
+    [Fact]
+    public async Task GetProcessTimelineAsync_FiltersByRemoteAddress() {
+        // Per-process timeline + IP filter compose: only the buckets for
+        // (process, IP) pair appear in the totals.
+        var buckets = new[] {
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         bytesIn: 100, bytesOut: 50, remoteAddress: "192.168.1.10"),
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         bytesIn: 999, bytesOut: 999, remoteAddress: "8.8.8.8"),
+            CreateBucket(processPath: "C:/app/chrome.exe", processName: "chrome.exe",
+                         bytesIn: 50, bytesOut: 25, remoteAddress: "192.168.1.10"),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var points = await _store.GetProcessTimelineAsync(
+            "C:/app/firefox.exe",
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            TimeSpan.FromSeconds(1), CancellationToken.None,
+            remoteAddress: "192.168.1.10");
+
+        // chrome.exe excluded by process filter; firefox 8.8.8.8 excluded by
+        // address filter. Only firefox ↔ 192.168.1.10 remains.
+        var totalIn = points.Sum(p => p.BytesIn);
+        var totalOut = points.Sum(p => p.BytesOut);
+        Assert.Equal(100, totalIn);
+        Assert.Equal(50, totalOut);
+    }
+
+    [Fact]
     public async Task GetProcessSummariesAsync_UnknownAddress_ReturnsEmpty() {
         var bucket = CreateBucket(
             processPath: "C:/app/firefox.exe", processName: "firefox.exe",

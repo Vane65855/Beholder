@@ -43,12 +43,12 @@ internal sealed class HistoricalChartLoader {
     /// caller's empty-state rendering doesn't burn a second round-trip.
     /// </summary>
     /// <param name="remoteAddress">
-    /// Phase 9.6: optional IP filter. When non-null/non-empty, the summaries
-    /// RPC restricts results to processes that exchanged data with this
-    /// remote address (backs the Scanner → Traffic cross-link). The aggregate
-    /// timeline is NOT filtered — the chart continues to show all traffic for
-    /// the time range so the user sees the IP-filtered process list in
-    /// context of overall network activity.
+    /// Phase 9.6: optional IP filter. When non-null/non-empty, BOTH the
+    /// aggregate timeline AND the per-process summaries are restricted to
+    /// traffic exchanged with this remote address (backs the Scanner →
+    /// Traffic cross-link). The chart and per-process list stay visually
+    /// coherent: a chart spike attributable to a process is always visible
+    /// in the list below.
     /// </param>
     public async Task<HistoricalRangeResult> LoadRangeAsync(
         TimeRangeSelection range, CancellationToken cancellationToken,
@@ -58,7 +58,7 @@ internal sealed class HistoricalChartLoader {
         var resolutionMs = ComputeResolutionMs(range);
 
         var timeline = await _daemonClient.GetAggregateTimelineAsync(
-            BuildAggregateTimelineRequest(range, resolutionMs), cancellationToken);
+            BuildAggregateTimelineRequest(range, resolutionMs, remoteAddress), cancellationToken);
 
         if (timeline.Points.Count == 0) {
             return new HistoricalRangeResult([], [], resolutionMs);
@@ -74,10 +74,14 @@ internal sealed class HistoricalChartLoader {
     /// Loads the chart for a specific range + process selection. When
     /// <paramref name="processPath"/> is <c>null</c>, returns the aggregate-
     /// across-processes timeline (the "All processes" selection). Otherwise
-    /// returns the per-process timeline for that path.
+    /// returns the per-process timeline for that path. Phase 9.6 fix:
+    /// <paramref name="remoteAddress"/> is the optional IP filter — when set,
+    /// restricts the timeline to traffic exchanged with that IP regardless of
+    /// process scope.
     /// </summary>
     public async Task<HistoricalChartResult> LoadProcessChartAsync(
-        TimeRangeSelection range, string? processPath, CancellationToken cancellationToken) {
+        TimeRangeSelection range, string? processPath, CancellationToken cancellationToken,
+        string? remoteAddress = null) {
         ArgumentNullException.ThrowIfNull(range);
 
         var resolutionMs = ComputeResolutionMs(range);
@@ -85,11 +89,11 @@ internal sealed class HistoricalChartLoader {
         IReadOnlyList<TrafficTimePoint> points;
         if (processPath is null) {
             var response = await _daemonClient.GetAggregateTimelineAsync(
-                BuildAggregateTimelineRequest(range, resolutionMs), cancellationToken);
+                BuildAggregateTimelineRequest(range, resolutionMs, remoteAddress), cancellationToken);
             points = response.Points;
         } else {
             var response = await _daemonClient.GetProcessTimelineAsync(
-                BuildProcessTimelineRequest(range, processPath, resolutionMs), cancellationToken);
+                BuildProcessTimelineRequest(range, processPath, resolutionMs, remoteAddress), cancellationToken);
             points = response.Points;
         }
 
@@ -102,10 +106,11 @@ internal sealed class HistoricalChartLoader {
     }
 
     private static GetAggregateTimelineRequest BuildAggregateTimelineRequest(
-        TimeRangeSelection range, long resolutionMs) => new() {
+        TimeRangeSelection range, long resolutionMs, string? remoteAddress = null) => new() {
             FromUnixNs = range.From.ToUnixTimeMilliseconds() * 1_000_000,
             ToUnixNs   = range.To.ToUnixTimeMilliseconds()   * 1_000_000,
             ResolutionMs = resolutionMs,
+            RemoteAddress = remoteAddress ?? string.Empty,
         };
 
     private static GetProcessSummariesRequest BuildProcessSummariesRequest(
@@ -117,10 +122,12 @@ internal sealed class HistoricalChartLoader {
         };
 
     private static GetProcessTimelineRequest BuildProcessTimelineRequest(
-        TimeRangeSelection range, string processPath, long resolutionMs) => new() {
+        TimeRangeSelection range, string processPath, long resolutionMs,
+        string? remoteAddress = null) => new() {
             ProcessPath = processPath,
             FromUnixNs = range.From.ToUnixTimeMilliseconds() * 1_000_000,
             ToUnixNs   = range.To.ToUnixTimeMilliseconds()   * 1_000_000,
             ResolutionMs = resolutionMs,
+            RemoteAddress = remoteAddress ?? string.Empty,
         };
 }

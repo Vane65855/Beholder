@@ -75,6 +75,13 @@ internal static class TimelineStitcher {
     /// <param name="processPath">
     /// Null → aggregate across all processes; non-null → per-process filter.
     /// </param>
+    /// <param name="remoteAddress">
+    /// Phase 9.6 fix: optional remote-IP filter. Null/empty → no filter
+    /// (preserves the pre-9.6 contract); non-empty → restrict the per-tier
+    /// GROUP BY to traffic exchanged with that IP. Composes with
+    /// <paramref name="processPath"/> when both are set. Backs the Scanner
+    /// → Traffic cross-link's chart-update path.
+    /// </param>
     public static async Task<IReadOnlyList<TrafficTimePoint>> StitchAsync(
         SqliteConnection connection,
         IReadOnlyList<RollupTier> tiers,
@@ -82,7 +89,8 @@ internal static class TimelineStitcher {
         DateTimeOffset to,
         long nowMs,
         string? processPath,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        string? remoteAddress = null
     ) {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(tiers);
@@ -139,7 +147,7 @@ internal static class TimelineStitcher {
         // (dataMinMs, dataMaxMs), compute the same effective resolution, align to
         // the same GROUP BY grid, and return the same array.
         var extent = await ComputeDataExtentAsync(
-            connection, slices, processPath, cancellationToken).ConfigureAwait(false);
+            connection, slices, processPath, cancellationToken, remoteAddress).ConfigureAwait(false);
         if (extent is null) {
             // No data in any tier for the range → empty result. Short-circuit to
             // avoid running the per-tier GROUP BY queries we know will be empty.
@@ -161,6 +169,9 @@ internal static class TimelineStitcher {
         // keyed by output bucket timestamp (ms).
         var merged = new Dictionary<long, (long BytesIn, long BytesOut)>();
 
+        var hasAddressFilter = !string.IsNullOrEmpty(remoteAddress);
+        var whereAddress = hasAddressFilter ? "AND remote_address = $address" : string.Empty;
+
         foreach (var (tier, sliceFromMs, sliceToMs) in slices) {
             using var command = connection.CreateCommand();
             var whereProcess = processPath is null ? "" : "AND process_path = $processPath";
@@ -171,6 +182,7 @@ internal static class TimelineStitcher {
                 WHERE bucket_start_ms >= $fromMs
                   AND bucket_start_ms < $toMs
                   {whereProcess}
+                  {whereAddress}
                 GROUP BY ts
                 ORDER BY ts;
                 """;
@@ -179,6 +191,9 @@ internal static class TimelineStitcher {
             command.Parameters.AddWithValue("$resolutionMs", effectiveResolutionMs);
             if (processPath is not null) {
                 command.Parameters.AddWithValue("$processPath", processPath);
+            }
+            if (hasAddressFilter) {
+                command.Parameters.AddWithValue("$address", remoteAddress!);
             }
 
             using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -217,10 +232,14 @@ internal static class TimelineStitcher {
         SqliteConnection connection,
         IReadOnlyList<(RollupTier Tier, long SliceFromMs, long SliceToMs)> slices,
         string? processPath,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        string? remoteAddress = null
     ) {
         long? overallMin = null;
         long? overallMax = null;
+
+        var hasAddressFilter = !string.IsNullOrEmpty(remoteAddress);
+        var whereAddress = hasAddressFilter ? "AND remote_address = $address" : string.Empty;
 
         foreach (var (tier, sliceFromMs, sliceToMs) in slices) {
             using var command = connection.CreateCommand();
@@ -230,12 +249,16 @@ internal static class TimelineStitcher {
                 FROM {tier.TableName}
                 WHERE bucket_start_ms >= $fromMs
                   AND bucket_start_ms < $toMs
-                  {whereProcess};
+                  {whereProcess}
+                  {whereAddress};
                 """;
             command.Parameters.AddWithValue("$fromMs", sliceFromMs);
             command.Parameters.AddWithValue("$toMs", sliceToMs);
             if (processPath is not null) {
                 command.Parameters.AddWithValue("$processPath", processPath);
+            }
+            if (hasAddressFilter) {
+                command.Parameters.AddWithValue("$address", remoteAddress!);
             }
 
             using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);

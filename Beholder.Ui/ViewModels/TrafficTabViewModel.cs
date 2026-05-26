@@ -495,7 +495,12 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         TimeRangeSelection range, ProcessListItem selected) {
         try {
             var processPath = selected.IsAll ? null : selected.ProcessPath;
-            var result = await _historicalQueries.LoadProcessChartAsync(range, processPath);
+            // Phase 9.6 fix: include the active IP filter so the chart reflects
+            // the same scope as the per-process list — otherwise selecting a
+            // process under a filter would show that process's full timeline
+            // including traffic to OTHER IPs.
+            var result = await _historicalQueries.LoadProcessChartAsync(
+                range, processPath, RemoteAddressFilter);
 
             if (!SelectedTimeRange.IsSameSelectionAs(range) || SelectedProcess != selected) return;
 
