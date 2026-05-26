@@ -624,4 +624,92 @@ public class TrafficTabViewModelTests {
         Assert.False(vm.HasError);
         Assert.Empty(vm.ErrorMessage);
     }
+
+    // ---- Phase 9.6: Scanner → Traffic cross-link filter ----
+
+    [Fact]
+    public void InitialState_RemoteAddressFilter_IsNull() {
+        var vm = CreateViewModel();
+
+        Assert.Null(vm.RemoteAddressFilter);
+        Assert.False(vm.HasRemoteAddressFilter);
+    }
+
+    [Fact]
+    public async Task ApplyRemoteAddressFilter_FromLiveMode_SwitchesToOneHourAndSetsFilter() {
+        var vm = CreateViewModel();
+        // Default range is Last5Minutes (live). Switching to filter mode
+        // must move to a historical preset so the SQL filter has data to
+        // bite on.
+        Assert.True(vm.SelectedTimeRange.IsLive);
+
+        vm.ApplyRemoteAddressFilter("192.168.1.42");
+        // Yield to let the OnSelectedTimeRangeChanged → LoadHistoricalRangeAsync
+        // fire-and-forget run.
+        for (var i = 0; i < 10; i++) await Task.Yield();
+
+        Assert.Equal("192.168.1.42", vm.RemoteAddressFilter);
+        Assert.True(vm.HasRemoteAddressFilter);
+        Assert.Equal(TimeRangePreset.Last1Hour, vm.SelectedTimeRange.Preset);
+        Assert.False(vm.SelectedTimeRange.IsLive);
+    }
+
+    [Fact]
+    public async Task ApplyRemoteAddressFilter_FromHistoricalMode_KeepsRangeAndSetsFilter() {
+        var vm = CreateViewModel();
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last24Hours);
+        for (var i = 0; i < 10; i++) await Task.Yield();
+
+        vm.ApplyRemoteAddressFilter("10.0.0.5");
+        for (var i = 0; i < 10; i++) await Task.Yield();
+
+        Assert.Equal("10.0.0.5", vm.RemoteAddressFilter);
+        Assert.Equal(TimeRangePreset.Last24Hours, vm.SelectedTimeRange.Preset);
+    }
+
+    [Fact]
+    public void ApplyRemoteAddressFilter_NullOrEmpty_Throws() {
+        var vm = CreateViewModel();
+
+        Assert.Throws<ArgumentException>(() => vm.ApplyRemoteAddressFilter(""));
+        Assert.Throws<ArgumentException>(() => vm.ApplyRemoteAddressFilter("   "));
+        Assert.Throws<ArgumentNullException>(() => vm.ApplyRemoteAddressFilter(null!));
+    }
+
+    [Fact]
+    public async Task ClearRemoteAddressFilterCommand_ClearsFilter() {
+        var vm = CreateViewModel();
+        vm.ApplyRemoteAddressFilter("192.168.1.42");
+        for (var i = 0; i < 10; i++) await Task.Yield();
+        Assert.True(vm.HasRemoteAddressFilter);
+
+        vm.ClearRemoteAddressFilterCommand.Execute(null);
+        for (var i = 0; i < 10; i++) await Task.Yield();
+
+        Assert.Null(vm.RemoteAddressFilter);
+        Assert.False(vm.HasRemoteAddressFilter);
+    }
+
+    [Fact]
+    public void ClearRemoteAddressFilterCommand_NoActiveFilter_NoOp() {
+        var vm = CreateViewModel();
+        Assert.False(vm.HasRemoteAddressFilter);
+
+        // Must not throw or otherwise misbehave when there's nothing to clear.
+        vm.ClearRemoteAddressFilterCommand.Execute(null);
+
+        Assert.False(vm.HasRemoteAddressFilter);
+    }
+
+    [Fact]
+    public async Task ActivateAsync_CompletesImmediately() {
+        // Phase 9.6: the Traffic tab's ActivateAsync is a no-op satisfaction
+        // of the cross-link contract — completes synchronously today.
+        var vm = CreateViewModel();
+
+        var task = vm.ActivateAsync(CancellationToken.None);
+
+        Assert.True(task.IsCompletedSuccessfully);
+        await task;
+    }
 }

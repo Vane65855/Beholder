@@ -88,8 +88,13 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         // INotificationService abstraction so the platform impl is hidden.
         _alertsTab = new AlertsTabViewModel(
             daemonClient, streamSubscriber, dispatcher, notifications, NavigateToFirewallRuleAsync);
+        // Phase 9.6: pass NavigateToTrafficForRemoteAddress as the Scanner
+        // tab's deep-link delegate so its VIEW IN TRAFFIC button can switch
+        // tabs + filter the per-process list to the selected device's IP.
+        // Same delegate-via-ctor shape as the Alerts → Firewall deep-link.
         _scannerTab = new ScannerTabViewModel(
-            daemonClient, streamSubscriber, dispatcher, TimeProvider.System);
+            daemonClient, streamSubscriber, dispatcher, TimeProvider.System,
+            navigateToTraffic: NavigateToTrafficForRemoteAddressAsync);
         _settingsTab = new SettingsTabViewModel(
             daemonClient, dispatcher, shellOpener, clipboardWriter, TimeProvider.System);
         StatusStripVm = statusStripVm;
@@ -131,6 +136,21 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         ActiveTab = TabKind.Alerts;
         await _alertsTab.ActivateAsync(CancellationToken.None);
         _alertsTab.SelectBySeq(seq);
+    }
+
+    /// <summary>
+    /// Phase 9.6: switch the active tab to Traffic and filter its per-process
+    /// list to processes that exchanged data with <paramref name="remoteAddress"/>.
+    /// Backs the Scanner-tab "VIEW IN TRAFFIC" deep-link. Awaits the Traffic
+    /// tab's <c>ActivateAsync</c> for contract symmetry with the other
+    /// navigation methods even though the Traffic tab is reactive (no async
+    /// load to wait for today — see <c>TrafficTabViewModel.ActivateAsync</c>).
+    /// </summary>
+    public async Task NavigateToTrafficForRemoteAddressAsync(string remoteAddress) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(remoteAddress);
+        ActiveTab = TabKind.Traffic;
+        await _trafficTab.ActivateAsync(CancellationToken.None);
+        _trafficTab.ApplyRemoteAddressFilter(remoteAddress);
     }
 
     public void Dispose() {

@@ -56,6 +56,7 @@ internal sealed partial class ScannerTabViewModel : ViewModelBase, IDisposable {
     private readonly DaemonStreamSubscriber _streamSubscriber;
     private readonly IDispatcher _dispatcher;
     private readonly TimeProvider _timeProvider;
+    private readonly Func<string, Task>? _navigateToTraffic;
     private readonly Dictionary<string, LanDeviceRow> _rowByMac = new(StringComparer.Ordinal);
 
     private CancellationTokenSource? _activationCts;
@@ -149,7 +150,8 @@ internal sealed partial class ScannerTabViewModel : ViewModelBase, IDisposable {
         IDaemonClient daemonClient,
         DaemonStreamSubscriber streamSubscriber,
         IDispatcher dispatcher,
-        TimeProvider timeProvider
+        TimeProvider timeProvider,
+        Func<string, Task>? navigateToTraffic = null
     ) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
@@ -159,6 +161,10 @@ internal sealed partial class ScannerTabViewModel : ViewModelBase, IDisposable {
         _streamSubscriber = streamSubscriber;
         _dispatcher = dispatcher;
         _timeProvider = timeProvider;
+        // Phase 9.6: optional deep-link delegate. Null in tests that don't
+        // exercise the cross-link; in production wired by MainWindowViewModel
+        // to its NavigateToTrafficForRemoteAddressAsync method.
+        _navigateToTraffic = navigateToTraffic;
 
         _streamSubscriber.LanDeviceFirstSeenReceived += OnLanDeviceFirstSeen;
         _streamSubscriber.LanDeviceMacChangedReceived += OnLanDeviceMacChanged;
@@ -261,6 +267,26 @@ internal sealed partial class ScannerTabViewModel : ViewModelBase, IDisposable {
     /// </summary>
     [RelayCommand]
     private void DismissScanStatus() => ClearScanStatus();
+
+    // ---- Phase 9.6: Scanner → Traffic cross-link ----
+
+    /// <summary>
+    /// Phase 9.6: deep-link to the Traffic tab filtered by the selected
+    /// device's IP. Invokes the <c>_navigateToTraffic</c> delegate
+    /// (wired by <see cref="MainWindowViewModel"/> to its
+    /// <c>NavigateToTrafficForRemoteAddressAsync</c> method); the destination
+    /// tab sets a sticky IP filter on its per-process list. Defensive no-op
+    /// when no device is selected, when the IP is empty (proto3 string
+    /// default), or when no delegate is wired (tests that don't exercise
+    /// the cross-link).
+    /// </summary>
+    [RelayCommand]
+    private async Task ViewInTraffic() {
+        if (SelectedDevice is null) return;
+        if (string.IsNullOrEmpty(SelectedDevice.Ip)) return;
+        if (_navigateToTraffic is null) return;
+        await _navigateToTraffic(SelectedDevice.Ip);
+    }
 
     // ---- Phase 9.5: label-edit state machine ----
 

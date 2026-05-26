@@ -115,6 +115,21 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     public bool IsMapActive => ViewMode == TrafficViewMode.Map;
 
     /// <summary>
+    /// Phase 9.6: optional remote-IP filter on the per-process list. When
+    /// non-null/non-empty, historical loads restrict the per-process
+    /// summaries to processes that exchanged data with this IP — backs the
+    /// Scanner → Traffic cross-link's "VIEW IN TRAFFIC" button. The chart's
+    /// aggregate timeline is intentionally NOT filtered (the user sees the
+    /// filtered process list in context of overall network activity for the
+    /// range). Cleared via <see cref="ClearRemoteAddressFilterCommand"/>.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasRemoteAddressFilter))]
+    private string? _remoteAddressFilter;
+
+    public bool HasRemoteAddressFilter => !string.IsNullOrEmpty(RemoteAddressFilter);
+
+    /// <summary>
     /// Per-country byte totals for the MAP sub-view, filtered to real
     /// (non-sentinel) country codes — "--" (Local) and "??" (Unknown)
     /// surface in <see cref="LocalAndUnknownCaption"/> instead of on the
@@ -223,6 +238,48 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         _mapCts?.Dispose();
         _topDestCts?.Cancel();
         _topDestCts?.Dispose();
+    }
+
+    /// <summary>
+    /// Phase 9.6: idempotent activation hook used by the cross-link path.
+    /// The Traffic tab's data is reactive to <c>ProcessStateService</c>
+    /// events, so there's no async load to wait for — this is a no-op today.
+    /// Exists so <c>INavigationService.NavigateToTrafficForRemoteAddressAsync</c>
+    /// can <c>await</c> on a symmetrical contract with the other tabs
+    /// (Firewall/Alerts/Scanner/Settings all have an ActivateAsync); any
+    /// future async init the Traffic tab gains can land here without
+    /// breaking the cross-link.
+    /// </summary>
+    public Task ActivateAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// Phase 9.6: applies an IP filter to the per-process list and forces a
+    /// reload. Called by <see cref="MainWindowViewModel"/> after the Scanner
+    /// tab's "VIEW IN TRAFFIC" deep-link switches tabs. When the user is in
+    /// live mode, the time range jumps to "1 Hour" so the filter has SQL data
+    /// to act on; otherwise the current historical range is preserved and
+    /// re-queried with the filter.
+    /// </summary>
+    public void ApplyRemoteAddressFilter(string remoteAddress) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(remoteAddress);
+        RemoteAddressFilter = remoteAddress;
+        if (SelectedTimeRange.IsLive) {
+            // OnSelectedTimeRangeChanged will fire LoadHistoricalRangeAsync,
+            // which reads RemoteAddressFilter and includes it in the query.
+            SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last1Hour);
+        } else {
+            // Re-load the current historical range with the new filter.
+            _ = LoadHistoricalRangeAsync(SelectedTimeRange);
+        }
+    }
+
+    [RelayCommand]
+    private void ClearRemoteAddressFilter() {
+        if (!HasRemoteAddressFilter) return;
+        RemoteAddressFilter = null;
+        if (!SelectedTimeRange.IsLive) {
+            _ = LoadHistoricalRangeAsync(SelectedTimeRange);
+        }
     }
 
     [RelayCommand]
@@ -370,7 +427,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             IsLoading = true;
             IsEmpty = false;
 
-            var result = await _historicalQueries.LoadRangeAsync(range);
+            var result = await _historicalQueries.LoadRangeAsync(range, RemoteAddressFilter);
 
             // The user may have switched away while we were querying.
             if (SelectedTimeRange != range) return;

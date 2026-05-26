@@ -78,10 +78,17 @@ public interface ITrafficStore {
     /// hits the tiered storage so historically-active processes appear even
     /// after the engine has evicted them.
     /// </summary>
+    /// <summary>
+    /// When <paramref name="remoteAddress"/> is non-null and non-empty, the
+    /// aggregation is restricted to traffic whose <c>remote_address</c> column
+    /// equals that value (Phase 9.6 — backs the Scanner → Traffic cross-link).
+    /// Null or empty = no filter, behaves identically to the pre-9.6 contract.
+    /// </summary>
     Task<IReadOnlyList<ProcessTrafficSummary>> GetProcessSummariesAsync(
         DateTimeOffset from,
         DateTimeOffset to,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? remoteAddress = null);
 
     /// <summary>
     /// Returns per-country traffic totals for a time range. When

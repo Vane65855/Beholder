@@ -146,11 +146,11 @@
         <!-- ────────────────  Detail pane (populated)  ──────────────── -->
         <Grid Grid.Column="1"
               IsVisible="{Binding ShowDetailPane}"
-              RowDefinitions="Auto,*"
+              RowDefinitions="Auto,Auto,*"
               Margin="24">
 
             <!-- Header: label-or-fallback name + IP. -->
-            <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,24">
+            <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,16">
                 <TextBlock Text="{Binding SelectedDevice.LabelOrFallback}"
                            FontSize="{DynamicResource FontSizeHeading}"
                            Foreground="{DynamicResource TextPrimary}"
@@ -160,10 +160,23 @@
                            Foreground="{DynamicResource TextSecondary}" />
             </StackPanel>
 
+            <!-- Phase 9.6: VIEW IN TRAFFIC deep-link button. Switches to the
+                 Traffic tab + filters the per-process list to traffic with
+                 this device's IP. Standalone row above the metadata grid so
+                 the cross-link is visually prominent + doesn't compete with
+                 the CUSTOM NAME row's RENAME button. -->
+            <Button Grid.Row="1"
+                    Classes="scanButton"
+                    HorizontalAlignment="Left"
+                    Margin="0,0,0,24"
+                    Content="VIEW IN TRAFFIC"
+                    Command="{Binding ViewInTrafficCommand}"
+                    ToolTip.Tip="Switch to the Traffic tab and filter the per-process list to traffic exchanged with this device's IP." />
+
             <!-- Body: field grid. Each row is a label + value pair.
                  Row 0 = CUSTOM NAME (Phase 9.5, editable in-place).
                  Rows 1-6 = read-only auto-detected facts. -->
-            <Grid Grid.Row="1"
+            <Grid Grid.Row="2"
                   ColumnDefinitions="140,*"
                   RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                   RowSpacing="14"

@@ -42,8 +42,17 @@ internal sealed class HistoricalChartLoader {
     /// summaries. Skips the summaries RPC when the timeline is empty so the
     /// caller's empty-state rendering doesn't burn a second round-trip.
     /// </summary>
+    /// <param name="remoteAddress">
+    /// Phase 9.6: optional IP filter. When non-null/non-empty, the summaries
+    /// RPC restricts results to processes that exchanged data with this
+    /// remote address (backs the Scanner → Traffic cross-link). The aggregate
+    /// timeline is NOT filtered — the chart continues to show all traffic for
+    /// the time range so the user sees the IP-filtered process list in
+    /// context of overall network activity.
+    /// </param>
     public async Task<HistoricalRangeResult> LoadRangeAsync(
-        TimeRangeSelection range, CancellationToken cancellationToken) {
+        TimeRangeSelection range, CancellationToken cancellationToken,
+        string? remoteAddress = null) {
         ArgumentNullException.ThrowIfNull(range);
 
         var resolutionMs = ComputeResolutionMs(range);
@@ -56,7 +65,7 @@ internal sealed class HistoricalChartLoader {
         }
 
         var summaries = await _daemonClient.GetProcessSummariesAsync(
-            BuildProcessSummariesRequest(range), cancellationToken);
+            BuildProcessSummariesRequest(range, remoteAddress), cancellationToken);
 
         return new HistoricalRangeResult(timeline.Points, summaries.Summaries, resolutionMs);
     }
@@ -100,9 +109,11 @@ internal sealed class HistoricalChartLoader {
         };
 
     private static GetProcessSummariesRequest BuildProcessSummariesRequest(
-        TimeRangeSelection range) => new() {
+        TimeRangeSelection range, string? remoteAddress = null) => new() {
             FromUnixNs = range.From.ToUnixTimeMilliseconds() * 1_000_000,
             ToUnixNs   = range.To.ToUnixTimeMilliseconds()   * 1_000_000,
+            // Empty string = no filter (RPC contract), matches "null" semantically.
+            RemoteAddress = remoteAddress ?? string.Empty,
         };
 
     private static GetProcessTimelineRequest BuildProcessTimelineRequest(

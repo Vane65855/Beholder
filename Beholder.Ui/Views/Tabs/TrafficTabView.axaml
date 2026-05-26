@@ -146,12 +146,50 @@
             <Grid DockPanel.Dock="Top"
                   ColumnDefinitions="*,Auto,Auto"
                   Margin="16,10,16,6">
-                <TextBlock Grid.Column="0"
-                           Text="TRAFFIC  ·  BYTES/SEC"
-                           FontSize="{DynamicResource FontSizeCaption}"
-                           LetterSpacing="1"
-                           Foreground="{DynamicResource TextMuted}"
-                           VerticalAlignment="Center" />
+                <StackPanel Grid.Column="0"
+                            Orientation="Horizontal"
+                            Spacing="12"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="TRAFFIC  ·  BYTES/SEC"
+                               FontSize="{DynamicResource FontSizeCaption}"
+                               LetterSpacing="1"
+                               Foreground="{DynamicResource TextMuted}"
+                               VerticalAlignment="Center" />
+
+                    <!-- Phase 9.6: Scanner → Traffic deep-link filter chip.
+                         Visible only when an IP filter is active. Click the
+                         × to clear the filter and restore the full
+                         per-process list. -->
+                    <Border IsVisible="{Binding HasRemoteAddressFilter}"
+                            Background="{DynamicResource BackgroundPanel}"
+                            BorderBrush="{DynamicResource AccentPrimary}"
+                            BorderThickness="1"
+                            CornerRadius="3"
+                            Padding="8,3"
+                            VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock Text="FILTERED TO IP:"
+                                       FontSize="{DynamicResource FontSizeCaption}"
+                                       LetterSpacing="1"
+                                       Foreground="{DynamicResource TextMuted}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding RemoteAddressFilter}"
+                                       FontSize="{DynamicResource FontSizeCaption}"
+                                       FontFamily="Cascadia Code, Consolas, monospace"
+                                       Foreground="{DynamicResource AccentPrimary}"
+                                       VerticalAlignment="Center" />
+                            <Button Content="×"
+                                    Padding="4,0"
+                                    MinWidth="0"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Foreground="{DynamicResource TextSecondary}"
+                                    Cursor="Hand"
+                                    Command="{Binding ClearRemoteAddressFilterCommand}"
+                                    ToolTip.Tip="Clear the IP filter and restore the full per-process list." />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
 
                 <controls:TimeRangeDropdown Grid.Column="1"
                                             SelectedRange="{Binding SelectedTimeRange, Mode=TwoWay}"

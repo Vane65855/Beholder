@@ -283,6 +283,12 @@ message GetProtocolBreakdownResponse {
 message GetProcessSummariesRequest {
   int64 from_unix_ns = 1;
   int64 to_unix_ns = 2;
+  // Phase 9.6: optional remote-address filter. Empty string = no filter
+  // (preserves existing aggregate-over-all-destinations behavior); non-empty
+  // = restrict the per-process aggregation to traffic whose remote address
+  // matches. Backs the Scanner-tab "VIEW IN TRAFFIC" cross-link — answers
+  // "which processes on my box talked to this LAN device's IP?".
+  string remote_address = 3;
 }
 
 message ProcessTrafficSummaryProto {

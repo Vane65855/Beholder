@@ -25,7 +25,8 @@ internal sealed class FakeTrafficStore : ITrafficStore {
         => Task.FromResult<IReadOnlyList<TrafficTimePoint>>([]);
 
     public Task<IReadOnlyList<ProcessTrafficSummary>> GetProcessSummariesAsync(
-        DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+        DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken,
+        string? remoteAddress = null)
         => Task.FromResult<IReadOnlyList<ProcessTrafficSummary>>([]);
 
     public Task<IReadOnlyList<CountryTrafficSummary>> GetCountryBreakdownAsync(

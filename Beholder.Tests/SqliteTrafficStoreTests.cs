@@ -393,6 +393,86 @@ public class SqliteTrafficStoreTests : IDisposable {
         Assert.Empty(summaries);
     }
 
+    // ---- Phase 9.6: remote_address filter ----
+
+    [Fact]
+    public async Task GetProcessSummariesAsync_FiltersByRemoteAddress_ReturnsOnlyMatchingProcesses() {
+        var buckets = new[] {
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         bytesIn: 100, bytesOut: 50, remoteAddress: "192.168.1.10"),
+            CreateBucket(processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+                         bytesIn: 999, bytesOut: 999, remoteAddress: "8.8.8.8"),
+            CreateBucket(processPath: "C:/app/chrome.exe", processName: "chrome.exe",
+                         bytesIn: 200, bytesOut: 75, remoteAddress: "192.168.1.10"),
+            CreateBucket(processPath: "C:/app/notepad.exe", processName: "notepad.exe",
+                         bytesIn: 50, bytesOut: 25, remoteAddress: "10.0.0.1"),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var summaries = await _store.GetProcessSummariesAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), CancellationToken.None,
+            remoteAddress: "192.168.1.10");
+
+        // notepad and the firefox 8.8.8.8 bucket are excluded.
+        Assert.Equal(2, summaries.Count);
+        var firefox = summaries.First(s => s.ProcessPath == "C:/app/firefox.exe");
+        Assert.Equal(100, firefox.TotalBytesIn);
+        Assert.Equal(50, firefox.TotalBytesOut);
+        var chrome = summaries.First(s => s.ProcessPath == "C:/app/chrome.exe");
+        Assert.Equal(200, chrome.TotalBytesIn);
+        Assert.Equal(75, chrome.TotalBytesOut);
+    }
+
+    [Fact]
+    public async Task GetProcessSummariesAsync_NullAddressFilter_ReturnsAllProcesses() {
+        var buckets = new[] {
+            CreateBucket(processPath: "C:/app/a.exe", processName: "a.exe",
+                         bytesIn: 100, bytesOut: 50, remoteAddress: "1.1.1.1"),
+            CreateBucket(processPath: "C:/app/b.exe", processName: "b.exe",
+                         bytesIn: 200, bytesOut: 100, remoteAddress: "2.2.2.2"),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var summaries = await _store.GetProcessSummariesAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), CancellationToken.None,
+            remoteAddress: null);
+
+        Assert.Equal(2, summaries.Count);
+    }
+
+    [Fact]
+    public async Task GetProcessSummariesAsync_EmptyAddressFilter_ReturnsAllProcesses() {
+        // Empty string is the proto3 default for an unset string field; the
+        // store treats it identically to null = "no filter."
+        var buckets = new[] {
+            CreateBucket(processPath: "C:/app/a.exe", processName: "a.exe",
+                         bytesIn: 100, bytesOut: 50, remoteAddress: "1.1.1.1"),
+            CreateBucket(processPath: "C:/app/b.exe", processName: "b.exe",
+                         bytesIn: 200, bytesOut: 100, remoteAddress: "2.2.2.2"),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var summaries = await _store.GetProcessSummariesAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), CancellationToken.None,
+            remoteAddress: "");
+
+        Assert.Equal(2, summaries.Count);
+    }
+
+    [Fact]
+    public async Task GetProcessSummariesAsync_UnknownAddress_ReturnsEmpty() {
+        var bucket = CreateBucket(
+            processPath: "C:/app/firefox.exe", processName: "firefox.exe",
+            bytesIn: 100, bytesOut: 50, remoteAddress: "1.1.1.1");
+        await _store.WriteRawBucketsAsync([bucket], CancellationToken.None);
+
+        var summaries = await _store.GetProcessSummariesAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), CancellationToken.None,
+            remoteAddress: "192.168.1.99");
+
+        Assert.Empty(summaries);
+    }
+
     [Fact]
     public async Task GetProcessTimelineAsync_InvalidResolution_Throws() {
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>

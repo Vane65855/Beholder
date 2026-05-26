@@ -647,4 +647,65 @@ public class ScannerTabViewModelTests {
 
         Assert.Equal("Renamed By Other UI", vm.Devices[0].Label);
     }
+
+    // ---- Phase 9.6: Scanner → Traffic cross-link ----
+
+    /// <summary>
+    /// Builds a Scanner VM with a capturing delegate so the cross-link tests
+    /// can assert what IP the VIEW IN TRAFFIC button passed through to the
+    /// navigation layer. Mirrors the shape used by
+    /// <see cref="AlertsTabViewModelTests"/>'s navigation-capture pattern.
+    /// </summary>
+    private static (ScannerTabViewModel Vm, FakeDaemonClient Client, List<string> NavCaptures)
+    CreateVmWithNavigation(ListLanDevicesResponse? listResponse = null) {
+        var client = new FakeDaemonClient();
+        if (listResponse is not null) client.ListLanDevicesResponse = listResponse;
+        var subscriber = new DaemonStreamSubscriber(
+            client, TimeProvider.System, NullLogger<DaemonStreamSubscriber>.Instance);
+        var captures = new List<string>();
+        var vm = new ScannerTabViewModel(
+            client, subscriber, new SyncDispatcher(), new FakeTimeProvider(FixedTimestamp),
+            navigateToTraffic: ip => { captures.Add(ip); return Task.CompletedTask; });
+        return (vm, client, captures);
+    }
+
+    [Fact]
+    public async Task ViewInTrafficCommand_InvokesNavigationDelegateWithSelectedDeviceIp() {
+        var response = ListResponseWith(
+            MakeDevice("aa:bb:cc:dd:ee:01", ip: "192.168.1.42"));
+        var (vm, _, captures) = CreateVmWithNavigation(response);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        vm.SelectedDevice = vm.Devices[0];
+
+        await vm.ViewInTrafficCommand.ExecuteAsync(null);
+
+        var captured = Assert.Single(captures);
+        Assert.Equal("192.168.1.42", captured);
+    }
+
+    [Fact]
+    public async Task ViewInTrafficCommand_NoSelectedDevice_NoOp() {
+        var (vm, _, captures) = CreateVmWithNavigation();
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        // No selection → SelectedDevice is null → command is defensive no-op.
+        Assert.Null(vm.SelectedDevice);
+
+        await vm.ViewInTrafficCommand.ExecuteAsync(null);
+
+        Assert.Empty(captures);
+    }
+
+    [Fact]
+    public async Task ViewInTrafficCommand_NoNavigationDelegate_NoOp() {
+        // CreateVm (the original helper) doesn't pass a navigateToTraffic
+        // delegate — exercises the "tests that don't care about cross-link"
+        // path where _navigateToTraffic is null.
+        var response = ListResponseWith(MakeDevice("aa:bb:cc:dd:ee:02"));
+        var (vm, _, _, _) = CreateVm(response);
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        vm.SelectedDevice = vm.Devices[0];
+
+        // Must complete without throwing despite the null delegate.
+        await vm.ViewInTrafficCommand.ExecuteAsync(null);
+    }
 }

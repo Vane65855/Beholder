@@ -278,22 +278,31 @@ public sealed class DatabaseInitializer {
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_raw_process_time ON traffic_raw(process_path, bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_raw_time ON traffic_raw(bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_raw_country_time ON traffic_raw(country, bucket_start_ms);");
+        // Phase 9.6: backs the optional remote_address filter on
+        // GetProcessSummariesAsync (Scanner → Traffic cross-link). Idempotent
+        // via `CREATE INDEX IF NOT EXISTS` — applied automatically on the next
+        // daemon start for existing installs; no separate migration needed.
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_raw_address_time ON traffic_raw(remote_address, bucket_start_ms);");
 
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_process_time ON traffic_buckets_10s(process_path, bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_time ON traffic_buckets_10s(bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_country_time ON traffic_buckets_10s(country, bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_address_time ON traffic_buckets_10s(remote_address, bucket_start_ms);");
 
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1m_process_time ON traffic_buckets_1m(process_path, bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1m_time ON traffic_buckets_1m(bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1m_country_time ON traffic_buckets_1m(country, bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1m_address_time ON traffic_buckets_1m(remote_address, bucket_start_ms);");
 
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_10m_process_time ON traffic_buckets_10m(process_path, bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_10m_time ON traffic_buckets_10m(bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_10m_country_time ON traffic_buckets_10m(country, bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_10m_address_time ON traffic_buckets_10m(remote_address, bucket_start_ms);");
 
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1h_process_time ON traffic_buckets_1h(process_path, bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1h_time ON traffic_buckets_1h(bucket_start_ms);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1h_country_time ON traffic_buckets_1h(country, bucket_start_ms);");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_traffic_1h_address_time ON traffic_buckets_1h(remote_address, bucket_start_ms);");
 
         // Phase 9.1 (ADR 009): LAN device discovery storage.
         // idx_lan_device_ip supports 9.2's MAC-change detection (find existing

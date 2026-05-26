@@ -21,4 +21,16 @@ internal interface INavigationService {
     /// race against rule-list population.
     /// </summary>
     Task NavigateToFirewallRuleAsync(string processPath);
+
+    /// <summary>
+    /// Phase 9.6: switch the active tab to Traffic and filter its per-process
+    /// list to only processes that exchanged data with
+    /// <paramref name="remoteAddress"/> in the current time range. Backs the
+    /// Scanner-tab "VIEW IN TRAFFIC" button — answers "which processes on my
+    /// box talked to this LAN device's IP?". Awaits the Traffic tab's
+    /// <c>ActivateAsync</c> before applying the filter to avoid the
+    /// construction-vs-load race that bit the Firewall deep-link's first
+    /// implementation.
+    /// </summary>
+    Task NavigateToTrafficForRemoteAddressAsync(string remoteAddress);
 }

@@ -32,13 +32,17 @@ internal sealed class HistoricalQueryOrchestrator : IDisposable {
     /// <summary>
     /// Runs a range load (aggregate timeline + per-process summaries). Cancels
     /// any prior in-flight query first. Throws <see cref="OperationCanceledException"/>
-    /// if superseded by a later call.
+    /// if superseded by a later call. Phase 9.6: <paramref name="remoteAddress"/>
+    /// is the optional IP filter on the per-process summaries query.
     /// </summary>
-    public async Task<HistoricalRangeResult> LoadRangeAsync(TimeRangeSelection range) {
+    public async Task<HistoricalRangeResult> LoadRangeAsync(
+        TimeRangeSelection range, string? remoteAddress = null
+    ) {
         ArgumentNullException.ThrowIfNull(range);
         var cancellationToken = StartNew();
         try {
-            return await _loader.LoadRangeAsync(range, cancellationToken).ConfigureAwait(false);
+            return await _loader.LoadRangeAsync(range, cancellationToken, remoteAddress)
+                .ConfigureAwait(false);
         } catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled) {
             throw new OperationCanceledException("Cancelled via gRPC status", ex);
         }

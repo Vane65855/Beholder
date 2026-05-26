@@ -261,10 +261,18 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
     public async Task<IReadOnlyList<ProcessTrafficSummary>> GetProcessSummariesAsync(
         DateTimeOffset from,
         DateTimeOffset to,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        string? remoteAddress = null
     ) {
         ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
         var tier = SelectTierForRange(from, to);
+
+        // Phase 9.6: optional remote_address filter — mirrors the country
+        // filter shape in GetCountryBreakdownAsync. Null OR empty = no filter
+        // (preserves the pre-9.6 contract). The supporting per-tier index
+        // idx_*_address_time keeps this cheap when the filter is applied.
+        var hasAddressFilter = !string.IsNullOrEmpty(remoteAddress);
+        var addressFilter = hasAddressFilter ? "AND remote_address = $address" : string.Empty;
 
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
@@ -274,11 +282,15 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
             FROM {tier.TableName}
             WHERE bucket_start_ms >= $fromMs
               AND bucket_start_ms < $toMs
+              {addressFilter}
             GROUP BY process_path, process_name
             ORDER BY SUM(bytes_in) + SUM(bytes_out) DESC;
             """;
         command.Parameters.AddWithValue("$fromMs", from.ToUnixTimeMilliseconds());
         command.Parameters.AddWithValue("$toMs", to.ToUnixTimeMilliseconds());
+        if (hasAddressFilter) {
+            command.Parameters.AddWithValue("$address", remoteAddress!);
+        }
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         var results = new List<ProcessTrafficSummary>();

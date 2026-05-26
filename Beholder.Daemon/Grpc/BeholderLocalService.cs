@@ -866,9 +866,13 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     ) => ExecuteQueryAsync(nameof(GetProcessSummaries), async cancellationToken => {
         var from = request.FromUnixNs.FromUnixTimeNanoseconds();
         var to = request.ToUnixNs.FromUnixTimeNanoseconds();
+        // Phase 9.6: empty string = no filter (preserves pre-9.6 behavior).
+        var remoteAddress = string.IsNullOrEmpty(request.RemoteAddress)
+            ? null
+            : request.RemoteAddress;
 
         var summaries = await _trafficStore.GetProcessSummariesAsync(
-            from, to, cancellationToken)
+            from, to, cancellationToken, remoteAddress)
             .ConfigureAwait(false);
 
         var response = new Local.GetProcessSummariesResponse();
