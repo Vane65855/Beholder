@@ -44,6 +44,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     private readonly IStorageStatsProvider _storageStatsProvider;
     private readonly IRecordingSettingsState _recordingSettings;
     private readonly IHostnameResolutionSettingsState _hostnameResolutionSettings;
+    private readonly IAlertSettingsState _alertSettings;
     private readonly ISettingsOverridesStore _settingsOverridesStore;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<BeholderLocalService> _logger;
@@ -63,6 +64,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         IStorageStatsProvider storageStatsProvider,
         IRecordingSettingsState recordingSettings,
         IHostnameResolutionSettingsState hostnameResolutionSettings,
+        IAlertSettingsState alertSettings,
         ISettingsOverridesStore settingsOverridesStore,
         TimeProvider timeProvider,
         ILogger<BeholderLocalService> logger
@@ -81,6 +83,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         ArgumentNullException.ThrowIfNull(storageStatsProvider);
         ArgumentNullException.ThrowIfNull(recordingSettings);
         ArgumentNullException.ThrowIfNull(hostnameResolutionSettings);
+        ArgumentNullException.ThrowIfNull(alertSettings);
         ArgumentNullException.ThrowIfNull(settingsOverridesStore);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
@@ -98,6 +101,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         _storageStatsProvider = storageStatsProvider;
         _recordingSettings = recordingSettings;
         _hostnameResolutionSettings = hostnameResolutionSettings;
+        _alertSettings = alertSettings;
         _settingsOverridesStore = settingsOverridesStore;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -404,6 +408,10 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
                 EnablePreload: _hostnameResolutionSettings.EnablePreload,
                 EnableReverseDnsFallback: _hostnameResolutionSettings.EnableReverseDnsFallback,
                 EnableSniCapture: _hostnameResolutionSettings.EnableSniCapture).ToProto(),
+            Alerts = new AlertSettingsSnapshot(
+                EnableNewProcessDetection: _alertSettings.EnableNewProcessDetection,
+                EnableHashChangeDetection: _alertSettings.EnableHashChangeDetection,
+                EnableChainIntegrityMonitor: _alertSettings.EnableChainIntegrityMonitor).ToProto(),
         };
         return Task.FromResult(response);
     }, context);
@@ -543,6 +551,86 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
                 EnablePreload: _hostnameResolutionSettings.EnablePreload,
                 EnableReverseDnsFallback: _hostnameResolutionSettings.EnableReverseDnsFallback,
                 EnableSniCapture: _hostnameResolutionSettings.EnableSniCapture).ToProto(),
+        };
+    }
+
+    /// <summary>
+    /// Phase 13.3: atomically updates the Alerts section's settings (the
+    /// three master kill-switches for the alert detector pipeline). Same
+    /// contract as <see cref="SetRecordingSettings"/> /
+    /// <see cref="SetHostnameResolutionSettings"/>: idempotent re-asserts are
+    /// no-ops; real transitions persist all three keys to
+    /// <c>settings_overrides</c> and append one chain entry.
+    /// </summary>
+    public override async Task<Local.SetAlertSettingsResponse> SetAlertSettings(
+        Local.SetAlertSettingsRequest request, ServerCallContext context
+    ) {
+        if (request.Values is null) {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "values is required"));
+        }
+
+        var ct = context.CancellationToken;
+        var values = request.Values;
+        var changed = _alertSettings.SetSettings(
+            enableNewProcessDetection: values.EnableNewProcessDetection,
+            enableHashChangeDetection: values.EnableHashChangeDetection,
+            enableChainIntegrityMonitor: values.EnableChainIntegrityMonitor);
+
+        if (changed) {
+            try {
+                await _settingsOverridesStore.UpsertAsync(
+                    SettingsKeys.AlertEnableNewProcessDetection,
+                    values.EnableNewProcessDetection ? "true" : "false",
+                    ct).ConfigureAwait(false);
+                await _settingsOverridesStore.UpsertAsync(
+                    SettingsKeys.AlertEnableHashChangeDetection,
+                    values.EnableHashChangeDetection ? "true" : "false",
+                    ct).ConfigureAwait(false);
+                await _settingsOverridesStore.UpsertAsync(
+                    SettingsKeys.AlertEnableChainIntegrityMonitor,
+                    values.EnableChainIntegrityMonitor ? "true" : "false",
+                    ct).ConfigureAwait(false);
+            } catch (OperationCanceledException) {
+                throw;
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to persist Alert settings override; in-memory state is updated but the change will not survive restart");
+                return new Local.SetAlertSettingsResponse {
+                    Success = false,
+                    Message = $"Failed to persist settings: {ex.Message}",
+                    Values = new AlertSettingsSnapshot(
+                        EnableNewProcessDetection: _alertSettings.EnableNewProcessDetection,
+                        EnableHashChangeDetection: _alertSettings.EnableHashChangeDetection,
+                        EnableChainIntegrityMonitor: _alertSettings.EnableChainIntegrityMonitor).ToProto(),
+                };
+            }
+
+            try {
+                var payload = AlertSettingsPayloadEncoder.Encode(
+                    values.EnableNewProcessDetection,
+                    values.EnableHashChangeDetection,
+                    values.EnableChainIntegrityMonitor,
+                    _timeProvider.GetUtcNow());
+                await _eventStore.AppendAsync(
+                    EventKind.AlertSettingsChanged, payload, ct).ConfigureAwait(false);
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to append Alert settings change to chain — change is applied but unaudited");
+            }
+            _logger.LogInformation(
+                "Alert settings updated (EnableNewProcessDetection={NewProc}, EnableHashChangeDetection={Hash}, EnableChainIntegrityMonitor={Chain})",
+                values.EnableNewProcessDetection,
+                values.EnableHashChangeDetection,
+                values.EnableChainIntegrityMonitor);
+        }
+
+        return new Local.SetAlertSettingsResponse {
+            Success = true,
+            Message = changed ? "Settings updated." : "Settings unchanged.",
+            Values = new AlertSettingsSnapshot(
+                EnableNewProcessDetection: _alertSettings.EnableNewProcessDetection,
+                EnableHashChangeDetection: _alertSettings.EnableHashChangeDetection,
+                EnableChainIntegrityMonitor: _alertSettings.EnableChainIntegrityMonitor).ToProto(),
         };
     }
 

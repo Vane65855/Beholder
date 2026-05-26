@@ -1,7 +1,9 @@
 # Beholder NMT — Project Status & Phase Plan
 
 **Last updated:** 2026-05-25
-**Current checkpoint:** Phase 13.2 (Settings tab — Recording + Hostname Resolution sections, the first interactive Settings sub-phase. Establishes the runtime-mutable-settings pattern that 13.3–13.5 will reuse: per-section state singletons mirroring `IFirewallEnforcementState`'s shape, a new `settings_overrides` SQLite table for persistence keyed on dotted section names (`Recording.FilterSelfTraffic` / `Dns.EnablePreload` / `Dns.EnableReverseDnsFallback` / `Sni.EnableSniCapture`), a dedicated `SettingsOverridesService : IHostedService` that runs first at startup to apply persisted overrides on top of `IOptions<T>` defaults, three new RPCs (`GetSettings` + two atomic `Set*` handlers, surface 19 → 22), two new chain-event kinds with deterministic JSON payload encoders, and a reusable `SettingsTogglePill` Avalonia control. Of the four toggles, `FilterSelfTraffic` and `EnableReverseDnsFallback` take effect live (consumers read per event / per cache miss); `EnablePreload` and `EnableSniCapture` consumers snapshot at `StartAsync`, so the UI renders `(takes effect on next daemon start)` beside those pills — honest UX over a risky ETW-lifecycle refactor. Set RPCs follow the existing `SetLanDeviceLabel` soft-failure precedent: persistence-throw returns `success=false` with a structured message; hard validation errors still throw `InvalidArgument`. See [ADR 010](decisions/010-runtime-mutable-settings.md) for the full rationale. 1231 → 1276 tests pass deterministically; +45 across `RecordingSettingsStateTests`, `HostnameResolutionSettingsStateTests`, both payload encoder test files, `SqliteSettingsOverridesStoreTests`, `SettingsOverridesServiceTests`, `SettingsRpcTests`, and `SettingsTabViewModelTests.Phase132.cs`.)
+**Current checkpoint:** Phase 13.3 (Settings tab — Alerts section. Second interactive Settings sub-phase; reuses Phase 13.2's runtime-mutable-settings pattern verbatim for three master kill-switches on the alert detector pipeline: `EnableNewProcessDetection` (per-flow-event live read in `NewProcessDetector`), `EnableHashChangeDetection` (per-tick live read in `BinaryHashMonitor`), `EnableChainIntegrityMonitor` (per-tick live read in `ChainIntegrityMonitor`). All three live — no restart-required captions. Numeric thresholds stay JSON-only matching the Phase 13.2 precedent. Behavior change (security fix): the mandatory startup chain verify can no longer be skipped via the UI toggle — `ChainIntegrityMonitor.StartAsync` always runs the startup verify; the toggle now gates only the periodic loop. Previously a corrupted chain could be silently hidden by toggling the monitor off before restart. RPC surface 22 → 23. New `EventKind.AlertSettingsChanged = 13` + `AlertSettingsPayloadEncoder`. 1276 → 1294 tests pass deterministically (+18 across `AlertSettingsStateTests`, `AlertSettingsPayloadEncoderTests`, `SettingsRpcTests`, `SettingsTabViewModelTests.Phase132`, and one modified `ChainIntegrityMonitorTests` test enforcing the new mandatory-startup-verify contract). Next up: Phase 13.4 (Scanner section).)
+
+**Previous checkpoint:** Phase 13.2 (Settings tab — Recording + Hostname Resolution sections, the first interactive Settings sub-phase. Establishes the runtime-mutable-settings pattern that 13.3–13.5 will reuse: per-section state singletons mirroring `IFirewallEnforcementState`'s shape, a new `settings_overrides` SQLite table for persistence keyed on dotted section names (`Recording.FilterSelfTraffic` / `Dns.EnablePreload` / `Dns.EnableReverseDnsFallback` / `Sni.EnableSniCapture`), a dedicated `SettingsOverridesService : IHostedService` that runs first at startup to apply persisted overrides on top of `IOptions<T>` defaults, three new RPCs (`GetSettings` + two atomic `Set*` handlers, surface 19 → 22), two new chain-event kinds with deterministic JSON payload encoders, and a reusable `SettingsTogglePill` Avalonia control. Of the four toggles, `FilterSelfTraffic` and `EnableReverseDnsFallback` take effect live (consumers read per event / per cache miss); `EnablePreload` and `EnableSniCapture` consumers snapshot at `StartAsync`, so the UI renders `(takes effect on next daemon start)` beside those pills — honest UX over a risky ETW-lifecycle refactor. Set RPCs follow the existing `SetLanDeviceLabel` soft-failure precedent: persistence-throw returns `success=false` with a structured message; hard validation errors still throw `InvalidArgument`. See [ADR 010](decisions/010-runtime-mutable-settings.md) for the full rationale. 1231 → 1276 tests pass deterministically; +45 across `RecordingSettingsStateTests`, `HostnameResolutionSettingsStateTests`, both payload encoder test files, `SqliteSettingsOverridesStoreTests`, `SettingsOverridesServiceTests`, `SettingsRpcTests`, and `SettingsTabViewModelTests.Phase132.cs`.)
 **Test count:** 1231
 
 ---
@@ -1237,6 +1239,42 @@ The two "next-start" toggles persist immediately but their consumers snapshot th
 - `README.md`: status-line refresh.
 
 **Build clean. 1276 tests pass deterministically (was 1231).**
+
+### Phase 13.3 — Settings tab: Alerts section ✅
+
+**Purpose:** Second interactive Settings sub-phase. Reuses Phase 13.2's runtime-mutable-settings pattern (per-section state singleton mirroring `IFirewallEnforcementState`, `settings_overrides` persistence, atomic Set RPC, soft-failure on persistence-throw, chain audit) to add three master kill-switches for the alert detector pipeline:
+
+| Toggle | Effect timing | Read site |
+|---|---|---|
+| `EnableNewProcessDetection` | Live | `NewProcessDetector.ProcessAsync` — per flow event |
+| `EnableHashChangeDetection` | Live | `BinaryHashMonitor.SweepOnceAsync` — per periodic tick |
+| `EnableChainIntegrityMonitor` | Live | `ChainIntegrityMonitor.RunLoopAsync` — per periodic tick |
+
+All three are live (no "restart required" caption). Numeric thresholds (`BinaryHashCheckIntervalMinutes`, `ChainVerifyIntervalMinutes`, `MaxFileHashTimeoutSeconds`) stay JSON-only — matches the Phase 13.2 precedent for advanced tuning.
+
+**Behavior change (security fix):** `ChainIntegrityMonitor.StartAsync` no longer early-returns when `EnableChainIntegrityMonitor=false`. The mandatory startup chain verification ALWAYS runs; the toggle now gates only the *periodic* verify loop. Previously, disabling the monitor before restart would silently skip the startup verify — exactly the failure mode the chain exists to prevent. ADR 010 addendum documents the change.
+
+**Changes:**
+- **Core (new):** `IAlertSettingsState` + `AlertSettingsSnapshot` record; three `SettingsKeys` constants; `EventKind.AlertSettingsChanged = 13`.
+- **Daemon (new):** `AlertSettingsState` (lock-protected impl seeded from `IOptions<AlertOptions>`), `AlertSettingsPayloadEncoder` (deterministic JSON, 3 bools + `changedAtUnixNs`).
+- **Daemon (modified):** `NewProcessDetector` swaps `IOptionsMonitor<AlertOptions>` → `IAlertSettingsState` (per-event read). `BinaryHashMonitor` keeps `IOptionsMonitor<AlertOptions>` for the numeric thresholds + adds `IAlertSettingsState` for the bool. `ChainIntegrityMonitor` same hybrid pattern + drops the StartAsync early-return (behavior change above). `SettingsOverridesService` extended to apply the three new keys. `Program.cs` registers the state singleton. `BeholderLocalService` ctor gains `IAlertSettingsState`; `GetSettings` populates the new `alerts` field; new `SetAlertSettings` handler.
+- **Protocol:** `beholder_local.proto` adds `AlertSettingsValues` value message + `SetAlertSettingsRequest/Response` + the new RPC. `GetSettingsResponse` extended with `alerts = 3`. `ProtocolConverters.cs` ToProto/ToDomain for the new pair.
+- **UI:** `IDaemonClient` + `DaemonClient` gain `SetAlertSettingsAsync`. New `AlertSettingsRow.cs` (3 bools + 3 saving flags). `SettingsTabViewModel`: three new toggle commands sharing a `ToggleAlert(AlertToggle)` helper — same shape as the existing `ToggleHostnameResolution(HostnameToggle)` helper. New ALERTS section card in `SettingsTabView.axaml` between Hostname Resolution and Maintenance.
+
+**Tests (+18 over 1276 → 1294):**
+- `AlertSettingsStateTests` (6) — initial-from-options, single-field transition, multi-field transition, no-op, StateChanged-only-on-real-transitions, concurrent callers no-tearing.
+- `AlertSettingsPayloadEncoderTests` (4) — encode shape, deterministic, round-trip, missing-field-returns-null.
+- `SettingsRpcTests` (+5) — `GetSettings` includes alerts; `SetAlertSettings` real transition persists 3 keys + chain-appends once; no-op skips persistence + chain; null values throws InvalidArgument; persistence-throw returns soft-failure.
+- `SettingsTabViewModelTests.Phase132.cs` (+3) — activate loads alerts; toggle success sends all three bools (only one flipped); toggle failure reverts all three.
+- `ChainIntegrityMonitorTests` (1 modified) — `StartAsync_DetectionDisabled_DoesNotRun` REPLACED by `StartAsync_DetectionDisabled_StillRunsMandatoryStartupVerify` enforcing the new contract.
+- New test double: `FakeAlertSettingsState`. `FakeDaemonClient` gains alert RPC hooks. All 14 existing `BeholderLocalService` test fixtures updated via PowerShell regex for the new ctor param.
+
+**Docs:**
+- `docs/decisions/010-runtime-mutable-settings.md`: addendum documenting the `ChainIntegrityMonitor` startup-skip behavior change.
+- `phases.md`: header bumped; this entry.
+- `README.md`: status-line refresh.
+
+**Build clean. 1294 tests pass deterministically (was 1276).**
 
 ---
 

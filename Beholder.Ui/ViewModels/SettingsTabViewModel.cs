@@ -135,6 +135,9 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
     /// <summary>Phase 13.2: Hostname Resolution section state.</summary>
     public HostnameResolutionSettingsRow HostnameResolution { get; } = new();
 
+    /// <summary>Phase 13.3: Alerts section state.</summary>
+    public AlertSettingsRow Alerts { get; } = new();
+
     /// <summary>Cyan-tinted share of the stacked total bar — sum of all
     /// traffic-tier rows divided by grand total. Falls back to 0 when the
     /// database has no rows.</summary>
@@ -344,6 +347,11 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
             HostnameResolution.EnableReverseDnsFallback = response.HostnameResolution.EnableReverseDnsFallback;
             HostnameResolution.EnableSniCapture = response.HostnameResolution.EnableSniCapture;
         }
+        if (response.Alerts is not null) {
+            Alerts.EnableNewProcessDetection = response.Alerts.EnableNewProcessDetection;
+            Alerts.EnableHashChangeDetection = response.Alerts.EnableHashChangeDetection;
+            Alerts.EnableChainIntegrityMonitor = response.Alerts.EnableChainIntegrityMonitor;
+        }
     }
 
     private void ApplyStorageStats(GetStorageStatsResponse response) {
@@ -546,6 +554,96 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
                 break;
             case HostnameToggle.SniCapture:
                 HostnameResolution.IsSavingSniCapture = value;
+                break;
+        }
+    }
+
+    [RelayCommand]
+    private Task ToggleEnableNewProcessDetection() => ToggleAlert(AlertToggle.NewProcessDetection);
+
+    [RelayCommand]
+    private Task ToggleEnableHashChangeDetection() => ToggleAlert(AlertToggle.HashChangeDetection);
+
+    [RelayCommand]
+    private Task ToggleEnableChainIntegrityMonitor() => ToggleAlert(AlertToggle.ChainIntegrityMonitor);
+
+    private enum AlertToggle { NewProcessDetection, HashChangeDetection, ChainIntegrityMonitor }
+
+    /// <summary>
+    /// Phase 13.3: shared optimistic-flip implementation for the three Alerts
+    /// toggles. Same shape as <see cref="ToggleHostnameResolution"/> — all
+    /// three bools go to the same atomic Set RPC, so one helper avoids
+    /// duplicating the flip / RPC / revert / save-flag dance three times.
+    /// </summary>
+    private async Task ToggleAlert(AlertToggle which) {
+        var saving = which switch {
+            AlertToggle.NewProcessDetection => Alerts.IsSavingNewProcessDetection,
+            AlertToggle.HashChangeDetection => Alerts.IsSavingHashChangeDetection,
+            AlertToggle.ChainIntegrityMonitor => Alerts.IsSavingChainIntegrityMonitor,
+            _ => false,
+        };
+        if (saving) return;
+
+        var previousNewProc = Alerts.EnableNewProcessDetection;
+        var previousHash = Alerts.EnableHashChangeDetection;
+        var previousChain = Alerts.EnableChainIntegrityMonitor;
+        var nextNewProc = which == AlertToggle.NewProcessDetection ? !previousNewProc : previousNewProc;
+        var nextHash = which == AlertToggle.HashChangeDetection ? !previousHash : previousHash;
+        var nextChain = which == AlertToggle.ChainIntegrityMonitor ? !previousChain : previousChain;
+
+        SetAlertsRowState(nextNewProc, nextHash, nextChain);
+        SetAlertSavingFlag(which, true);
+        try {
+            var response = await _daemonClient.SetAlertSettingsAsync(
+                new SetAlertSettingsRequest {
+                    Values = new AlertSettingsValues {
+                        EnableNewProcessDetection = nextNewProc,
+                        EnableHashChangeDetection = nextHash,
+                        EnableChainIntegrityMonitor = nextChain,
+                    },
+                },
+                CancellationToken.None);
+            if (response.Success && response.Values is not null) {
+                SetAlertsRowState(
+                    response.Values.EnableNewProcessDetection,
+                    response.Values.EnableHashChangeDetection,
+                    response.Values.EnableChainIntegrityMonitor);
+            } else {
+                SetAlertsRowState(previousNewProc, previousHash, previousChain);
+                HasError = true;
+                ErrorMessage = string.IsNullOrEmpty(response.Message)
+                    ? "Failed to save Alert settings."
+                    : response.Message;
+            }
+        } catch (RpcException ex) {
+            SetAlertsRowState(previousNewProc, previousHash, previousChain);
+            HasError = true;
+            ErrorMessage = $"Failed to save Alert settings: {ex.Status.Detail}";
+        } catch (Exception ex) {
+            SetAlertsRowState(previousNewProc, previousHash, previousChain);
+            HasError = true;
+            ErrorMessage = $"Failed to save Alert settings: {ex.Message}";
+        } finally {
+            SetAlertSavingFlag(which, false);
+        }
+    }
+
+    private void SetAlertsRowState(bool newProc, bool hash, bool chain) {
+        Alerts.EnableNewProcessDetection = newProc;
+        Alerts.EnableHashChangeDetection = hash;
+        Alerts.EnableChainIntegrityMonitor = chain;
+    }
+
+    private void SetAlertSavingFlag(AlertToggle which, bool value) {
+        switch (which) {
+            case AlertToggle.NewProcessDetection:
+                Alerts.IsSavingNewProcessDetection = value;
+                break;
+            case AlertToggle.HashChangeDetection:
+                Alerts.IsSavingHashChangeDetection = value;
+                break;
+            case AlertToggle.ChainIntegrityMonitor:
+                Alerts.IsSavingChainIntegrityMonitor = value;
                 break;
         }
     }

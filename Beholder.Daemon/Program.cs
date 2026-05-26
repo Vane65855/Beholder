@@ -200,6 +200,7 @@ if (OperatingSystem.IsWindows()) {
     //   persisted overrides to the singletons before any consumer reads them.
     builder.Services.AddSingleton<IRecordingSettingsState, RecordingSettingsState>();
     builder.Services.AddSingleton<IHostnameResolutionSettingsState, HostnameResolutionSettingsState>();
+    builder.Services.AddSingleton<IAlertSettingsState, AlertSettingsState>();
     builder.Services.AddSingleton<ISettingsOverridesStore>(sp => new SqliteSettingsOverridesStore(
         sp.GetRequiredService<ConnectionFactory>(),
         sp.GetRequiredService<TimeProvider>()));

@@ -53,6 +53,7 @@ public sealed class GetFirewallActivityRpcTests : IDisposable {
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeAlertSettingsState(),
             new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }

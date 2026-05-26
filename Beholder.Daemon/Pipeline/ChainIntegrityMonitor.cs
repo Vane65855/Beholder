@@ -24,6 +24,7 @@ internal sealed class ChainIntegrityMonitor : IHostedService, IDisposable {
     private readonly IAlertEmitter _alertEmitter;
     private readonly IChainStatusCache _chainStatusCache;
     private readonly IOptionsMonitor<AlertOptions> _options;
+    private readonly IAlertSettingsState _alertSettings;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ChainIntegrityMonitor> _logger;
 
@@ -36,6 +37,7 @@ internal sealed class ChainIntegrityMonitor : IHostedService, IDisposable {
         IAlertEmitter alertEmitter,
         IChainStatusCache chainStatusCache,
         IOptionsMonitor<AlertOptions> options,
+        IAlertSettingsState alertSettings,
         TimeProvider timeProvider,
         ILogger<ChainIntegrityMonitor> logger
     ) {
@@ -43,22 +45,32 @@ internal sealed class ChainIntegrityMonitor : IHostedService, IDisposable {
         ArgumentNullException.ThrowIfNull(alertEmitter);
         ArgumentNullException.ThrowIfNull(chainStatusCache);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(alertSettings);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _eventStore = eventStore;
         _alertEmitter = alertEmitter;
         _chainStatusCache = chainStatusCache;
+        // Phase 13.3: numeric interval stays on IOptionsMonitor<AlertOptions>
+        // (advanced JSON-only tuning); the kill-switch moves to the live state
+        // singleton so the SetAlertSettings RPC takes effect on the next tick.
         _options = options;
+        _alertSettings = alertSettings;
         _timeProvider = timeProvider;
         _logger = logger;
     }
 
     public Task StartAsync(CancellationToken cancellationToken) {
-        if (!_options.CurrentValue.EnableChainIntegrityMonitor) {
-            _logger.LogInformation(
-                "ChainIntegrityMonitor disabled by AlertOptions; skipping startup + periodic verify");
-            return Task.CompletedTask;
-        }
+        // Phase 13.3 behavior change: the mandatory startup chain verify ALWAYS
+        // runs, regardless of EnableChainIntegrityMonitor. The toggle now
+        // gates only the *periodic* verify loop (checked per-tick at line
+        // RunLoopAsync below). Rationale: chain corruption is most likely to
+        // be discovered at startup (power-loss mid-write, manual SQL tampering
+        // between daemon runs); allowing the user to skip startup verify via
+        // a UI flip would silently hide corruption — exactly the failure mode
+        // the chain exists to prevent. The periodic loop is the legitimate
+        // disable target — power users on low-resource hardware may want to
+        // skip the hourly O(n) re-verify without disabling the startup check.
         _loopTask = Task.Run(() => RunLoopAsync(_shutdownCts.Token), cancellationToken);
         _logger.LogInformation("ChainIntegrityMonitor started");
         return Task.CompletedTask;
@@ -86,14 +98,15 @@ internal sealed class ChainIntegrityMonitor : IHostedService, IDisposable {
 
     private async Task RunLoopAsync(CancellationToken cancellationToken) {
         try {
-            // Mandatory startup verify. Failure here produces the alert
-            // even before the periodic timer's first tick.
+            // Mandatory startup verify (cannot be disabled via the UI toggle —
+            // see StartAsync's docstring for the rationale). Failure here
+            // produces the alert even before the periodic timer's first tick.
             await VerifyOnceAsync(cancellationToken).ConfigureAwait(false);
 
             var interval = TimeSpan.FromMinutes(_options.CurrentValue.ChainVerifyIntervalMinutes);
             using var timer = new PeriodicTimer(interval, _timeProvider);
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false)) {
-                if (!_options.CurrentValue.EnableChainIntegrityMonitor) continue;
+                if (!_alertSettings.EnableChainIntegrityMonitor) continue;
                 await VerifyOnceAsync(cancellationToken).ConfigureAwait(false);
             }
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {

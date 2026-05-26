@@ -100,7 +100,10 @@ public sealed class BinaryHashMonitorTests : IDisposable {
         var fixture = new Fixture();
         var (path, _) = await fixture.WriteBinaryAsync("app.exe", new byte[] { 0xEE });
         await fixture.RegisterAsync(path, sha256: null);
-        fixture.Options.Set(new AlertOptions { EnableHashChangeDetection = false });
+        fixture.AlertSettings.SetSettings(
+            enableNewProcessDetection: true,
+            enableHashChangeDetection: false,
+            enableChainIntegrityMonitor: true);
 
         await fixture.Monitor.SweepOnceAsync(CancellationToken.None);
 
@@ -175,6 +178,7 @@ public sealed class BinaryHashMonitorTests : IDisposable {
             processRegistry: null!,
             alertEmitter: new FakeAlertEmitter(),
             options: new FakeOptionsMonitor<AlertOptions>(new AlertOptions()),
+            alertSettings: new FakeAlertSettingsState(),
             timeProvider: new FakeTimeProvider(FixedTimestamp),
             logger: NullLogger<BinaryHashMonitor>.Instance));
 
@@ -184,6 +188,7 @@ public sealed class BinaryHashMonitorTests : IDisposable {
         public FakeProcessRegistry Registry { get; } = new();
         public FakeAlertEmitter Emitter { get; } = new();
         public FakeOptionsMonitor<AlertOptions> Options { get; } = new(new AlertOptions());
+        public FakeAlertSettingsState AlertSettings { get; } = new();
         public FakeTimeProvider Time { get; } = new(FixedTimestamp);
         public BinaryHashMonitor Monitor { get; }
 
@@ -191,7 +196,7 @@ public sealed class BinaryHashMonitorTests : IDisposable {
             _tempDir = Path.Combine(Path.GetTempPath(), "beholder-monitor-tests", Guid.NewGuid().ToString());
             Directory.CreateDirectory(_tempDir);
             Monitor = new BinaryHashMonitor(
-                Registry, Emitter, Options, Time,
+                Registry, Emitter, Options, AlertSettings, Time,
                 NullLogger<BinaryHashMonitor>.Instance);
         }
 

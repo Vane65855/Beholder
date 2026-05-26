@@ -28,21 +28,25 @@ internal sealed class SettingsOverridesService : IHostedService {
     private readonly ISettingsOverridesStore _store;
     private readonly IRecordingSettingsState _recordingState;
     private readonly IHostnameResolutionSettingsState _hostnameResolutionState;
+    private readonly IAlertSettingsState _alertState;
     private readonly ILogger<SettingsOverridesService> _logger;
 
     public SettingsOverridesService(
         ISettingsOverridesStore store,
         IRecordingSettingsState recordingState,
         IHostnameResolutionSettingsState hostnameResolutionState,
+        IAlertSettingsState alertState,
         ILogger<SettingsOverridesService> logger
     ) {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(recordingState);
         ArgumentNullException.ThrowIfNull(hostnameResolutionState);
+        ArgumentNullException.ThrowIfNull(alertState);
         ArgumentNullException.ThrowIfNull(logger);
         _store = store;
         _recordingState = recordingState;
         _hostnameResolutionState = hostnameResolutionState;
+        _alertState = alertState;
         _logger = logger;
     }
 
@@ -77,6 +81,15 @@ internal sealed class SettingsOverridesService : IHostedService {
         var enableSniCapture = ReadBoolOverride(
             overrides, SettingsKeys.SniEnableSniCapture, _hostnameResolutionState.EnableSniCapture);
         _hostnameResolutionState.SetSettings(enablePreload, enableReverseDnsFallback, enableSniCapture);
+
+        // Apply the Alerts section. Same bundle-then-apply pattern.
+        var enableNewProcessDetection = ReadBoolOverride(
+            overrides, SettingsKeys.AlertEnableNewProcessDetection, _alertState.EnableNewProcessDetection);
+        var enableHashChangeDetection = ReadBoolOverride(
+            overrides, SettingsKeys.AlertEnableHashChangeDetection, _alertState.EnableHashChangeDetection);
+        var enableChainIntegrityMonitor = ReadBoolOverride(
+            overrides, SettingsKeys.AlertEnableChainIntegrityMonitor, _alertState.EnableChainIntegrityMonitor);
+        _alertState.SetSettings(enableNewProcessDetection, enableHashChangeDetection, enableChainIntegrityMonitor);
 
         _logger.LogInformation(
             "Applied {Count} settings overrides at startup", overrides.Count);

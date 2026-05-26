@@ -541,6 +541,73 @@
                             </Grid>
                         </Border>
 
+                        <!-- ──────────  ALERTS  ────────── -->
+                        <Border x:Name="AlertsCard" Classes="sectionCard">
+                            <Grid>
+                                <Border Classes="accentStripe cyan" />
+                                <StackPanel Orientation="Vertical" Spacing="16">
+                                    <TextBlock Classes="sectionTitle" Text="ALERTS" />
+
+                                    <!-- EnableNewProcessDetection (LIVE, per-event) -->
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="New process detection"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <TextBlock Text="Fire an alert the first time a binary touches the network. Turn off if your machine constantly spawns new binaries (e.g., dev box compiling+running fresh executables)."
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <controls:SettingsTogglePill Grid.Column="1"
+                                                                     IsOn="{Binding Alerts.EnableNewProcessDetection}"
+                                                                     IsSaving="{Binding Alerts.IsSavingNewProcessDetection}"
+                                                                     Command="{Binding ToggleEnableNewProcessDetectionCommand}"
+                                                                     VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <!-- EnableHashChangeDetection (LIVE, per-tick) -->
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="Hash-change detection"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <TextBlock Text="Re-hash tracked binaries periodically and alert when the SHA-256 changes (covers both straight-up tampering and the Phase 7.5 publisher-mismatch spoof case)."
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <controls:SettingsTogglePill Grid.Column="1"
+                                                                     IsOn="{Binding Alerts.EnableHashChangeDetection}"
+                                                                     IsSaving="{Binding Alerts.IsSavingHashChangeDetection}"
+                                                                     Command="{Binding ToggleEnableHashChangeDetectionCommand}"
+                                                                     VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <!-- EnableChainIntegrityMonitor (LIVE, per-tick — mandatory startup verify ALWAYS runs) -->
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="Chain integrity periodic verify"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <TextBlock Text="Re-verify the chain-hashed event log periodically and alert on mismatch. The mandatory startup verify always runs regardless of this toggle (Phase 13.3 hardening — a corrupt chain shouldn't be hideable via a UI flip)."
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <controls:SettingsTogglePill Grid.Column="1"
+                                                                     IsOn="{Binding Alerts.EnableChainIntegrityMonitor}"
+                                                                     IsSaving="{Binding Alerts.IsSavingChainIntegrityMonitor}"
+                                                                     Command="{Binding ToggleEnableChainIntegrityMonitorCommand}"
+                                                                     VerticalAlignment="Center" />
+                                    </Grid>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
                         <!-- ──────────  MAINTENANCE  ────────── -->
                         <Border x:Name="MaintenanceCard" Classes="sectionCard">
                             <Grid>

@@ -37,6 +37,7 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
             _lanDeviceStore, TestServiceFactory.CreateInactiveLanScannerService(_lanDeviceStore),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeAlertSettingsState(),
             new FakeSettingsOverridesStore(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
@@ -182,6 +183,7 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
             throwingStore, TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeAlertSettingsState(),
             new FakeSettingsOverridesStore(),
             TimeProvider.System, NullLogger<BeholderLocalService>.Instance);
 

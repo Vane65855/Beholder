@@ -57,7 +57,10 @@ public sealed class NewProcessDetectorTests {
     [Fact]
     public async Task FirstFlow_DetectionDisabled_NoAlert_NoRegistration() {
         var fixture = new Fixture();
-        fixture.Options.Set(new AlertOptions { EnableNewProcessDetection = false });
+        fixture.AlertSettings.SetSettings(
+            enableNewProcessDetection: false,
+            enableHashChangeDetection: true,
+            enableChainIntegrityMonitor: true);
 
         await fixture.Detector.ProcessAsync(@"C:\bin\app.exe", CancellationToken.None);
 
@@ -104,7 +107,7 @@ public sealed class NewProcessDetectorTests {
             flowSource: null!,
             processRegistry: new FakeProcessRegistry(),
             alertEmitter: new FakeAlertEmitter(),
-            options: new FakeOptionsMonitor<AlertOptions>(new AlertOptions()),
+            alertSettings: new FakeAlertSettingsState(),
             timeProvider: new FakeTimeProvider(FixedTimestamp),
             logger: NullLogger<NewProcessDetector>.Instance));
 
@@ -297,7 +300,7 @@ public sealed class NewProcessDetectorTests {
         public FakeProcessFirstNetworkFlowSource FlowSource { get; } = new();
         public FakeProcessRegistry Registry { get; } = new();
         public FakeAlertEmitter Emitter { get; } = new();
-        public FakeOptionsMonitor<AlertOptions> Options { get; } = new(new AlertOptions());
+        public FakeAlertSettingsState AlertSettings { get; } = new();
         public FakeTimeProvider Time { get; } = new(FixedTimestamp);
         public FakeBinaryIdentityProvider? IdentityProvider { get; }
         public NewProcessDetector Detector { get; }
@@ -305,7 +308,7 @@ public sealed class NewProcessDetectorTests {
         public Fixture(bool withIdentityProvider = false) {
             IdentityProvider = withIdentityProvider ? new FakeBinaryIdentityProvider() : null;
             Detector = new NewProcessDetector(
-                FlowSource, Registry, Emitter, Options, Time,
+                FlowSource, Registry, Emitter, AlertSettings, Time,
                 NullLogger<NewProcessDetector>.Instance,
                 IdentityProvider);
         }

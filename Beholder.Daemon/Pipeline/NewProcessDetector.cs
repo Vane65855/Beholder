@@ -1,5 +1,4 @@
 using Beholder.Core;
-using Microsoft.Extensions.Options;
 
 namespace Beholder.Daemon.Pipeline;
 
@@ -42,7 +41,7 @@ internal sealed class NewProcessDetector : IHostedService {
     private readonly IProcessFirstNetworkFlowSource _flowSource;
     private readonly IProcessRegistry _processRegistry;
     private readonly IAlertEmitter _alertEmitter;
-    private readonly IOptionsMonitor<AlertOptions> _options;
+    private readonly IAlertSettingsState _alertSettings;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<NewProcessDetector> _logger;
     private readonly IBinaryIdentityProvider? _identityProvider;
@@ -54,7 +53,7 @@ internal sealed class NewProcessDetector : IHostedService {
         IProcessFirstNetworkFlowSource flowSource,
         IProcessRegistry processRegistry,
         IAlertEmitter alertEmitter,
-        IOptionsMonitor<AlertOptions> options,
+        IAlertSettingsState alertSettings,
         TimeProvider timeProvider,
         ILogger<NewProcessDetector> logger,
         IBinaryIdentityProvider? identityProvider = null
@@ -62,13 +61,17 @@ internal sealed class NewProcessDetector : IHostedService {
         ArgumentNullException.ThrowIfNull(flowSource);
         ArgumentNullException.ThrowIfNull(processRegistry);
         ArgumentNullException.ThrowIfNull(alertEmitter);
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(alertSettings);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _flowSource = flowSource;
         _processRegistry = processRegistry;
         _alertEmitter = alertEmitter;
-        _options = options;
+        // Phase 13.3: read from the live state singleton instead of the
+        // IOptionsMonitor<AlertOptions> snapshot. EnableNewProcessDetection
+        // now takes effect immediately when toggled via the
+        // SetAlertSettings RPC.
+        _alertSettings = alertSettings;
         _timeProvider = timeProvider;
         _logger = logger;
         _identityProvider = identityProvider;  // null on Linux/macOS — see ADR 007
@@ -104,7 +107,7 @@ internal sealed class NewProcessDetector : IHostedService {
     /// </summary>
     internal async Task ProcessAsync(string processPath, CancellationToken cancellationToken) {
         try {
-            if (!_options.CurrentValue.EnableNewProcessDetection) return;
+            if (!_alertSettings.EnableNewProcessDetection) return;
 
             // Tier 1: path-based dedup catches daemon-restart re-observation.
             var existing = await _processRegistry.GetByPathAsync(processPath, cancellationToken)

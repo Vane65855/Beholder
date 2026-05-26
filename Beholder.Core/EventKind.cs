@@ -62,4 +62,18 @@ public enum EventKind {
     /// <see cref="RecordingSettingsChanged"/>.
     /// </summary>
     HostnameResolutionSettingsChanged = 12,
+
+    /// <summary>
+    /// User toggled one or more values in the Settings tab's Alerts section
+    /// (Phase 13.3) — the master kill-switches for the three alert detectors
+    /// (<c>EnableNewProcessDetection</c>, <c>EnableHashChangeDetection</c>,
+    /// <c>EnableChainIntegrityMonitor</c>). Chain-audit kind only.
+    /// </summary>
+    AlertSettingsChanged = 13,
+
+    /// <summary>
+    /// User toggled the Settings tab's Scanner section value (Phase 13.4) —
+    /// <c>EnableHostnameResolution</c>. Chain-audit kind only.
+    /// </summary>
+    ScannerSettingsChanged = 14,
 }

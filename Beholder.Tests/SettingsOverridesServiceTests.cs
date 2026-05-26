@@ -15,7 +15,7 @@ public class SettingsOverridesServiceTests {
             initialEnableReverseDnsFallback: true,
             initialEnableSniCapture: true);
         var service = new SettingsOverridesService(
-            store, recording, hostname, NullLogger<SettingsOverridesService>.Instance);
+            store, recording, hostname, new FakeAlertSettingsState(), NullLogger<SettingsOverridesService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
 
@@ -35,7 +35,7 @@ public class SettingsOverridesServiceTests {
         var recording = new FakeRecordingSettingsState(initialFilterSelfTraffic: true);
         var hostname = new FakeHostnameResolutionSettingsState();
         var service = new SettingsOverridesService(
-            store, recording, hostname, NullLogger<SettingsOverridesService>.Instance);
+            store, recording, hostname, new FakeAlertSettingsState(), NullLogger<SettingsOverridesService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
 
@@ -56,7 +56,7 @@ public class SettingsOverridesServiceTests {
             initialEnableReverseDnsFallback: true,
             initialEnableSniCapture: true);
         var service = new SettingsOverridesService(
-            store, recording, hostname, NullLogger<SettingsOverridesService>.Instance);
+            store, recording, hostname, new FakeAlertSettingsState(), NullLogger<SettingsOverridesService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
 
@@ -73,7 +73,7 @@ public class SettingsOverridesServiceTests {
         var recording = new FakeRecordingSettingsState(initialFilterSelfTraffic: true);
         var hostname = new FakeHostnameResolutionSettingsState();
         var service = new SettingsOverridesService(
-            store, recording, hostname, NullLogger<SettingsOverridesService>.Instance);
+            store, recording, hostname, new FakeAlertSettingsState(), NullLogger<SettingsOverridesService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
 
@@ -87,7 +87,7 @@ public class SettingsOverridesServiceTests {
         var recording = new FakeRecordingSettingsState();
         var hostname = new FakeHostnameResolutionSettingsState();
         var service = new SettingsOverridesService(
-            store, recording, hostname, NullLogger<SettingsOverridesService>.Instance);
+            store, recording, hostname, new FakeAlertSettingsState(), NullLogger<SettingsOverridesService>.Instance);
 
         // StartAsync must not throw — daemon startup proceeds with defaults.
         await service.StartAsync(CancellationToken.None);

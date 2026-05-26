@@ -119,3 +119,20 @@ Mirrors the `SetLanDeviceLabel` / `TriggerScan` "soft-failure" precedent: recove
 - **`DaemonEvent` stream broadcasts for Settings changes**. Settings tab is the only UI for these knobs; chain-audit is the durable record. Adding a broadcast surface is cheap if cross-instance Settings views ever materialise.
 - **Other `DnsOptions` / `SniOptions` knobs** (queue capacities, buffer sizes, dedup capacity). Advanced tuning, stays JSON-only, not surfaced in the UI.
 - **Versioning the chain payload schema**. Today there's one schema per `EventKind`; adding a field is a breaking change that requires `TryDecode` to be lenient. Defer until a real second version exists.
+
+---
+
+## Addendum (Phase 13.3): mandatory startup chain verify is non-skippable
+
+Phase 13.3 added the Alerts section to Settings with three master kill-switches: `EnableNewProcessDetection`, `EnableHashChangeDetection`, `EnableChainIntegrityMonitor`. Adding the third toggle surfaced a pre-existing gap in `ChainIntegrityMonitor.StartAsync`: when `EnableChainIntegrityMonitor = false`, the entire monitor — including the **mandatory startup chain verification** — was skipped.
+
+That gap meant a user could silence a corrupt chain by toggling the monitor off before restart. The chain audit log is the project's core trust mechanism (per `PRINCIPLES.md` §"The Hash Chain"); allowing a UI flip to bypass startup verification breaks the trust contract: corruption developing while the daemon is *running* would be detected, but corruption arriving via power-loss-mid-write, manual SQL tampering between daemon runs, or disk bit-rot would silently go unnoticed.
+
+**Decision:** Drop the `if (!_options.CurrentValue.EnableChainIntegrityMonitor) return;` early-return in `ChainIntegrityMonitor.StartAsync`. The startup verify always runs. The `EnableChainIntegrityMonitor` toggle now gates only the *periodic* re-verify loop (already checked per-tick at `RunLoopAsync` — Phase 7 logic).
+
+**Trade-offs:**
+- Cost is one O(n) chain walk at every daemon start, regardless of the toggle. Acceptable: chains under 100k rows verify in <100 ms today; Phase 11 checkpointing will reduce this further if it ever becomes a concern.
+- The toggle's user-visible meaning is now "skip the hourly periodic re-verify" rather than "skip all chain verification." The Settings caption is rewritten to make this explicit: "*Re-verify the chain-hashed event log periodically and alert on mismatch. The mandatory startup verify always runs regardless of this toggle.*"
+- The test `ChainIntegrityMonitorTests.StartAsync_DetectionDisabled_DoesNotRun` is replaced by `StartAsync_DetectionDisabled_StillRunsMandatoryStartupVerify`, enforcing the new contract.
+
+**Pattern guidance for future settings:** when a setting gates a feature that has both a *mandatory at-startup* phase and a *periodic ongoing* phase, the UI toggle should disable only the periodic phase. Settings exist to honour user preference, but they must not be a back door to disable security-critical invariants. Document this distinction in the toggle's user-facing caption.

@@ -95,21 +95,32 @@ public sealed class ChainIntegrityMonitorTests {
     }
 
     [Fact]
-    public async Task StartAsync_DetectionDisabled_DoesNotRun() {
+    public async Task StartAsync_DetectionDisabled_StillRunsMandatoryStartupVerify() {
+        // Phase 13.3 hardening: the mandatory startup chain verify can no
+        // longer be skipped via the EnableChainIntegrityMonitor toggle.
+        // Rationale: chain corruption is most likely to be discovered at
+        // startup (power loss mid-write, manual SQL tampering between
+        // daemon runs); allowing the UI toggle to silence the startup
+        // check would silently hide corruption — exactly what the chain
+        // exists to prevent. The toggle now gates only the periodic loop
+        // (see StartAsync_DetectionDisabled_SkipsPeriodicLoop below).
         var fixture = new Fixture();
-        fixture.Options.Set(new AlertOptions { EnableChainIntegrityMonitor = false });
+        fixture.AlertSettings.SetSettings(
+            enableNewProcessDetection: true,
+            enableHashChangeDetection: true,
+            enableChainIntegrityMonitor: false);
         fixture.EventStore.VerifyResult = ChainVerificationResult.Failure(
-            rowsVerified: 0, failedAtSeq: 1, errorMessage: "should not be observed");
+            rowsVerified: 0, failedAtSeq: 1, errorMessage: "boom");
 
         var ct = TestContext.Current.CancellationToken;
         await fixture.Monitor.StartAsync(ct);
-        // Tiny grace window: if the loop did start, it would emit on the
-        // mandatory startup verify almost immediately. We're proving it
-        // didn't.
+        // Grace window for the mandatory startup verify to fire.
         await Task.Delay(50, ct);
         await fixture.Monitor.StopAsync(ct);
 
-        Assert.Empty(fixture.Emitter.Emissions);
+        // The startup verify emitted the failure alert.
+        Assert.Single(fixture.Emitter.Emissions);
+        Assert.Equal(AlertKind.ChainError, fixture.Emitter.Emissions[0].Kind);
     }
 
     [Fact]
@@ -119,6 +130,7 @@ public sealed class ChainIntegrityMonitorTests {
             alertEmitter: new FakeAlertEmitter(),
             chainStatusCache: new FakeChainStatusCache(),
             options: new FakeOptionsMonitor<AlertOptions>(new AlertOptions()),
+            alertSettings: new FakeAlertSettingsState(),
             timeProvider: new FakeTimeProvider(FixedTimestamp),
             logger: NullLogger<ChainIntegrityMonitor>.Instance));
 
@@ -127,12 +139,13 @@ public sealed class ChainIntegrityMonitorTests {
         public FakeAlertEmitter Emitter { get; } = new();
         public FakeChainStatusCache ChainStatusCache { get; } = new();
         public FakeOptionsMonitor<AlertOptions> Options { get; } = new(new AlertOptions());
+        public FakeAlertSettingsState AlertSettings { get; } = new();
         public FakeTimeProvider Time { get; } = new(FixedTimestamp);
         public ChainIntegrityMonitor Monitor { get; }
 
         public Fixture() {
             Monitor = new ChainIntegrityMonitor(
-                EventStore, Emitter, ChainStatusCache, Options, Time,
+                EventStore, Emitter, ChainStatusCache, Options, AlertSettings, Time,
                 NullLogger<ChainIntegrityMonitor>.Instance);
         }
     }

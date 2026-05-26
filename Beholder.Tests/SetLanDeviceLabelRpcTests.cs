@@ -37,6 +37,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
             _lanDeviceStore, TestServiceFactory.CreateInactiveLanScannerService(_lanDeviceStore),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeAlertSettingsState(),
             new FakeSettingsOverridesStore(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
@@ -142,6 +143,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
             throwingStore, TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeAlertSettingsState(),
             new FakeSettingsOverridesStore(),
             TimeProvider.System, NullLogger<BeholderLocalService>.Instance);
 
@@ -180,6 +182,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
             store, TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeAlertSettingsState(),
             new FakeSettingsOverridesStore(),
             TimeProvider.System, NullLogger<BeholderLocalService>.Instance);
 

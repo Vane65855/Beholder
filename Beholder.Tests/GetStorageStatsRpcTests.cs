@@ -41,6 +41,7 @@ public sealed class GetStorageStatsRpcTests : IDisposable {
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             _chainStatusCache, _storageStatsProvider,
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeAlertSettingsState(),
             new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }

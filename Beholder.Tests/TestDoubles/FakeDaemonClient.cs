@@ -39,6 +39,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? GetSettingsException { get; set; }
     public Exception? SetRecordingSettingsException { get; set; }
     public Exception? SetHostnameResolutionSettingsException { get; set; }
+    public Exception? SetAlertSettingsException { get; set; }
 
     // Optional canned snapshot/response bodies so tests can drive real data
     // through the seeding path. Existing callers that don't set these get the
@@ -100,6 +101,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Func<GetSettingsRequest, CancellationToken, Task<GetSettingsResponse>>? AsyncGetSettingsResponder { get; set; }
     public Func<SetRecordingSettingsRequest, SetRecordingSettingsResponse>? SetRecordingSettingsResponder { get; set; }
     public Func<SetHostnameResolutionSettingsRequest, SetHostnameResolutionSettingsResponse>? SetHostnameResolutionSettingsResponder { get; set; }
+    public Func<SetAlertSettingsRequest, SetAlertSettingsResponse>? SetAlertSettingsResponder { get; set; }
 
     // Captured invocations for assertions.
     public List<ApplyFirewallRuleRequest> ApplyFirewallRuleCalls { get; } = new();
@@ -114,6 +116,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public List<GetSettingsRequest> GetSettingsCalls { get; } = new();
     public List<SetRecordingSettingsRequest> SetRecordingSettingsCalls { get; } = new();
     public List<SetHostnameResolutionSettingsRequest> SetHostnameResolutionSettingsCalls { get; } = new();
+    public List<SetAlertSettingsRequest> SetAlertSettingsCalls { get; } = new();
     // Responder variant for tests that need the CancellationToken the VM
     // passed (e.g., cancellation-plumbing tests). Takes precedence over
     // AggregateTimelineResponse when set.
@@ -304,6 +307,17 @@ internal sealed class FakeDaemonClient : IDaemonClient {
             ?? new SetHostnameResolutionSettingsResponse {
                 Success = true,
                 Values = request.Values ?? new HostnameResolutionSettingsValues(),
+            });
+    }
+
+    public Task<SetAlertSettingsResponse> SetAlertSettingsAsync(
+        SetAlertSettingsRequest request, CancellationToken cancellationToken) {
+        SetAlertSettingsCalls.Add(request);
+        if (SetAlertSettingsException is not null) throw SetAlertSettingsException;
+        return Task.FromResult(SetAlertSettingsResponder?.Invoke(request)
+            ?? new SetAlertSettingsResponse {
+                Success = true,
+                Values = request.Values ?? new AlertSettingsValues(),
             });
     }
 

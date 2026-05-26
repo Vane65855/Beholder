@@ -438,14 +438,23 @@ message HostnameResolutionSettingsValues {
   bool enable_sni_capture = 3;
 }
 
+// Mirrors Beholder.Core.AlertSettingsSnapshot. Shared across the get + set
+// surface for the Alerts section (Phase 13.3).
+message AlertSettingsValues {
+  bool enable_new_process_detection = 1;
+  bool enable_hash_change_detection = 2;
+  bool enable_chain_integrity_monitor = 3;
+}
+
 message GetSettingsRequest {}
 
 // Bulk-read of every Settings section the UI renders. Future sub-phases
-// (13.3 Alerts, 13.4 Scanner, 13.5 Storage) add their own value sub-messages
-// here; existing fields stay stable.
+// (13.4 Scanner, 13.5 Storage) add their own value sub-messages here;
+// existing fields stay stable.
 message GetSettingsResponse {
   RecordingSettingsValues recording = 1;
   HostnameResolutionSettingsValues hostname_resolution = 2;
+  AlertSettingsValues alerts = 3;
 }
 
 message SetRecordingSettingsRequest {
@@ -471,6 +480,16 @@ message SetHostnameResolutionSettingsResponse {
   bool success = 1;
   string message = 2;
   HostnameResolutionSettingsValues values = 3;
+}
+
+message SetAlertSettingsRequest {
+  AlertSettingsValues values = 1;
+}
+
+message SetAlertSettingsResponse {
+  bool success = 1;
+  string message = 2;
+  AlertSettingsValues values = 3;
 }
 
 // ---- Storage stats (Phase 13.1) ----
@@ -549,4 +568,6 @@ service BeholderLocal {
   rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
   rpc SetRecordingSettings(SetRecordingSettingsRequest) returns (SetRecordingSettingsResponse);
   rpc SetHostnameResolutionSettings(SetHostnameResolutionSettingsRequest) returns (SetHostnameResolutionSettingsResponse);
+  // Phase 13.3 — Settings tab Alerts section
+  rpc SetAlertSettings(SetAlertSettingsRequest) returns (SetAlertSettingsResponse);
 }

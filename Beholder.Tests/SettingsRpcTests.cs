@@ -19,6 +19,7 @@ public sealed class SettingsRpcTests : IDisposable {
     private readonly SqliteEventStore _eventStore;
     private readonly FakeRecordingSettingsState _recordingState;
     private readonly FakeHostnameResolutionSettingsState _hostnameState;
+    private readonly FakeAlertSettingsState _alertState;
     private readonly FakeSettingsOverridesStore _overridesStore;
     private readonly BroadcastService _broadcaster;
     private readonly BeholderLocalService _service;
@@ -33,6 +34,7 @@ public sealed class SettingsRpcTests : IDisposable {
         _eventStore = new SqliteEventStore(connectionFactory, timeProvider);
         _recordingState = new FakeRecordingSettingsState(initialFilterSelfTraffic: true);
         _hostnameState = new FakeHostnameResolutionSettingsState();
+        _alertState = new FakeAlertSettingsState();
         _overridesStore = new FakeSettingsOverridesStore();
         _broadcaster = new BroadcastService(
             new FakeSnapshotBatchSource(), timeProvider, NullLogger<BroadcastService>.Instance);
@@ -50,7 +52,7 @@ public sealed class SettingsRpcTests : IDisposable {
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
-            _recordingState, _hostnameState, _overridesStore,
+            _recordingState, _hostnameState, _alertState, _overridesStore,
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
@@ -208,5 +210,93 @@ public sealed class SettingsRpcTests : IDisposable {
                 new Local.SetHostnameResolutionSettingsRequest(), context));
 
         Assert.Equal(StatusCode.InvalidArgument, ex.StatusCode);
+    }
+
+    // ---- Phase 13.3: Alerts ----
+
+    [Fact]
+    public async Task GetSettings_IncludesAlertsBundle() {
+        _alertState.SetSettings(
+            enableNewProcessDetection: false,
+            enableHashChangeDetection: true,
+            enableChainIntegrityMonitor: false);
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.GetSettings(new Local.GetSettingsRequest(), context);
+
+        Assert.NotNull(response.Alerts);
+        Assert.False(response.Alerts.EnableNewProcessDetection);
+        Assert.True(response.Alerts.EnableHashChangeDetection);
+        Assert.False(response.Alerts.EnableChainIntegrityMonitor);
+    }
+
+    [Fact]
+    public async Task SetAlertSettings_RealTransition_PersistsAllThreeKeysAndChainsOnce() {
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.SetAlertSettings(
+            new Local.SetAlertSettingsRequest {
+                Values = new Local.AlertSettingsValues {
+                    EnableNewProcessDetection = false,
+                    EnableHashChangeDetection = false,
+                    EnableChainIntegrityMonitor = false,
+                },
+            }, context);
+
+        Assert.True(response.Success);
+        Assert.False(response.Values.EnableNewProcessDetection);
+        Assert.False(response.Values.EnableHashChangeDetection);
+        Assert.False(response.Values.EnableChainIntegrityMonitor);
+        Assert.Equal(3, _overridesStore.UpsertCallCount);
+        var verification = await _eventStore.VerifyAsync(CancellationToken.None);
+        Assert.Equal(1, verification.RowsVerified);
+    }
+
+    [Fact]
+    public async Task SetAlertSettings_NoOp_SkipsPersistenceAndChain() {
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+        // _alertState seeded with all three = true (FakeAlertSettingsState default).
+
+        var response = await _service.SetAlertSettings(
+            new Local.SetAlertSettingsRequest {
+                Values = new Local.AlertSettingsValues {
+                    EnableNewProcessDetection = true,
+                    EnableHashChangeDetection = true,
+                    EnableChainIntegrityMonitor = true,
+                },
+            }, context);
+
+        Assert.True(response.Success);
+        Assert.Equal(0, _overridesStore.UpsertCallCount);
+        var verification = await _eventStore.VerifyAsync(CancellationToken.None);
+        Assert.Equal(0, verification.RowsVerified);
+    }
+
+    [Fact]
+    public async Task SetAlertSettings_NullValues_ThrowsInvalidArgument() {
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var ex = await Assert.ThrowsAsync<RpcException>(
+            () => _service.SetAlertSettings(new Local.SetAlertSettingsRequest(), context));
+
+        Assert.Equal(StatusCode.InvalidArgument, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task SetAlertSettings_PersistenceFails_ReturnsSoftFailure() {
+        _overridesStore.ThrowOnUpsert = true;
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.SetAlertSettings(
+            new Local.SetAlertSettingsRequest {
+                Values = new Local.AlertSettingsValues {
+                    EnableNewProcessDetection = false,
+                    EnableHashChangeDetection = false,
+                    EnableChainIntegrityMonitor = false,
+                },
+            }, context);
+
+        Assert.False(response.Success);
+        Assert.Contains("Failed to persist", response.Message);
     }
 }

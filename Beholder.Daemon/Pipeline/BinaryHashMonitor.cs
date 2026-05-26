@@ -29,6 +29,7 @@ internal sealed class BinaryHashMonitor : IHostedService, IDisposable {
     private readonly IProcessRegistry _processRegistry;
     private readonly IAlertEmitter _alertEmitter;
     private readonly IOptionsMonitor<AlertOptions> _options;
+    private readonly IAlertSettingsState _alertSettings;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<BinaryHashMonitor> _logger;
 
@@ -40,17 +41,24 @@ internal sealed class BinaryHashMonitor : IHostedService, IDisposable {
         IProcessRegistry processRegistry,
         IAlertEmitter alertEmitter,
         IOptionsMonitor<AlertOptions> options,
+        IAlertSettingsState alertSettings,
         TimeProvider timeProvider,
         ILogger<BinaryHashMonitor> logger
     ) {
         ArgumentNullException.ThrowIfNull(processRegistry);
         ArgumentNullException.ThrowIfNull(alertEmitter);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(alertSettings);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _processRegistry = processRegistry;
         _alertEmitter = alertEmitter;
+        // Phase 13.3: numeric thresholds (interval, file-hash timeout) stay on
+        // IOptionsMonitor<AlertOptions> — they're JSON-only advanced tuning.
+        // The bool kill-switch moves to the runtime-mutable state singleton
+        // so the SetAlertSettings RPC takes effect on the next tick.
         _options = options;
+        _alertSettings = alertSettings;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -107,7 +115,7 @@ internal sealed class BinaryHashMonitor : IHostedService, IDisposable {
     /// no-op.
     /// </summary>
     internal async Task SweepOnceAsync(CancellationToken cancellationToken) {
-        if (!_options.CurrentValue.EnableHashChangeDetection) return;
+        if (!_alertSettings.EnableHashChangeDetection) return;
 
         IReadOnlyList<ProcessInfo> entries;
         try {

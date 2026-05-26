@@ -64,6 +64,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeAlertSettingsState(),
             new FakeSettingsOverridesStore(),
             _timeProvider,
             NullLogger<BeholderLocalService>.Instance);
@@ -176,6 +177,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeAlertSettingsState(),
             new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
@@ -255,6 +257,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeAlertSettingsState(),
             new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 

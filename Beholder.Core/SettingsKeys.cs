@@ -20,4 +20,10 @@ public static class SettingsKeys {
     public const string DnsEnableReverseDnsFallback = "Dns.EnableReverseDnsFallback";
 
     public const string SniEnableSniCapture = "Sni.EnableSniCapture";
+
+    public const string AlertEnableNewProcessDetection = "Alert.EnableNewProcessDetection";
+    public const string AlertEnableHashChangeDetection = "Alert.EnableHashChangeDetection";
+    public const string AlertEnableChainIntegrityMonitor = "Alert.EnableChainIntegrityMonitor";
+
+    public const string ScannerEnableHostnameResolution = "Scanner.EnableHostnameResolution";
 }

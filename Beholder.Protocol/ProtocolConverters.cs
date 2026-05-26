@@ -200,6 +200,29 @@ internal static class ProtocolConverters {
     }
 
     /// <summary>
+    /// Maps an Alert settings snapshot onto its wire value message (Phase 13.3).
+    /// </summary>
+    public static Local.AlertSettingsValues ToProto(this Core.AlertSettingsSnapshot source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Local.AlertSettingsValues {
+            EnableNewProcessDetection = source.EnableNewProcessDetection,
+            EnableHashChangeDetection = source.EnableHashChangeDetection,
+            EnableChainIntegrityMonitor = source.EnableChainIntegrityMonitor,
+        };
+    }
+
+    /// <summary>
+    /// Maps a wire Alert settings value message back to the domain snapshot.
+    /// </summary>
+    public static Core.AlertSettingsSnapshot ToDomain(this Local.AlertSettingsValues source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Core.AlertSettingsSnapshot(
+            EnableNewProcessDetection: source.EnableNewProcessDetection,
+            EnableHashChangeDetection: source.EnableHashChangeDetection,
+            EnableChainIntegrityMonitor: source.EnableChainIntegrityMonitor);
+    }
+
+    /// <summary>
     /// Maps a Hostname Resolution settings snapshot onto its wire value message.
     /// </summary>
     public static Local.HostnameResolutionSettingsValues ToProto(this Core.HostnameResolutionSettingsSnapshot source) {

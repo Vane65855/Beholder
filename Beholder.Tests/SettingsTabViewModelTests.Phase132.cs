@@ -38,13 +38,21 @@ public class SettingsTabViewModelTestsPhase132 {
         bool filterSelfTraffic = true,
         bool enablePreload = true,
         bool enableReverseDnsFallback = true,
-        bool enableSniCapture = true
+        bool enableSniCapture = true,
+        bool enableNewProcessDetection = true,
+        bool enableHashChangeDetection = true,
+        bool enableChainIntegrityMonitor = true
     ) => new() {
         Recording = new RecordingSettingsValues { FilterSelfTraffic = filterSelfTraffic },
         HostnameResolution = new HostnameResolutionSettingsValues {
             EnablePreload = enablePreload,
             EnableReverseDnsFallback = enableReverseDnsFallback,
             EnableSniCapture = enableSniCapture,
+        },
+        Alerts = new AlertSettingsValues {
+            EnableNewProcessDetection = enableNewProcessDetection,
+            EnableHashChangeDetection = enableHashChangeDetection,
+            EnableChainIntegrityMonitor = enableChainIntegrityMonitor,
         },
     };
 
@@ -135,6 +143,66 @@ public class SettingsTabViewModelTestsPhase132 {
         Assert.False(vm.HostnameResolution.IsSavingPreload);
         Assert.True(vm.HasError);
         Assert.Contains("network down", vm.ErrorMessage);
+    }
+
+    // ---- Phase 13.3: Alerts ----
+
+    [Fact]
+    public async Task ActivateAsync_LoadsAlertsAlongsideOtherSections() {
+        var (vm, _) = CreateVm(MakeSettings(
+            enableNewProcessDetection: false,
+            enableHashChangeDetection: true,
+            enableChainIntegrityMonitor: false));
+
+        await vm.ActivateAsync(CancellationToken.None);
+
+        Assert.False(vm.Alerts.EnableNewProcessDetection);
+        Assert.True(vm.Alerts.EnableHashChangeDetection);
+        Assert.False(vm.Alerts.EnableChainIntegrityMonitor);
+    }
+
+    [Fact]
+    public async Task ToggleEnableNewProcessDetection_Success_FlipsAndSendsAllThreeBools() {
+        var (vm, client) = CreateVm(MakeSettings(
+            enableNewProcessDetection: true,
+            enableHashChangeDetection: true,
+            enableChainIntegrityMonitor: true));
+        await vm.ActivateAsync(CancellationToken.None);
+        client.SetAlertSettingsResponder = req => new SetAlertSettingsResponse {
+            Success = true,
+            Values = req.Values,
+        };
+
+        await vm.ToggleEnableNewProcessDetectionCommand.ExecuteAsync(null);
+
+        Assert.Single(client.SetAlertSettingsCalls);
+        var sent = client.SetAlertSettingsCalls[0].Values;
+        Assert.False(sent.EnableNewProcessDetection);   // flipped
+        Assert.True(sent.EnableHashChangeDetection);     // unchanged
+        Assert.True(sent.EnableChainIntegrityMonitor);   // unchanged
+        Assert.False(vm.Alerts.EnableNewProcessDetection);
+        Assert.False(vm.Alerts.IsSavingNewProcessDetection);
+        Assert.False(vm.HasError);
+    }
+
+    [Fact]
+    public async Task ToggleEnableHashChangeDetection_Failure_RevertsAndShowsError() {
+        var (vm, client) = CreateVm(MakeSettings(
+            enableNewProcessDetection: true,
+            enableHashChangeDetection: true,
+            enableChainIntegrityMonitor: true));
+        await vm.ActivateAsync(CancellationToken.None);
+        client.SetAlertSettingsException = new InvalidOperationException("daemon offline");
+
+        await vm.ToggleEnableHashChangeDetectionCommand.ExecuteAsync(null);
+
+        // All three reverted to pre-toggle values.
+        Assert.True(vm.Alerts.EnableNewProcessDetection);
+        Assert.True(vm.Alerts.EnableHashChangeDetection);
+        Assert.True(vm.Alerts.EnableChainIntegrityMonitor);
+        Assert.False(vm.Alerts.IsSavingHashChangeDetection);
+        Assert.True(vm.HasError);
+        Assert.Contains("daemon offline", vm.ErrorMessage);
     }
 
     [Fact]
