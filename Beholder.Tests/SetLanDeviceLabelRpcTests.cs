@@ -38,6 +38,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
+            new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
@@ -144,6 +145,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
+            new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
             TimeProvider.System, NullLogger<BeholderLocalService>.Instance);
 
@@ -183,6 +185,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
+            new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
             TimeProvider.System, NullLogger<BeholderLocalService>.Instance);
 

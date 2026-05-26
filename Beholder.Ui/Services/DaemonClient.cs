@@ -270,6 +270,13 @@ internal sealed class DaemonClient : IDaemonClient {
         return await client.SetAlertSettingsAsync(request, cancellationToken: cancellationToken);
     }
 
+    public async Task<SetScannerSettingsResponse> SetScannerSettingsAsync(
+        SetScannerSettingsRequest request, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(request);
+        var client = GetConnectedClient();
+        return await client.SetScannerSettingsAsync(request, cancellationToken: cancellationToken);
+    }
+
     public AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken cancellationToken) {
         var client = GetConnectedClient();
         return client.Subscribe(new SubscribeRequest(), cancellationToken: cancellationToken);

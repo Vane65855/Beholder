@@ -223,6 +223,24 @@ internal static class ProtocolConverters {
     }
 
     /// <summary>
+    /// Maps a Scanner settings snapshot onto its wire value message (Phase 13.4).
+    /// </summary>
+    public static Local.ScannerSettingsValues ToProto(this Core.ScannerSettingsSnapshot source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Local.ScannerSettingsValues {
+            EnableHostnameResolution = source.EnableHostnameResolution,
+        };
+    }
+
+    /// <summary>
+    /// Maps a wire Scanner settings value message back to the domain snapshot.
+    /// </summary>
+    public static Core.ScannerSettingsSnapshot ToDomain(this Local.ScannerSettingsValues source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Core.ScannerSettingsSnapshot(source.EnableHostnameResolution);
+    }
+
+    /// <summary>
     /// Maps a Hostname Resolution settings snapshot onto its wire value message.
     /// </summary>
     public static Local.HostnameResolutionSettingsValues ToProto(this Core.HostnameResolutionSettingsSnapshot source) {

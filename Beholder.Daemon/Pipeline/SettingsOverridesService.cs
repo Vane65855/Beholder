@@ -29,6 +29,7 @@ internal sealed class SettingsOverridesService : IHostedService {
     private readonly IRecordingSettingsState _recordingState;
     private readonly IHostnameResolutionSettingsState _hostnameResolutionState;
     private readonly IAlertSettingsState _alertState;
+    private readonly IScannerSettingsState _scannerState;
     private readonly ILogger<SettingsOverridesService> _logger;
 
     public SettingsOverridesService(
@@ -36,17 +37,20 @@ internal sealed class SettingsOverridesService : IHostedService {
         IRecordingSettingsState recordingState,
         IHostnameResolutionSettingsState hostnameResolutionState,
         IAlertSettingsState alertState,
+        IScannerSettingsState scannerState,
         ILogger<SettingsOverridesService> logger
     ) {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(recordingState);
         ArgumentNullException.ThrowIfNull(hostnameResolutionState);
         ArgumentNullException.ThrowIfNull(alertState);
+        ArgumentNullException.ThrowIfNull(scannerState);
         ArgumentNullException.ThrowIfNull(logger);
         _store = store;
         _recordingState = recordingState;
         _hostnameResolutionState = hostnameResolutionState;
         _alertState = alertState;
+        _scannerState = scannerState;
         _logger = logger;
     }
 
@@ -90,6 +94,11 @@ internal sealed class SettingsOverridesService : IHostedService {
         var enableChainIntegrityMonitor = ReadBoolOverride(
             overrides, SettingsKeys.AlertEnableChainIntegrityMonitor, _alertState.EnableChainIntegrityMonitor);
         _alertState.SetSettings(enableNewProcessDetection, enableHashChangeDetection, enableChainIntegrityMonitor);
+
+        // Apply the Scanner section.
+        var enableHostnameResolution = ReadBoolOverride(
+            overrides, SettingsKeys.ScannerEnableHostnameResolution, _scannerState.EnableHostnameResolution);
+        _scannerState.SetSettings(enableHostnameResolution);
 
         _logger.LogInformation(
             "Applied {Count} settings overrides at startup", overrides.Count);

@@ -158,18 +158,23 @@ if (OperatingSystem.IsWindows()) {
         logger: sp.GetRequiredService<ILogger<HostnameResolutionLadder>>()));
 
     builder.Services.AddSingleton<ILanDeviceProbe>(sp => {
-        var enableHostnameResolution = sp.GetRequiredService<IOptionsMonitor<ScannerOptions>>()
-            .CurrentValue.EnableHostnameResolution;
+        // Phase 13.4: probes are always injected — the IScannerSettingsState
+        // toggle gates whether they run inside WindowsLanDeviceProbe.ScanAsync.
+        // This pattern (live read at scan time) makes the toggle take effect
+        // on the next scan tick AND sidesteps the construction-vs-StartAsync
+        // ordering problem: the factory previously read the state singleton's
+        // value at construction time, but SettingsOverridesService.StartAsync
+        // applies persisted overrides AFTER all hosted services are
+        // constructed but BEFORE any StartAsync runs. Reading at scan time
+        // (which is always after StartAsync) lands the user's override
+        // correctly.
         return new WindowsLanDeviceProbe(
             arpProbe: sp.GetRequiredService<ArpScanProbe>(),
             timeProvider: sp.GetRequiredService<TimeProvider>(),
             logger: sp.GetRequiredService<ILogger<WindowsLanDeviceProbe>>(),
-            hostnameResolutionLadder: enableHostnameResolution
-                ? sp.GetRequiredService<HostnameResolutionLadder>()
-                : null,
-            mdnsServiceDiscoveryProbe: enableHostnameResolution
-                ? sp.GetRequiredService<MdnsServiceDiscoveryProbe>()
-                : null);
+            hostnameResolutionLadder: sp.GetRequiredService<HostnameResolutionLadder>(),
+            mdnsServiceDiscoveryProbe: sp.GetRequiredService<MdnsServiceDiscoveryProbe>(),
+            scannerSettings: sp.GetRequiredService<IScannerSettingsState>());
     });
 
     builder.Services.Configure<ScannerOptions>(builder.Configuration.GetSection("Scanner"));
@@ -201,6 +206,7 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<IRecordingSettingsState, RecordingSettingsState>();
     builder.Services.AddSingleton<IHostnameResolutionSettingsState, HostnameResolutionSettingsState>();
     builder.Services.AddSingleton<IAlertSettingsState, AlertSettingsState>();
+    builder.Services.AddSingleton<IScannerSettingsState, ScannerSettingsState>();
     builder.Services.AddSingleton<ISettingsOverridesStore>(sp => new SqliteSettingsOverridesStore(
         sp.GetRequiredService<ConnectionFactory>(),
         sp.GetRequiredService<TimeProvider>()));

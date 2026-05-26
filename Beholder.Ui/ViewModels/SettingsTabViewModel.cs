@@ -138,6 +138,9 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
     /// <summary>Phase 13.3: Alerts section state.</summary>
     public AlertSettingsRow Alerts { get; } = new();
 
+    /// <summary>Phase 13.4: Scanner section state.</summary>
+    public ScannerSettingsRow Scanner { get; } = new();
+
     /// <summary>Cyan-tinted share of the stacked total bar — sum of all
     /// traffic-tier rows divided by grand total. Falls back to 0 when the
     /// database has no rows.</summary>
@@ -351,6 +354,9 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
             Alerts.EnableNewProcessDetection = response.Alerts.EnableNewProcessDetection;
             Alerts.EnableHashChangeDetection = response.Alerts.EnableHashChangeDetection;
             Alerts.EnableChainIntegrityMonitor = response.Alerts.EnableChainIntegrityMonitor;
+        }
+        if (response.Scanner is not null) {
+            Scanner.EnableHostnameResolution = response.Scanner.EnableHostnameResolution;
         }
     }
 
@@ -645,6 +651,46 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
             case AlertToggle.ChainIntegrityMonitor:
                 Alerts.IsSavingChainIntegrityMonitor = value;
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Phase 13.4: optimistic-flip for the Scanner section's single toggle.
+    /// Inlined (no shared helper) because the section has only one bool —
+    /// the dispatch overhead the helper exists to avoid doesn't apply.
+    /// </summary>
+    [RelayCommand]
+    private async Task ToggleEnableHostnameResolution() {
+        if (Scanner.IsSavingHostnameResolution) return;
+        var previous = Scanner.EnableHostnameResolution;
+        var next = !previous;
+        Scanner.EnableHostnameResolution = next;
+        Scanner.IsSavingHostnameResolution = true;
+        try {
+            var response = await _daemonClient.SetScannerSettingsAsync(
+                new SetScannerSettingsRequest {
+                    Values = new ScannerSettingsValues { EnableHostnameResolution = next },
+                },
+                CancellationToken.None);
+            if (response.Success && response.Values is not null) {
+                Scanner.EnableHostnameResolution = response.Values.EnableHostnameResolution;
+            } else {
+                Scanner.EnableHostnameResolution = previous;
+                HasError = true;
+                ErrorMessage = string.IsNullOrEmpty(response.Message)
+                    ? "Failed to save Scanner settings."
+                    : response.Message;
+            }
+        } catch (RpcException ex) {
+            Scanner.EnableHostnameResolution = previous;
+            HasError = true;
+            ErrorMessage = $"Failed to save Scanner settings: {ex.Status.Detail}";
+        } catch (Exception ex) {
+            Scanner.EnableHostnameResolution = previous;
+            HasError = true;
+            ErrorMessage = $"Failed to save Scanner settings: {ex.Message}";
+        } finally {
+            Scanner.IsSavingHostnameResolution = false;
         }
     }
 

@@ -608,6 +608,34 @@
                             </Grid>
                         </Border>
 
+                        <!-- ──────────  SCANNER  ────────── -->
+                        <Border x:Name="ScannerCard" Classes="sectionCard">
+                            <Grid>
+                                <Border Classes="accentStripe cyan" />
+                                <StackPanel Orientation="Vertical" Spacing="16">
+                                    <TextBlock Classes="sectionTitle" Text="SCANNER" />
+
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="Hostname resolution"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <TextBlock Text="On each LAN scan, run mDNS service-discovery + the per-IP hostname ladder (mDNS-PTR, NetBIOS, router-DNS) to populate device names. Disable for pure passive discovery — hostnames will stay empty for newly observed devices."
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <controls:SettingsTogglePill Grid.Column="1"
+                                                                     IsOn="{Binding Scanner.EnableHostnameResolution}"
+                                                                     IsSaving="{Binding Scanner.IsSavingHostnameResolution}"
+                                                                     Command="{Binding ToggleEnableHostnameResolutionCommand}"
+                                                                     VerticalAlignment="Center" />
+                                    </Grid>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
                         <!-- ──────────  MAINTENANCE  ────────── -->
                         <Border x:Name="MaintenanceCard" Classes="sectionCard">
                             <Grid>

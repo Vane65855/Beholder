@@ -55,6 +55,7 @@ public sealed class VerifyChainTests : IDisposable {
             _chainStatusCache, new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
+            new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
@@ -178,6 +179,7 @@ public sealed class VerifyChainTests : IDisposable {
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
+            new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 

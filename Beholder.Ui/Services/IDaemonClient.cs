@@ -34,5 +34,6 @@ internal interface IDaemonClient : IAsyncDisposable {
     Task<SetRecordingSettingsResponse> SetRecordingSettingsAsync(SetRecordingSettingsRequest request, CancellationToken cancellationToken);
     Task<SetHostnameResolutionSettingsResponse> SetHostnameResolutionSettingsAsync(SetHostnameResolutionSettingsRequest request, CancellationToken cancellationToken);
     Task<SetAlertSettingsResponse> SetAlertSettingsAsync(SetAlertSettingsRequest request, CancellationToken cancellationToken);
+    Task<SetScannerSettingsResponse> SetScannerSettingsAsync(SetScannerSettingsRequest request, CancellationToken cancellationToken);
     Grpc.Core.AsyncServerStreamingCall<DaemonEvent> Subscribe(CancellationToken cancellationToken);
 }

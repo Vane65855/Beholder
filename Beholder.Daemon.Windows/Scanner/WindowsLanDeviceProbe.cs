@@ -36,6 +36,7 @@ public sealed class WindowsLanDeviceProbe : ILanDeviceProbe {
     private readonly ArpScanProbe _arpProbe;
     private readonly HostnameResolutionLadder? _hostnameResolutionLadder;
     private readonly MdnsServiceDiscoveryProbe? _mdnsServiceDiscoveryProbe;
+    private readonly IScannerSettingsState? _scannerSettings;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<WindowsLanDeviceProbe> _logger;
 
@@ -44,17 +45,29 @@ public sealed class WindowsLanDeviceProbe : ILanDeviceProbe {
         TimeProvider timeProvider,
         ILogger<WindowsLanDeviceProbe> logger,
         HostnameResolutionLadder? hostnameResolutionLadder = null,
-        MdnsServiceDiscoveryProbe? mdnsServiceDiscoveryProbe = null
+        MdnsServiceDiscoveryProbe? mdnsServiceDiscoveryProbe = null,
+        IScannerSettingsState? scannerSettings = null
     ) {
         ArgumentNullException.ThrowIfNull(arpProbe);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _arpProbe = arpProbe;
+        // Phase 13.4: probes are always injected (no longer null-gated at
+        // construction). The IScannerSettingsState toggle gates whether they
+        // actually run per scan, so the SetScannerSettings RPC takes effect
+        // on the next scan tick. When the state singleton is null (test
+        // fixtures that don't exercise the toggle), the probes themselves
+        // determine whether they run via their nullable refs — preserves
+        // the pre-13.4 test contract.
         _hostnameResolutionLadder = hostnameResolutionLadder;
         _mdnsServiceDiscoveryProbe = mdnsServiceDiscoveryProbe;
+        _scannerSettings = scannerSettings;
         _timeProvider = timeProvider;
         _logger = logger;
     }
+
+    private bool ShouldRunHostnameResolution()
+        => _scannerSettings?.EnableHostnameResolution ?? true;
 
     public async Task<IReadOnlyList<LanDeviceObservation>> ScanAsync(CancellationToken cancellationToken) {
         var subnet = TryGetPrimarySubnet();
@@ -101,8 +114,10 @@ public sealed class WindowsLanDeviceProbe : ILanDeviceProbe {
         // single multicast send-and-wait rather than per-IP and (b) it
         // catches the modern majority of Bonjour-style LAN devices.
         // Skipped entirely when the kill-switch is disabled.
+        var hostnameResolutionEnabled = ShouldRunHostnameResolution();
+
         var sdHits = 0;
-        if (_mdnsServiceDiscoveryProbe is not null && merged.Count > 0) {
+        if (hostnameResolutionEnabled && _mdnsServiceDiscoveryProbe is not null && merged.Count > 0) {
             var sdHostnames = await _mdnsServiceDiscoveryProbe.BrowseAsync(cancellationToken)
                 .ConfigureAwait(false);
             foreach (var ip in merged.Keys.ToList()) {
@@ -119,7 +134,7 @@ public sealed class WindowsLanDeviceProbe : ILanDeviceProbe {
         // machines with NetBIOS still enabled, plus residual NAT/minimal
         // home routers). Same dictionary patch as the SD pass.
         var ladderHits = 0;
-        if (_hostnameResolutionLadder is not null) {
+        if (hostnameResolutionEnabled && _hostnameResolutionLadder is not null) {
             var ipsNeedingLadder = merged.Values
                 .Where(o => string.IsNullOrEmpty(o.Hostname))
                 .Select(o => IPAddress.Parse(o.Ip))

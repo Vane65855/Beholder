@@ -46,6 +46,7 @@ public sealed class ListFirewallRulesRpcTests : IDisposable {
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
+            new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }

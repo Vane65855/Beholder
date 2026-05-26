@@ -40,6 +40,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? SetRecordingSettingsException { get; set; }
     public Exception? SetHostnameResolutionSettingsException { get; set; }
     public Exception? SetAlertSettingsException { get; set; }
+    public Exception? SetScannerSettingsException { get; set; }
 
     // Optional canned snapshot/response bodies so tests can drive real data
     // through the seeding path. Existing callers that don't set these get the
@@ -102,6 +103,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Func<SetRecordingSettingsRequest, SetRecordingSettingsResponse>? SetRecordingSettingsResponder { get; set; }
     public Func<SetHostnameResolutionSettingsRequest, SetHostnameResolutionSettingsResponse>? SetHostnameResolutionSettingsResponder { get; set; }
     public Func<SetAlertSettingsRequest, SetAlertSettingsResponse>? SetAlertSettingsResponder { get; set; }
+    public Func<SetScannerSettingsRequest, SetScannerSettingsResponse>? SetScannerSettingsResponder { get; set; }
 
     // Captured invocations for assertions.
     public List<ApplyFirewallRuleRequest> ApplyFirewallRuleCalls { get; } = new();
@@ -117,6 +119,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public List<SetRecordingSettingsRequest> SetRecordingSettingsCalls { get; } = new();
     public List<SetHostnameResolutionSettingsRequest> SetHostnameResolutionSettingsCalls { get; } = new();
     public List<SetAlertSettingsRequest> SetAlertSettingsCalls { get; } = new();
+    public List<SetScannerSettingsRequest> SetScannerSettingsCalls { get; } = new();
     // Responder variant for tests that need the CancellationToken the VM
     // passed (e.g., cancellation-plumbing tests). Takes precedence over
     // AggregateTimelineResponse when set.
@@ -318,6 +321,17 @@ internal sealed class FakeDaemonClient : IDaemonClient {
             ?? new SetAlertSettingsResponse {
                 Success = true,
                 Values = request.Values ?? new AlertSettingsValues(),
+            });
+    }
+
+    public Task<SetScannerSettingsResponse> SetScannerSettingsAsync(
+        SetScannerSettingsRequest request, CancellationToken cancellationToken) {
+        SetScannerSettingsCalls.Add(request);
+        if (SetScannerSettingsException is not null) throw SetScannerSettingsException;
+        return Task.FromResult(SetScannerSettingsResponder?.Invoke(request)
+            ?? new SetScannerSettingsResponse {
+                Success = true,
+                Values = request.Values ?? new ScannerSettingsValues(),
             });
     }
 

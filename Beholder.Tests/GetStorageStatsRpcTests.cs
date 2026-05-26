@@ -42,6 +42,7 @@ public sealed class GetStorageStatsRpcTests : IDisposable {
             _chainStatusCache, _storageStatsProvider,
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
+            new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }

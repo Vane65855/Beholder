@@ -41,7 +41,8 @@ public class SettingsTabViewModelTestsPhase132 {
         bool enableSniCapture = true,
         bool enableNewProcessDetection = true,
         bool enableHashChangeDetection = true,
-        bool enableChainIntegrityMonitor = true
+        bool enableChainIntegrityMonitor = true,
+        bool enableHostnameResolution = true
     ) => new() {
         Recording = new RecordingSettingsValues { FilterSelfTraffic = filterSelfTraffic },
         HostnameResolution = new HostnameResolutionSettingsValues {
@@ -53,6 +54,9 @@ public class SettingsTabViewModelTestsPhase132 {
             EnableNewProcessDetection = enableNewProcessDetection,
             EnableHashChangeDetection = enableHashChangeDetection,
             EnableChainIntegrityMonitor = enableChainIntegrityMonitor,
+        },
+        Scanner = new ScannerSettingsValues {
+            EnableHostnameResolution = enableHostnameResolution,
         },
     };
 
@@ -223,5 +227,34 @@ public class SettingsTabViewModelTestsPhase132 {
         Assert.False(sent.EnablePreload);
         Assert.True(sent.EnableReverseDnsFallback);
         Assert.False(sent.EnableSniCapture);   // flipped from true
+    }
+
+    // ---- Phase 13.4: Scanner ----
+
+    [Fact]
+    public async Task ActivateAsync_LoadsScannerAlongsideOtherSections() {
+        var (vm, _) = CreateVm(MakeSettings(enableHostnameResolution: false));
+
+        await vm.ActivateAsync(CancellationToken.None);
+
+        Assert.False(vm.Scanner.EnableHostnameResolution);
+    }
+
+    [Fact]
+    public async Task ToggleEnableHostnameResolution_Success_FlipsAndCallsRpc() {
+        var (vm, client) = CreateVm(MakeSettings(enableHostnameResolution: true));
+        await vm.ActivateAsync(CancellationToken.None);
+        client.SetScannerSettingsResponder = req => new SetScannerSettingsResponse {
+            Success = true,
+            Values = req.Values,
+        };
+
+        await vm.ToggleEnableHostnameResolutionCommand.ExecuteAsync(null);
+
+        Assert.Single(client.SetScannerSettingsCalls);
+        Assert.False(client.SetScannerSettingsCalls[0].Values.EnableHostnameResolution);
+        Assert.False(vm.Scanner.EnableHostnameResolution);
+        Assert.False(vm.Scanner.IsSavingHostnameResolution);
+        Assert.False(vm.HasError);
     }
 }

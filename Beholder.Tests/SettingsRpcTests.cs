@@ -20,6 +20,7 @@ public sealed class SettingsRpcTests : IDisposable {
     private readonly FakeRecordingSettingsState _recordingState;
     private readonly FakeHostnameResolutionSettingsState _hostnameState;
     private readonly FakeAlertSettingsState _alertState;
+    private readonly FakeScannerSettingsState _scannerState;
     private readonly FakeSettingsOverridesStore _overridesStore;
     private readonly BroadcastService _broadcaster;
     private readonly BeholderLocalService _service;
@@ -35,6 +36,7 @@ public sealed class SettingsRpcTests : IDisposable {
         _recordingState = new FakeRecordingSettingsState(initialFilterSelfTraffic: true);
         _hostnameState = new FakeHostnameResolutionSettingsState();
         _alertState = new FakeAlertSettingsState();
+        _scannerState = new FakeScannerSettingsState();
         _overridesStore = new FakeSettingsOverridesStore();
         _broadcaster = new BroadcastService(
             new FakeSnapshotBatchSource(), timeProvider, NullLogger<BroadcastService>.Instance);
@@ -52,7 +54,7 @@ public sealed class SettingsRpcTests : IDisposable {
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
-            _recordingState, _hostnameState, _alertState, _overridesStore,
+            _recordingState, _hostnameState, _alertState, _scannerState, _overridesStore,
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
@@ -298,5 +300,64 @@ public sealed class SettingsRpcTests : IDisposable {
 
         Assert.False(response.Success);
         Assert.Contains("Failed to persist", response.Message);
+    }
+
+    // ---- Phase 13.4: Scanner ----
+
+    [Fact]
+    public async Task GetSettings_IncludesScannerBundle() {
+        _scannerState.SetSettings(false);
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.GetSettings(new Local.GetSettingsRequest(), context);
+
+        Assert.NotNull(response.Scanner);
+        Assert.False(response.Scanner.EnableHostnameResolution);
+    }
+
+    [Fact]
+    public async Task SetScannerSettings_RealTransition_PersistsAndAppendsChain() {
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.SetScannerSettings(
+            new Local.SetScannerSettingsRequest {
+                Values = new Local.ScannerSettingsValues { EnableHostnameResolution = false },
+            }, context);
+
+        Assert.True(response.Success);
+        Assert.False(response.Values.EnableHostnameResolution);
+        Assert.False(_scannerState.EnableHostnameResolution);
+        Assert.Equal(1, _overridesStore.UpsertCallCount);
+        var persisted = await _overridesStore.GetAsync(
+            SettingsKeys.ScannerEnableHostnameResolution, CancellationToken.None);
+        Assert.Equal("false", persisted);
+        var verification = await _eventStore.VerifyAsync(CancellationToken.None);
+        Assert.Equal(1, verification.RowsVerified);
+    }
+
+    [Fact]
+    public async Task SetScannerSettings_NoOp_SkipsPersistenceAndChain() {
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+        // _scannerState seeded with EnableHostnameResolution=true.
+
+        var response = await _service.SetScannerSettings(
+            new Local.SetScannerSettingsRequest {
+                Values = new Local.ScannerSettingsValues { EnableHostnameResolution = true },
+            }, context);
+
+        Assert.True(response.Success);
+        Assert.Equal(0, _overridesStore.UpsertCallCount);
+        var verification = await _eventStore.VerifyAsync(CancellationToken.None);
+        Assert.Equal(0, verification.RowsVerified);
+    }
+
+    [Fact]
+    public async Task SetScannerSettings_NullValues_ThrowsInvalidArgument() {
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var ex = await Assert.ThrowsAsync<RpcException>(
+            () => _service.SetScannerSettings(new Local.SetScannerSettingsRequest(), context));
+
+        Assert.Equal(StatusCode.InvalidArgument, ex.StatusCode);
     }
 }

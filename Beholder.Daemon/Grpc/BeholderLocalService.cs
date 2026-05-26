@@ -45,6 +45,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     private readonly IRecordingSettingsState _recordingSettings;
     private readonly IHostnameResolutionSettingsState _hostnameResolutionSettings;
     private readonly IAlertSettingsState _alertSettings;
+    private readonly IScannerSettingsState _scannerSettings;
     private readonly ISettingsOverridesStore _settingsOverridesStore;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<BeholderLocalService> _logger;
@@ -65,6 +66,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         IRecordingSettingsState recordingSettings,
         IHostnameResolutionSettingsState hostnameResolutionSettings,
         IAlertSettingsState alertSettings,
+        IScannerSettingsState scannerSettings,
         ISettingsOverridesStore settingsOverridesStore,
         TimeProvider timeProvider,
         ILogger<BeholderLocalService> logger
@@ -84,6 +86,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         ArgumentNullException.ThrowIfNull(recordingSettings);
         ArgumentNullException.ThrowIfNull(hostnameResolutionSettings);
         ArgumentNullException.ThrowIfNull(alertSettings);
+        ArgumentNullException.ThrowIfNull(scannerSettings);
         ArgumentNullException.ThrowIfNull(settingsOverridesStore);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
@@ -102,6 +105,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         _recordingSettings = recordingSettings;
         _hostnameResolutionSettings = hostnameResolutionSettings;
         _alertSettings = alertSettings;
+        _scannerSettings = scannerSettings;
         _settingsOverridesStore = settingsOverridesStore;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -412,6 +416,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
                 EnableNewProcessDetection: _alertSettings.EnableNewProcessDetection,
                 EnableHashChangeDetection: _alertSettings.EnableHashChangeDetection,
                 EnableChainIntegrityMonitor: _alertSettings.EnableChainIntegrityMonitor).ToProto(),
+            Scanner = new ScannerSettingsSnapshot(_scannerSettings.EnableHostnameResolution).ToProto(),
         };
         return Task.FromResult(response);
     }, context);
@@ -631,6 +636,61 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
                 EnableNewProcessDetection: _alertSettings.EnableNewProcessDetection,
                 EnableHashChangeDetection: _alertSettings.EnableHashChangeDetection,
                 EnableChainIntegrityMonitor: _alertSettings.EnableChainIntegrityMonitor).ToProto(),
+        };
+    }
+
+    /// <summary>
+    /// Phase 13.4: atomically updates the Scanner section's settings (a single
+    /// bool kill-switch for the LAN scanner's hostname-resolution pass). Same
+    /// contract as the other <c>Set*</c> handlers. Live read at scan time —
+    /// the toggle takes effect on the next scan tick, NOT on next daemon start
+    /// (see <see cref="WindowsLanDeviceProbe"/>'s ScanAsync gate).
+    /// </summary>
+    public override async Task<Local.SetScannerSettingsResponse> SetScannerSettings(
+        Local.SetScannerSettingsRequest request, ServerCallContext context
+    ) {
+        if (request.Values is null) {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "values is required"));
+        }
+
+        var ct = context.CancellationToken;
+        var requested = request.Values.EnableHostnameResolution;
+        var changed = _scannerSettings.SetSettings(requested);
+
+        if (changed) {
+            try {
+                await _settingsOverridesStore.UpsertAsync(
+                    SettingsKeys.ScannerEnableHostnameResolution,
+                    requested ? "true" : "false",
+                    ct).ConfigureAwait(false);
+            } catch (OperationCanceledException) {
+                throw;
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to persist Scanner settings override; in-memory state is updated but the change will not survive restart");
+                return new Local.SetScannerSettingsResponse {
+                    Success = false,
+                    Message = $"Failed to persist settings: {ex.Message}",
+                    Values = new ScannerSettingsSnapshot(_scannerSettings.EnableHostnameResolution).ToProto(),
+                };
+            }
+
+            try {
+                var payload = ScannerSettingsPayloadEncoder.Encode(requested, _timeProvider.GetUtcNow());
+                await _eventStore.AppendAsync(
+                    EventKind.ScannerSettingsChanged, payload, ct).ConfigureAwait(false);
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to append Scanner settings change to chain — change is applied but unaudited");
+            }
+            _logger.LogInformation(
+                "Scanner settings updated (EnableHostnameResolution={Enabled})", requested);
+        }
+
+        return new Local.SetScannerSettingsResponse {
+            Success = true,
+            Message = changed ? "Settings updated." : "Settings unchanged.",
+            Values = new ScannerSettingsSnapshot(_scannerSettings.EnableHostnameResolution).ToProto(),
         };
     }
 
