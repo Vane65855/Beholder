@@ -372,6 +372,11 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             // and can't remove processes that were populated via
             // GetProcessSummaries but aren't in the current live snapshot
             // (e.g., engine-evicted processes that only exist in SQL history).
+            // Phase 9.6: also clear the IP filter — live ProcessState carries
+            // per-process delta bytes only, not per-destination, so we can't
+            // honour the filter client-side. The chip going away is the
+            // visible signal that the filter doesn't apply in live mode.
+            RemoteAddressFilter = null;
             _historicalQueries.CancelInFlight();
             _processList.Clear();
             ChartDataSpan = null;

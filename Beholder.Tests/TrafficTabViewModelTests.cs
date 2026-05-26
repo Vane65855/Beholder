@@ -712,4 +712,42 @@ public class TrafficTabViewModelTests {
         Assert.True(task.IsCompletedSuccessfully);
         await task;
     }
+
+    [Fact]
+    public async Task RemoteAddressFilter_SurvivesHistoricalToHistoricalRangeChange() {
+        // Regression: changing time range between two historical presets
+        // must preserve the IP filter — the LoadHistoricalRangeAsync call
+        // re-reads RemoteAddressFilter and includes it in the query.
+        var vm = CreateViewModel();
+        vm.ApplyRemoteAddressFilter("192.168.1.42");
+        for (var i = 0; i < 10; i++) await Task.Yield();
+        Assert.True(vm.HasRemoteAddressFilter);
+        Assert.Equal(TimeRangePreset.Last1Hour, vm.SelectedTimeRange.Preset);
+
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last24Hours);
+        for (var i = 0; i < 10; i++) await Task.Yield();
+
+        Assert.True(vm.HasRemoteAddressFilter);
+        Assert.Equal("192.168.1.42", vm.RemoteAddressFilter);
+        Assert.Equal(TimeRangePreset.Last24Hours, vm.SelectedTimeRange.Preset);
+    }
+
+    [Fact]
+    public async Task RemoteAddressFilter_AutoClearsWhenSwitchingToLiveMode() {
+        // Live ProcessState carries per-process delta bytes only — no
+        // per-destination info — so the IP filter can't be applied
+        // client-side in live mode. Auto-clearing the filter makes the
+        // chip's visible state match the displayed data.
+        var vm = CreateViewModel();
+        vm.ApplyRemoteAddressFilter("192.168.1.42");
+        for (var i = 0; i < 10; i++) await Task.Yield();
+        Assert.True(vm.HasRemoteAddressFilter);
+
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last5Minutes);
+        for (var i = 0; i < 10; i++) await Task.Yield();
+
+        Assert.False(vm.HasRemoteAddressFilter);
+        Assert.Null(vm.RemoteAddressFilter);
+        Assert.True(vm.SelectedTimeRange.IsLive);
+    }
 }
