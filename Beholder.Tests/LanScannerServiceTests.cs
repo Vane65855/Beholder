@@ -52,12 +52,13 @@ public sealed class LanScannerServiceTests : IDisposable {
 
     [Fact]
     public async Task StartAsync_NullProbe_LogsWarningAndPerformsNoScans() {
+        var ct = TestContext.Current.CancellationToken;
         var probe = new FakeLanDeviceProbe();
         await using var service = CreateService(probe: null);
 
-        await service.StartAsync(CancellationToken.None);
-        await Task.Delay(50);
-        await service.StopAsync(CancellationToken.None);
+        await service.StartAsync(ct);
+        await Task.Delay(50, ct);
+        await service.StopAsync(ct);
 
         Assert.Equal(0, probe.ScanCount);
     }
@@ -297,7 +298,7 @@ public sealed class LanScannerServiceTests : IDisposable {
             await foreach (var ev in broadcaster.SubscribeAsync(subscriberCts.Token)) {
                 receivedEvents.Add(ev);
             }
-        });
+        }, TestContext.Current.CancellationToken);
         await WaitForAsync(() => broadcaster.ActiveSubscriberCount == 1);
 
         await using var service = CreateService(probe, broadcaster: broadcaster);
@@ -347,7 +348,7 @@ public sealed class LanScannerServiceTests : IDisposable {
             await foreach (var ev in broadcaster.SubscribeAsync(subscriberCts.Token)) {
                 receivedEvents.Add(ev);
             }
-        });
+        }, TestContext.Current.CancellationToken);
         await WaitForAsync(() => broadcaster.ActiveSubscriberCount == 1);
 
         await using var service = CreateService(probe, broadcaster: broadcaster);
@@ -398,7 +399,7 @@ public sealed class LanScannerServiceTests : IDisposable {
             await foreach (var ev in broadcaster.SubscribeAsync(subscriberCts.Token)) {
                 receivedEvents.Add(ev);
             }
-        });
+        }, TestContext.Current.CancellationToken);
         await WaitForAsync(() => broadcaster.ActiveSubscriberCount == 1);
 
         await using var service = CreateService(probe, broadcaster: broadcaster);
@@ -407,7 +408,7 @@ public sealed class LanScannerServiceTests : IDisposable {
         await service.StopAsync(CancellationToken.None);
 
         // Give any in-flight broadcast a brief chance to land before asserting.
-        await Task.Delay(50);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
         await subscriberCts.CancelAsync();
         try { await consumer; } catch (OperationCanceledException) { }
 
