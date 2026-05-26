@@ -250,6 +250,104 @@ public class SettingsTabViewModelTests {
         Assert.Single(client.GetStorageStatsCalls);
     }
 
+    // ---- Auto-recovery on daemon reconnect ----
+
+    [Fact]
+    public async Task ActivateAsync_AfterError_RetriesWhenCalledAgain() {
+        // The cold-start-race idempotency must not prevent retry: a
+        // failed initial load clears _activationTask so subsequent
+        // ActivateAsync calls (e.g., user switches tabs and comes back)
+        // re-attempt the load instead of handing back the cached failure.
+        var (vm, client, _, _, _) = CreateVm();
+        client.GetStorageStatsException = new RpcException(
+            new Status(StatusCode.Unavailable, "daemon offline"));
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.True(vm.HasError);
+        Assert.Single(client.GetStorageStatsCalls);
+
+        // Clear the failure mode — daemon is now responsive.
+        client.GetStorageStatsException = null;
+        client.GetStorageStatsResponder = _ => MakeStats(includeChainStatus: true);
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(vm.HasError);
+        Assert.NotNull(vm.StorageStats);
+        Assert.Equal(2, client.GetStorageStatsCalls.Count);
+    }
+
+    [Fact]
+    public async Task DaemonReconnect_AfterError_AutoRetriesLoad() {
+        // The realistic scenario: UI starts before the daemon, user opens
+        // Settings while disconnected, gets the "Not connected" error.
+        // When the daemon comes online, the StateChanged handler fires a
+        // fresh load — no user action required.
+        var (vm, client, _, _, _) = CreateVm();
+        client.GetStorageStatsException = new RpcException(
+            new Status(StatusCode.Unavailable, "daemon offline"));
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.True(vm.HasError);
+
+        client.GetStorageStatsException = null;
+        client.GetStorageStatsResponder = _ => MakeStats(includeChainStatus: true);
+        client.SimulateConnected();
+
+        // SyncDispatcher + Task.FromResult-shaped responder means the
+        // entire auto-retry chain runs synchronously inside
+        // SimulateConnected.
+        Assert.False(vm.HasError);
+        Assert.NotNull(vm.StorageStats);
+        Assert.Equal(2, client.GetStorageStatsCalls.Count);
+    }
+
+    [Fact]
+    public void DaemonReconnect_BeforeActivation_DoesNotPreemptivelyLoad() {
+        // If the user has never opened the Settings tab, the daemon
+        // coming online must not fire an RPC for data nobody is looking
+        // at — the handler short-circuits on `_hasActivatedOnce`.
+        var (_, client, _, _, _) = CreateVm();
+
+        client.SimulateConnected();
+
+        Assert.Empty(client.GetStorageStatsCalls);
+    }
+
+    [Fact]
+    public async Task DaemonReconnect_WhenHealthy_DoesNotReload() {
+        // Already-healthy tab: don't refetch on every daemon reconnect.
+        // The user can click REFRESH manually if they want fresh numbers.
+        var (vm, client, _, _, _) = CreateVm(MakeStats());
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+        Assert.Single(client.GetStorageStatsCalls);
+
+        client.SimulateConnected();
+
+        Assert.Single(client.GetStorageStatsCalls);
+    }
+
+    [Fact]
+    public void Dispose_UnsubscribesFromStateChanged() {
+        // After Dispose, daemon reconnects must not trigger any side
+        // effects — guards against a torn-down VM observing late events
+        // and re-firing RPCs.
+        var (vm, client, _, _, _) = CreateVm();
+        // Force _hasActivatedOnce + an error so the handler would otherwise
+        // act on SimulateConnected.
+        client.GetStorageStatsException = new RpcException(
+            new Status(StatusCode.Unavailable, "down"));
+        _ = vm.ActivateAsync(CancellationToken.None);
+        var callsBeforeDispose = client.GetStorageStatsCalls.Count;
+
+        vm.Dispose();
+        client.GetStorageStatsException = null;
+        client.GetStorageStatsResponder = _ => MakeStats();
+        client.SimulateConnected();
+
+        Assert.Equal(callsBeforeDispose, client.GetStorageStatsCalls.Count);
+    }
+
     // ---- RefreshStorageStatsCommand ----
 
     [Fact]

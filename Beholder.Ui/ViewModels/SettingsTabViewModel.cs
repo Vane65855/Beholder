@@ -219,11 +219,22 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
 
         ChainStatus = ChainStatusRow.FromProto(null, timeProvider);
         AboutInfo = AboutInfo.FromRunningAssembly();
+
+        // Auto-recover when the daemon transitions to Connected: if the tab
+        // has previously been activated and is currently in an error state
+        // (typical scenario: UI started before the daemon, user opened
+        // Settings while disconnected, got the "Not connected" error), fire
+        // a fresh load now that the RPC will actually work. Without this
+        // hook the tab stays stuck on the initial error until the user
+        // unmounts and re-mounts it — see TrafficTabViewModel's identical
+        // OnDaemonStateChanged pattern.
+        _daemonClient.StateChanged += OnDaemonStateChanged;
     }
 
     public void Dispose() {
         if (_disposed) return;
         _disposed = true;
+        _daemonClient.StateChanged -= OnDaemonStateChanged;
         _activationCts?.Cancel();
         _activationCts?.Dispose();
         _verifyStatusCts?.Cancel();
@@ -231,8 +242,52 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         _relativeTimeTicker?.Dispose();
     }
 
+    /// <summary>
+    /// True once <see cref="ActivateAsync"/> has been called at least once.
+    /// Gates the daemon-state-changed auto-recovery — there's no point
+    /// pre-loading Settings data for a tab the user has never opened.
+    /// </summary>
+    private bool _hasActivatedOnce;
+
+    private void OnDaemonStateChanged(DaemonStatusInfo status) {
+        if (status.State != ConnectionState.Connected) return;
+        if (!_hasActivatedOnce) return;
+        // Already-healthy tab: don't refetch on every reconnect (the user
+        // can click REFRESH if they want fresh numbers).
+        if (!HasError && StorageStats is not null) return;
+
+        // StateChanged fires from the DaemonClient's background reconnect
+        // loop — marshal to the UI thread before touching observable state.
+        _dispatcher.Post(() => {
+            if (_disposed) return;
+            HasError = false;
+            ErrorMessage = string.Empty;
+            // Clear the cached activation task so ActivateAsync doesn't
+            // hand back the previous failed Task. The reset is also
+            // performed inside the LoadStorageStatsAsync error handler
+            // for the manual "switch tabs and come back" recovery path;
+            // doing it here too keeps the two paths independent.
+            _activationTask = null;
+            _ = ActivateAsync(CancellationToken.None);
+        });
+    }
+
     public Task ActivateAsync(CancellationToken cancellationToken) {
-        if (_activationTask is not null) return _activationTask;
+        // Cold-start race protection: concurrent in-flight callers AND a
+        // successful previous load both hand back the cached task. A
+        // *failed* previous load (HasError set) skips the cache and runs
+        // a fresh attempt — this is what makes "user switched tabs after
+        // an error and came back" recover. Nullifying _activationTask
+        // from inside LoadStorageStatsAsync's catch block wouldn't work
+        // because synchronous-completing async methods run their body
+        // before the caller's assignment of the returned Task — the
+        // catch-block null gets overwritten by ActivateAsync's
+        // assignment. Detecting via HasError sidesteps that ordering
+        // problem entirely.
+        if (_activationTask is not null && !HasError) return _activationTask;
+        _hasActivatedOnce = true;
+        _activationCts?.Cancel();
+        _activationCts?.Dispose();
         _activationCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _activationTask = LoadStorageStatsAsync(_activationCts.Token, isInitialLoad: true);
         StartRelativeTimeTicker();
