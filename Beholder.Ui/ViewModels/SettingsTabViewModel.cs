@@ -351,7 +351,17 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
             var rulesTask = _daemonClient.ListAppIdentityRulesAsync(
                 new ListAppIdentityRulesRequest(), cancellationToken);
             AppIdentityRules.IsLoading = true;
-            await Task.WhenAll(storageTask, settingsTask, rulesTask).ConfigureAwait(false);
+            // No ConfigureAwait(false): the Apply* methods below mutate
+            // ObservableCollections (TrafficTables, FlatTables,
+            // AppIdentityRules.Rules) that are bound to the UI. Avalonia's
+            // binding pipeline expects collection mutations on the dispatcher
+            // thread; cross-thread Clear()+Add() sequences can mis-render as
+            // duplicated visual rows even when the underlying collection has
+            // the correct count. Every other VM in Beholder.Ui follows this
+            // rule (see ScannerTabViewModel.LoadInitialDevicesAsync) — VM
+            // code resumes on the captured SynchronizationContext (the UI
+            // thread) because that's where its side effects belong.
+            await Task.WhenAll(storageTask, settingsTask, rulesTask);
             ApplyStorageStats(storageTask.Result);
             ApplySettings(settingsTask.Result);
             ApplyAppIdentityRules(rulesTask.Result);
