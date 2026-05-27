@@ -311,6 +311,22 @@ public sealed class DatabaseInitializer {
         // filter — ORDER BY last_seen_unix_ns DESC + range scan via this index.
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_lan_device_ip ON lan_device(ip);");
         Execute(connection, "CREATE INDEX IF NOT EXISTS idx_lan_device_last_seen ON lan_device(last_seen_unix_ns);");
+
+        // Phase 13.6 (ADR 011): manual application-identity rules. User-
+        // configured fallback for ADR 007's automatic logical-identity dedup
+        // — see IAppIdentityRuleStore for the strict depth-1 anchor+filename
+        // match semantics. Idempotent migration via CREATE IF NOT EXISTS.
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS app_identity_rule (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                anchor_path     TEXT    NOT NULL,
+                filename        TEXT    NOT NULL,
+                display_name    TEXT,
+                created_at      INTEGER NOT NULL,
+                UNIQUE(anchor_path, filename)
+            );
+            """);
+        Execute(connection, "CREATE INDEX IF NOT EXISTS idx_app_identity_filename ON app_identity_rule(filename);");
     }
 
     private static void Execute(SqliteConnection connection, string sql) {

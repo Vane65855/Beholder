@@ -57,6 +57,7 @@ public sealed class VerifyChainTests : IDisposable {
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
+            new FakeAppIdentityRuleStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
@@ -181,6 +182,7 @@ public sealed class VerifyChainTests : IDisposable {
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
+            new FakeAppIdentityRuleStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);

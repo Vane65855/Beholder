@@ -49,6 +49,7 @@ public sealed class SetFirewallEnabledRpcTests : IDisposable {
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
+            new FakeAppIdentityRuleStore(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 

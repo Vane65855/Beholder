@@ -67,6 +67,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
+            new FakeAppIdentityRuleStore(),
             _timeProvider,
             NullLogger<BeholderLocalService>.Instance);
     }
@@ -181,6 +182,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
+            new FakeAppIdentityRuleStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var request = MakeRequest();
@@ -262,6 +264,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
+            new FakeAppIdentityRuleStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
 
         var request = MakeRequest();

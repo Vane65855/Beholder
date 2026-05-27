@@ -54,6 +54,7 @@ public sealed class MarkAlertReadTests : IDisposable {
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
+            new FakeAppIdentityRuleStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 

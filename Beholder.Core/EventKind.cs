@@ -76,4 +76,21 @@ public enum EventKind {
     /// <c>EnableHostnameResolution</c>. Chain-audit kind only.
     /// </summary>
     ScannerSettingsChanged = 14,
+
+    /// <summary>
+    /// User added a manual application-identity rule via the Settings tab's
+    /// Application Identity Overrides section (Phase 13.6). The rule tells
+    /// the daemon that a binary exactly one folder below the configured
+    /// anchor is the same logical app across versions — suppresses
+    /// <see cref="NewProcess"/> alerts on the next install. Chain-audit
+    /// kind only.
+    /// </summary>
+    AppIdentityRuleCreated = 15,
+
+    /// <summary>
+    /// User removed a manual application-identity rule (Phase 13.6). Future
+    /// version installs under the rule's anchor will fire
+    /// <see cref="NewProcess"/> alerts again. Chain-audit kind only.
+    /// </summary>
+    AppIdentityRuleRemoved = 16,
 }

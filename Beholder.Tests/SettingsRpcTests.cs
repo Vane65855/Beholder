@@ -54,7 +54,7 @@ public sealed class SettingsRpcTests : IDisposable {
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeStorageStatsProvider(),
-            _recordingState, _hostnameState, _alertState, _scannerState, _overridesStore,
+            _recordingState, _hostnameState, _alertState, _scannerState, _overridesStore, new FakeAppIdentityRuleStore(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 

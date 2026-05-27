@@ -41,6 +41,9 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? SetHostnameResolutionSettingsException { get; set; }
     public Exception? SetAlertSettingsException { get; set; }
     public Exception? SetScannerSettingsException { get; set; }
+    public Exception? AddAppIdentityRuleException { get; set; }
+    public Exception? RemoveAppIdentityRuleException { get; set; }
+    public Exception? ListAppIdentityRulesException { get; set; }
 
     // Optional canned snapshot/response bodies so tests can drive real data
     // through the seeding path. Existing callers that don't set these get the
@@ -104,6 +107,10 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Func<SetHostnameResolutionSettingsRequest, SetHostnameResolutionSettingsResponse>? SetHostnameResolutionSettingsResponder { get; set; }
     public Func<SetAlertSettingsRequest, SetAlertSettingsResponse>? SetAlertSettingsResponder { get; set; }
     public Func<SetScannerSettingsRequest, SetScannerSettingsResponse>? SetScannerSettingsResponder { get; set; }
+    public Func<AddAppIdentityRuleRequest, AddAppIdentityRuleResponse>? AddAppIdentityRuleResponder { get; set; }
+    public Func<RemoveAppIdentityRuleRequest, RemoveAppIdentityRuleResponse>? RemoveAppIdentityRuleResponder { get; set; }
+    public Func<ListAppIdentityRulesRequest, ListAppIdentityRulesResponse>? ListAppIdentityRulesResponder { get; set; }
+    public ListAppIdentityRulesResponse? ListAppIdentityRulesResponse { get; set; }
 
     // Captured invocations for assertions.
     public List<ApplyFirewallRuleRequest> ApplyFirewallRuleCalls { get; } = new();
@@ -118,6 +125,9 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public List<GetSettingsRequest> GetSettingsCalls { get; } = new();
     public List<SetRecordingSettingsRequest> SetRecordingSettingsCalls { get; } = new();
     public List<SetHostnameResolutionSettingsRequest> SetHostnameResolutionSettingsCalls { get; } = new();
+    public List<AddAppIdentityRuleRequest> AddAppIdentityRuleCalls { get; } = new();
+    public List<RemoveAppIdentityRuleRequest> RemoveAppIdentityRuleCalls { get; } = new();
+    public List<ListAppIdentityRulesRequest> ListAppIdentityRulesCalls { get; } = new();
     public List<SetAlertSettingsRequest> SetAlertSettingsCalls { get; } = new();
     public List<SetScannerSettingsRequest> SetScannerSettingsCalls { get; } = new();
     // Responder variant for tests that need the CancellationToken the VM
@@ -333,6 +343,38 @@ internal sealed class FakeDaemonClient : IDaemonClient {
                 Success = true,
                 Values = request.Values ?? new ScannerSettingsValues(),
             });
+    }
+
+    public Task<AddAppIdentityRuleResponse> AddAppIdentityRuleAsync(
+        AddAppIdentityRuleRequest request, CancellationToken cancellationToken) {
+        AddAppIdentityRuleCalls.Add(request);
+        if (AddAppIdentityRuleException is not null) throw AddAppIdentityRuleException;
+        return Task.FromResult(AddAppIdentityRuleResponder?.Invoke(request)
+            ?? new AddAppIdentityRuleResponse {
+                Success = true,
+                Rule = new AppIdentityRule {
+                    Id = 1,
+                    AnchorPath = request.AnchorPath,
+                    Filename = request.Filename,
+                    DisplayName = request.DisplayName,
+                },
+            });
+    }
+
+    public Task<RemoveAppIdentityRuleResponse> RemoveAppIdentityRuleAsync(
+        RemoveAppIdentityRuleRequest request, CancellationToken cancellationToken) {
+        RemoveAppIdentityRuleCalls.Add(request);
+        if (RemoveAppIdentityRuleException is not null) throw RemoveAppIdentityRuleException;
+        return Task.FromResult(RemoveAppIdentityRuleResponder?.Invoke(request)
+            ?? new RemoveAppIdentityRuleResponse { Removed = true });
+    }
+
+    public Task<ListAppIdentityRulesResponse> ListAppIdentityRulesAsync(
+        ListAppIdentityRulesRequest request, CancellationToken cancellationToken) {
+        ListAppIdentityRulesCalls.Add(request);
+        if (ListAppIdentityRulesException is not null) throw ListAppIdentityRulesException;
+        return Task.FromResult(ListAppIdentityRulesResponder?.Invoke(request)
+            ?? ListAppIdentityRulesResponse ?? new ListAppIdentityRulesResponse());
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

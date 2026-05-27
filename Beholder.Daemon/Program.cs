@@ -102,6 +102,13 @@ if (OperatingSystem.IsWindows()) {
         databasePath: databasePath));
     builder.Services.AddSingleton<SqliteFirewallRuleStore>();
     builder.Services.AddSingleton<IFirewallRuleStore>(sp => sp.GetRequiredService<SqliteFirewallRuleStore>());
+    // Phase 13.6 (ADR 011): manual application-identity rules — NewProcessDetector's
+    // Tier 2.5 fallback for unsigned / no-VersionInfo apps that ADR 007's automatic
+    // logical-identity dedup can't cover (Squirrel auto-updaters, sideloaded tools).
+    builder.Services.AddSingleton<SqliteAppIdentityRuleStore>(sp => new SqliteAppIdentityRuleStore(
+        sp.GetRequiredService<ConnectionFactory>(),
+        sp.GetRequiredService<TimeProvider>()));
+    builder.Services.AddSingleton<IAppIdentityRuleStore>(sp => sp.GetRequiredService<SqliteAppIdentityRuleStore>());
     builder.Services.AddSingleton<SqliteAlertStore>();
     builder.Services.AddSingleton<IAlertStore>(sp => sp.GetRequiredService<SqliteAlertStore>());
     builder.Services.AddSingleton<SqliteProcessRegistry>();

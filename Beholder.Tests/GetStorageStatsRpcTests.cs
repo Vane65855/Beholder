@@ -44,6 +44,7 @@ public sealed class GetStorageStatsRpcTests : IDisposable {
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
+            new FakeAppIdentityRuleStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 

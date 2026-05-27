@@ -78,11 +78,16 @@ public partial class App : Application {
             // makes the Func resolve to the constructed window when invoked.
             MainWindow? mainWindowRef = null;
             var clipboardWriter = new AvaloniaClipboardWriter(() => mainWindowRef);
+            // Phase 13.6: file picker for Application Identity Overrides.
+            // Same Func<MainWindow?> capture-by-reference pattern as the
+            // clipboard writer above — resolves to the live window when the
+            // picker is invoked from a VM command.
+            var filePicker = new AvaloniaFilePicker(() => mainWindowRef);
 
             _mainWindowVm = new MainWindowViewModel(
                 _daemonClient, _processStateService, _streamSubscriber,
                 statusStripVm, historicalChartLoader, dispatcher, _notifications,
-                shellOpener, clipboardWriter);
+                shellOpener, clipboardWriter, filePicker);
             var mainWindow = new MainWindow { DataContext = _mainWindowVm };
             mainWindowRef = mainWindow;
             desktop.MainWindow = mainWindow;

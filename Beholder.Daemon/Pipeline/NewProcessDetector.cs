@@ -42,6 +42,7 @@ internal sealed class NewProcessDetector : IHostedService {
     private readonly IProcessRegistry _processRegistry;
     private readonly IAlertEmitter _alertEmitter;
     private readonly IAlertSettingsState _alertSettings;
+    private readonly IAppIdentityRuleStore _appIdentityRules;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<NewProcessDetector> _logger;
     private readonly IBinaryIdentityProvider? _identityProvider;
@@ -54,6 +55,7 @@ internal sealed class NewProcessDetector : IHostedService {
         IProcessRegistry processRegistry,
         IAlertEmitter alertEmitter,
         IAlertSettingsState alertSettings,
+        IAppIdentityRuleStore appIdentityRules,
         TimeProvider timeProvider,
         ILogger<NewProcessDetector> logger,
         IBinaryIdentityProvider? identityProvider = null
@@ -62,6 +64,7 @@ internal sealed class NewProcessDetector : IHostedService {
         ArgumentNullException.ThrowIfNull(processRegistry);
         ArgumentNullException.ThrowIfNull(alertEmitter);
         ArgumentNullException.ThrowIfNull(alertSettings);
+        ArgumentNullException.ThrowIfNull(appIdentityRules);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _flowSource = flowSource;
@@ -72,6 +75,10 @@ internal sealed class NewProcessDetector : IHostedService {
         // now takes effect immediately when toggled via the
         // SetAlertSettings RPC.
         _alertSettings = alertSettings;
+        // Phase 13.6: Tier 2.5 fallback store — user-configured manual
+        // identity rules for unsigned / no-VersionInfo apps that Tier 2 can't
+        // recognise (e.g., Squirrel auto-updaters per ADR 011).
+        _appIdentityRules = appIdentityRules;
         _timeProvider = timeProvider;
         _logger = logger;
         _identityProvider = identityProvider;  // null on Linux/macOS — see ADR 007
@@ -141,6 +148,26 @@ internal sealed class NewProcessDetector : IHostedService {
                 }
             }
 
+            // Tier 2.5 (Phase 13.6, ADR 011): manual application-identity rule.
+            // The user explicitly told us this binary is the same logical app
+            // across versions — register silently and bail. Match semantics
+            // are strict depth-1: file exactly one variable folder below the
+            // configured anchor. Mirrors Tier 2's same-publisher silent path;
+            // never fires NewProcess. The order is deliberate: Tier 2 (signed
+            // identity, cryptographically anchored) wins over Tier 2.5 (user
+            // assertion); Tier 2.5 wins over Tier 3 (genuinely-new fallback).
+            var filename = Path.GetFileName(processPath);
+            if (!string.IsNullOrEmpty(filename)) {
+                var matchedRule = await _appIdentityRules
+                    .MatchAsync(filename, processPath, cancellationToken)
+                    .ConfigureAwait(false);
+                if (matchedRule is not null) {
+                    await HandleManualRuleMatchAsync(processPath, matchedRule, cancellationToken)
+                        .ConfigureAwait(false);
+                    return;
+                }
+            }
+
             // Tier 3: genuinely new — fire NewProcess and register.
             await EmitNewProcessAsync(processPath, identity, installRoot, cancellationToken)
                 .ConfigureAwait(false);
@@ -205,6 +232,41 @@ internal sealed class NewProcessDetector : IHostedService {
         await _alertEmitter
             .EmitAlertAsync(AlertKind.NewProcess, processPath, summary, cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Phase 13.6 (ADR 011): handles a Tier 2.5 manual-rule match. Registers
+    /// the path in the process registry with the rule's display name (falling
+    /// back to the filename when no display name is set) and returns silent.
+    /// No alert fires — the user already vouched that this is the same
+    /// logical app as prior versions under the rule's anchor. Identity /
+    /// signature fields stay null because manual-rule targets are typically
+    /// unsigned (that's the whole reason the user reached for this fallback).
+    /// </summary>
+    private async Task HandleManualRuleMatchAsync(
+        string processPath, AppIdentityRule rule, CancellationToken cancellationToken
+    ) {
+        var now = _timeProvider.GetUtcNow();
+        var displayName = string.IsNullOrEmpty(rule.DisplayName)
+            ? ExtractDisplayName(processPath)
+            : rule.DisplayName;
+        var info = new ProcessInfo(
+            path: processPath,
+            displayName: displayName,
+            sha256: null,
+            firstSeen: now,
+            lastSeen: now,
+            lastHashedAt: null,
+            companyName: null,
+            productName: null,
+            installRoot: null,
+            certSubjectCn: null,
+            certIssuerCn: null,
+            signatureStatus: null);
+        await _processRegistry.RegisterAsync(info, cancellationToken).ConfigureAwait(false);
+        _logger.LogDebug(
+            "NewProcessDetector Tier 2.5: {ProcessPath} matched rule {RuleId} ({Anchor} / {Filename}); registered silently",
+            processPath, rule.Id, rule.AnchorPath, rule.Filename);
     }
 
     private async Task RegisterAsync(

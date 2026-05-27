@@ -108,6 +108,7 @@ public sealed class NewProcessDetectorTests {
             processRegistry: new FakeProcessRegistry(),
             alertEmitter: new FakeAlertEmitter(),
             alertSettings: new FakeAlertSettingsState(),
+            appIdentityRules: new FakeAppIdentityRuleStore(),
             timeProvider: new FakeTimeProvider(FixedTimestamp),
             logger: NullLogger<NewProcessDetector>.Instance));
 
@@ -296,11 +297,74 @@ public sealed class NewProcessDetectorTests {
         Assert.Null(root);
     }
 
+    // ---- Phase 13.6: Tier 2.5 manual identity rules ----
+
+    [Fact]
+    public async Task FirstFlow_ManualRuleMatches_NoAlert_RegisterSilent() {
+        // Discord Squirrel-style updater — unsigned, no VersionInfo, so Tier 2
+        // can't fire. User has configured a manual rule that targets the
+        // grandparent + filename pair.
+        var fixture = new Fixture();
+        fixture.AppIdentityRules.Seed(
+            @"C:\Users\Vane\AppData\Local\Discord", "Discord.exe", "Discord");
+        var newVersionPath = @"C:\Users\Vane\AppData\Local\Discord\app-1.0.9236\Discord.exe";
+
+        await fixture.Detector.ProcessAsync(newVersionPath, CancellationToken.None);
+
+        // No NewProcess alert.
+        Assert.Empty(fixture.Emitter.Emissions);
+        // But the path WAS registered (silent).
+        var registered = await fixture.Registry.GetByPathAsync(newVersionPath, CancellationToken.None);
+        Assert.NotNull(registered);
+        Assert.Equal("Discord", registered.DisplayName);
+    }
+
+    [Fact]
+    public async Task FirstFlow_ManualRuleMisses_FiresNewProcess() {
+        // Rule exists but the incoming path's grandparent doesn't match.
+        var fixture = new Fixture();
+        fixture.AppIdentityRules.Seed(@"C:\Foo\Discord", "Discord.exe");
+        var differentPath = @"C:\Other\v1\Discord.exe";
+
+        await fixture.Detector.ProcessAsync(differentPath, CancellationToken.None);
+
+        var emission = Assert.Single(fixture.Emitter.Emissions);
+        Assert.Equal(AlertKind.NewProcess, emission.Kind);
+    }
+
+    [Fact]
+    public async Task FirstFlow_NoRulesAndNoIdentity_FiresNewProcessAsBefore() {
+        // Regression: Phase 13.6 must not change behaviour when no rules
+        // are configured. Tier 3 still fires.
+        var fixture = new Fixture();
+
+        await fixture.Detector.ProcessAsync(@"C:\bin\app.exe", CancellationToken.None);
+
+        var emission = Assert.Single(fixture.Emitter.Emissions);
+        Assert.Equal(AlertKind.NewProcess, emission.Kind);
+    }
+
+    [Fact]
+    public async Task FirstFlow_ManualRule_NoDisplayName_FallsBackToFilename() {
+        var fixture = new Fixture();
+        fixture.AppIdentityRules.Seed(
+            @"C:\Users\Vane\AppData\Local\Discord", "Discord.exe", displayName: null);
+        var path = @"C:\Users\Vane\AppData\Local\Discord\app-1.0.9236\Discord.exe";
+
+        await fixture.Detector.ProcessAsync(path, CancellationToken.None);
+
+        var registered = await fixture.Registry.GetByPathAsync(path, CancellationToken.None);
+        Assert.NotNull(registered);
+        // Falls back to the filename ("Discord.exe"), not the bare anchor.
+        Assert.Equal("Discord.exe", registered.DisplayName);
+    }
+
     private sealed class Fixture {
         public FakeProcessFirstNetworkFlowSource FlowSource { get; } = new();
         public FakeProcessRegistry Registry { get; } = new();
         public FakeAlertEmitter Emitter { get; } = new();
         public FakeAlertSettingsState AlertSettings { get; } = new();
+        public FakeAppIdentityRuleStore AppIdentityRules { get; } = new();
         public FakeTimeProvider Time { get; } = new(FixedTimestamp);
         public FakeBinaryIdentityProvider? IdentityProvider { get; }
         public NewProcessDetector Detector { get; }
@@ -308,7 +372,7 @@ public sealed class NewProcessDetectorTests {
         public Fixture(bool withIdentityProvider = false) {
             IdentityProvider = withIdentityProvider ? new FakeBinaryIdentityProvider() : null;
             Detector = new NewProcessDetector(
-                FlowSource, Registry, Emitter, AlertSettings, Time,
+                FlowSource, Registry, Emitter, AlertSettings, AppIdentityRules, Time,
                 NullLogger<NewProcessDetector>.Instance,
                 IdentityProvider);
         }

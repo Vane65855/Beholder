@@ -40,6 +40,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
+            new FakeAppIdentityRuleStore(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
@@ -147,6 +148,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
+            new FakeAppIdentityRuleStore(),
             TimeProvider.System, NullLogger<BeholderLocalService>.Instance);
 
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
@@ -187,6 +189,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
             new FakeSettingsOverridesStore(),
+            new FakeAppIdentityRuleStore(),
             TimeProvider.System, NullLogger<BeholderLocalService>.Instance);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(

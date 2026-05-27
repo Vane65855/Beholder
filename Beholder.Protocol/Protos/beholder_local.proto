@@ -524,6 +524,52 @@ message SetScannerSettingsResponse {
   ScannerSettingsValues values = 3;
 }
 
+// ---- Application Identity Overrides (Phase 13.6) ----
+
+// Mirrors Beholder.Core.AppIdentityRule. Manual fallback for ADR 007's
+// automatic logical-identity dedup — see ADR 011. Match semantics: strict
+// depth-1 — the binary's grandparent path must equal anchor_path AND the
+// filename must match, in which case NewProcess is suppressed for that
+// path and future paths under the same rule.
+message AppIdentityRule {
+  int32 id = 1;
+  string anchor_path = 2;        // absolute path to stable parent, e.g. C:\Users\Vane\AppData\Local\Discord
+  string filename = 3;           // exe name, e.g. Discord.exe
+  string display_name = 4;       // empty string = unset (UI label only)
+  int64 created_at_unix_ns = 5;
+}
+
+message AddAppIdentityRuleRequest {
+  string anchor_path = 1;
+  string filename = 2;
+  string display_name = 3;       // empty string = unset
+}
+
+// Soft-failure pattern mirroring SetLanDeviceLabel: a duplicate-add returns
+// success=false with a human-readable message rather than an RpcException,
+// so the UI surfaces the conflict inline. `rule` is populated only when
+// success=true.
+message AddAppIdentityRuleResponse {
+  bool success = 1;
+  string message = 2;
+  AppIdentityRule rule = 3;
+}
+
+message RemoveAppIdentityRuleRequest {
+  int32 id = 1;
+}
+
+// Idempotent: removing an unknown ID returns removed=false (no exception).
+message RemoveAppIdentityRuleResponse {
+  bool removed = 1;
+}
+
+message ListAppIdentityRulesRequest {}
+
+message ListAppIdentityRulesResponse {
+  repeated AppIdentityRule rules = 1;
+}
+
 // ---- Storage stats (Phase 13.1) ----
 
 // Mirrors Beholder.Core.TableStats. Per-table on-disk byte size is not
@@ -604,4 +650,8 @@ service BeholderLocal {
   rpc SetAlertSettings(SetAlertSettingsRequest) returns (SetAlertSettingsResponse);
   // Phase 13.4 — Settings tab Scanner section
   rpc SetScannerSettings(SetScannerSettingsRequest) returns (SetScannerSettingsResponse);
+  // Phase 13.6 — Settings tab Application Identity Overrides section (ADR 011)
+  rpc AddAppIdentityRule(AddAppIdentityRuleRequest) returns (AddAppIdentityRuleResponse);
+  rpc RemoveAppIdentityRule(RemoveAppIdentityRuleRequest) returns (RemoveAppIdentityRuleResponse);
+  rpc ListAppIdentityRules(ListAppIdentityRulesRequest) returns (ListAppIdentityRulesResponse);
 }

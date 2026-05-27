@@ -18,7 +18,7 @@ public class SettingsTabViewModelTests {
         var shell = new FakeShellOpener();
         var clipboard = new FakeClipboardWriter();
         var time = new FakeTimeProvider(FixedTimestamp);
-        var vm = new SettingsTabViewModel(client, new SyncDispatcher(), shell, clipboard, time);
+        var vm = new SettingsTabViewModel(client, new SyncDispatcher(), shell, clipboard, new FakeFilePicker(), time);
         return (vm, client, shell, clipboard, time);
     }
 
@@ -65,31 +65,37 @@ public class SettingsTabViewModelTests {
     public void Constructor_NullDaemonClient_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             null!, new SyncDispatcher(), new FakeShellOpener(), new FakeClipboardWriter(),
-            new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullDispatcher_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), null!, new FakeShellOpener(), new FakeClipboardWriter(),
-            new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullShellOpener_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), null!, new FakeClipboardWriter(),
-            new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullClipboardWriter_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(), null!,
-            new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeTimeProvider(FixedTimestamp)));
+
+    [Fact]
+    public void Constructor_NullFilePicker_Throws() =>
+        Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
+            new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
+            new FakeClipboardWriter(), null!, new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullTimeProvider_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
-            new FakeClipboardWriter(), null!));
+            new FakeClipboardWriter(), new FakeFilePicker(), null!));
 
     [Fact]
     public void InitialState_NoStorageStats_NoTables_DefaultPlaceholders() {

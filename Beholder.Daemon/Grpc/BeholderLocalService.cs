@@ -47,6 +47,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     private readonly IAlertSettingsState _alertSettings;
     private readonly IScannerSettingsState _scannerSettings;
     private readonly ISettingsOverridesStore _settingsOverridesStore;
+    private readonly IAppIdentityRuleStore _appIdentityRuleStore;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<BeholderLocalService> _logger;
 
@@ -68,6 +69,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         IAlertSettingsState alertSettings,
         IScannerSettingsState scannerSettings,
         ISettingsOverridesStore settingsOverridesStore,
+        IAppIdentityRuleStore appIdentityRuleStore,
         TimeProvider timeProvider,
         ILogger<BeholderLocalService> logger
     ) {
@@ -88,6 +90,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         ArgumentNullException.ThrowIfNull(alertSettings);
         ArgumentNullException.ThrowIfNull(scannerSettings);
         ArgumentNullException.ThrowIfNull(settingsOverridesStore);
+        ArgumentNullException.ThrowIfNull(appIdentityRuleStore);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _broadcaster = broadcaster;
@@ -107,6 +110,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         _alertSettings = alertSettings;
         _scannerSettings = scannerSettings;
         _settingsOverridesStore = settingsOverridesStore;
+        _appIdentityRuleStore = appIdentityRuleStore;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -693,6 +697,133 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
             Values = new ScannerSettingsSnapshot(_scannerSettings.EnableHostnameResolution).ToProto(),
         };
     }
+
+    /// <summary>
+    /// Phase 13.6 (ADR 011): adds a manual application-identity rule. The
+    /// daemon trusts the user's anchor + filename pairing and treats matching
+    /// binaries as the same logical app — suppresses NewProcess alerts on
+    /// future versions sharing the rule's anchor. Soft-failure on duplicate
+    /// (returns <c>success=false</c> with a structured message); hard
+    /// validation errors (empty anchor or filename) throw
+    /// <see cref="StatusCode.InvalidArgument"/>.
+    /// </summary>
+    public override async Task<Local.AddAppIdentityRuleResponse> AddAppIdentityRule(
+        Local.AddAppIdentityRuleRequest request, ServerCallContext context
+    ) {
+        if (string.IsNullOrWhiteSpace(request.AnchorPath))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "anchor_path is required"));
+        if (string.IsNullOrWhiteSpace(request.Filename))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "filename is required"));
+
+        var ct = context.CancellationToken;
+        var displayName = string.IsNullOrWhiteSpace(request.DisplayName) ? null : request.DisplayName;
+
+        AppIdentityRule? created;
+        try {
+            created = await _appIdentityRuleStore
+                .AddAsync(request.AnchorPath, request.Filename, displayName, ct)
+                .ConfigureAwait(false);
+        } catch (OperationCanceledException) {
+            throw;
+        } catch (Exception ex) {
+            _logger.LogError(ex,
+                "Failed to persist app-identity rule (anchor={Anchor} filename={Filename})",
+                request.AnchorPath, request.Filename);
+            return new Local.AddAppIdentityRuleResponse {
+                Success = false,
+                Message = $"Failed to persist rule: {ex.Message}",
+            };
+        }
+
+        if (created is null) {
+            // Duplicate (anchor, filename) — soft-fail; UI surfaces inline.
+            return new Local.AddAppIdentityRuleResponse {
+                Success = false,
+                Message = "A rule with this anchor + filename already exists.",
+            };
+        }
+
+        try {
+            var payload = AppIdentityRulePayloadEncoder.Encode(created);
+            await _eventStore.AppendAsync(EventKind.AppIdentityRuleCreated, payload, ct)
+                .ConfigureAwait(false);
+        } catch (Exception ex) {
+            _logger.LogError(ex,
+                "Failed to append AppIdentityRuleCreated to chain — rule is persisted but unaudited (id={Id})",
+                created.Id);
+        }
+
+        _logger.LogInformation(
+            "App-identity rule created (id={Id}, anchor={Anchor}, filename={Filename})",
+            created.Id, created.AnchorPath, created.Filename);
+
+        return new Local.AddAppIdentityRuleResponse {
+            Success = true,
+            Message = "Rule created.",
+            Rule = created.ToProto(),
+        };
+    }
+
+    /// <summary>
+    /// Phase 13.6: removes a manual application-identity rule by ID.
+    /// Idempotent — unknown ID returns <c>removed=false</c> with no chain
+    /// write.
+    /// </summary>
+    public override async Task<Local.RemoveAppIdentityRuleResponse> RemoveAppIdentityRule(
+        Local.RemoveAppIdentityRuleRequest request, ServerCallContext context
+    ) {
+        if (request.Id <= 0)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "id must be positive"));
+
+        var ct = context.CancellationToken;
+
+        // Snapshot the row BEFORE delete so the chain payload carries the
+        // removed rule's anchor / filename / display name (the row no longer
+        // exists post-delete; the chain audit needs the values).
+        var existing = (await _appIdentityRuleStore.ListAllAsync(ct).ConfigureAwait(false))
+            .FirstOrDefault(r => r.Id == request.Id);
+
+        bool removed;
+        try {
+            removed = await _appIdentityRuleStore.RemoveAsync(request.Id, ct).ConfigureAwait(false);
+        } catch (OperationCanceledException) {
+            throw;
+        } catch (Exception ex) {
+            _logger.LogError(ex,
+                "Failed to remove app-identity rule (id={Id})", request.Id);
+            throw new RpcException(new Status(StatusCode.Internal,
+                $"Failed to remove rule: {ex.Message}"));
+        }
+
+        if (removed && existing is not null) {
+            try {
+                var payload = AppIdentityRulePayloadEncoder.Encode(existing);
+                await _eventStore.AppendAsync(EventKind.AppIdentityRuleRemoved, payload, ct)
+                    .ConfigureAwait(false);
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to append AppIdentityRuleRemoved to chain — rule is removed but unaudited (id={Id})",
+                    request.Id);
+            }
+            _logger.LogInformation("App-identity rule removed (id={Id})", request.Id);
+        }
+
+        return new Local.RemoveAppIdentityRuleResponse { Removed = removed };
+    }
+
+    /// <summary>
+    /// Phase 13.6: returns every persisted manual application-identity rule
+    /// in insertion (ID) order. Called by the Settings tab on activate to
+    /// populate the rule list.
+    /// </summary>
+    public override Task<Local.ListAppIdentityRulesResponse> ListAppIdentityRules(
+        Local.ListAppIdentityRulesRequest request, ServerCallContext context
+    ) => ExecuteQueryAsync(nameof(ListAppIdentityRules), async cancellationToken => {
+        var rules = await _appIdentityRuleStore.ListAllAsync(cancellationToken).ConfigureAwait(false);
+        var response = new Local.ListAppIdentityRulesResponse();
+        foreach (var rule in rules) response.Rules.Add(rule.ToProto());
+        return response;
+    }, context);
 
     public override Task<Local.GetProcessTimelineResponse> GetProcessTimeline(
         Local.GetProcessTimelineRequest request, ServerCallContext context

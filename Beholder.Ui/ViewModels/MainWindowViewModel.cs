@@ -68,7 +68,8 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         IDispatcher dispatcher,
         INotificationService notifications,
         IShellOpener shellOpener,
-        IClipboardWriter clipboardWriter) {
+        IClipboardWriter clipboardWriter,
+        IFilePicker filePicker) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
@@ -78,6 +79,7 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         ArgumentNullException.ThrowIfNull(notifications);
         ArgumentNullException.ThrowIfNull(shellOpener);
         ArgumentNullException.ThrowIfNull(clipboardWriter);
+        ArgumentNullException.ThrowIfNull(filePicker);
         _daemonClient = daemonClient;
         _dispatcher = dispatcher;
         _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader, dispatcher);
@@ -95,8 +97,11 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         _scannerTab = new ScannerTabViewModel(
             daemonClient, streamSubscriber, dispatcher, TimeProvider.System,
             navigateToTraffic: NavigateToTrafficForRemoteAddressAsync);
+        // Phase 13.6: file picker drives the Application Identity Overrides
+        // section's ADD RULE flow (user picks a binary, VM derives anchor +
+        // filename).
         _settingsTab = new SettingsTabViewModel(
-            daemonClient, dispatcher, shellOpener, clipboardWriter, TimeProvider.System);
+            daemonClient, dispatcher, shellOpener, clipboardWriter, filePicker, TimeProvider.System);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         _daemonClient.StateChanged += OnDaemonStateChanged;

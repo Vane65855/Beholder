@@ -182,6 +182,24 @@ internal static class ProtocolConverters {
     }
 
     /// <summary>
+    /// Maps a manual application-identity rule (Phase 13.6) onto its wire
+    /// equivalent. The optional <see cref="Core.AppIdentityRule.DisplayName"/>
+    /// becomes the empty string on the wire (proto3 has no nullable string
+    /// primitive; the empty-string-as-null precedent matches
+    /// <see cref="Core.Alert.Summary"/> / <see cref="Core.LanDevice.Hostname"/>).
+    /// </summary>
+    public static Local.AppIdentityRule ToProto(this Core.AppIdentityRule source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Local.AppIdentityRule {
+            Id = source.Id,
+            AnchorPath = source.AnchorPath,
+            Filename = source.Filename,
+            DisplayName = source.DisplayName ?? string.Empty,
+            CreatedAtUnixNs = source.CreatedAt.ToUnixTimeNanoseconds(),
+        };
+    }
+
+    /// <summary>
     /// Maps a Recording settings snapshot onto its wire value message.
     /// </summary>
     public static Local.RecordingSettingsValues ToProto(this Core.RecordingSettingsSnapshot source) {

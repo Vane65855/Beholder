@@ -64,6 +64,7 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
     private readonly IDispatcher _dispatcher;
     private readonly IShellOpener _shellOpener;
     private readonly IClipboardWriter _clipboardWriter;
+    private readonly IFilePicker _filePicker;
     private readonly TimeProvider _timeProvider;
 
     private CancellationTokenSource? _activationCts;
@@ -140,6 +141,14 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
 
     /// <summary>Phase 13.4: Scanner section state.</summary>
     public ScannerSettingsRow Scanner { get; } = new();
+
+    /// <summary>
+    /// Phase 13.6: Application Identity Overrides section state. Holds the
+    /// persisted rules list + add-mode form state. Commands live on this
+    /// VM (see <c>BeginAddRule</c>, <c>PickFile</c>, <c>SaveRule</c>,
+    /// <c>RemoveRule</c>, <c>CancelAddRule</c>).
+    /// </summary>
+    public AppIdentityRulesRow AppIdentityRules { get; } = new();
 
     /// <summary>Cyan-tinted share of the stacked total bar — sum of all
     /// traffic-tier rows divided by grand total. Falls back to 0 when the
@@ -220,17 +229,20 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         IDispatcher dispatcher,
         IShellOpener shellOpener,
         IClipboardWriter clipboardWriter,
+        IFilePicker filePicker,
         TimeProvider timeProvider
     ) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(shellOpener);
         ArgumentNullException.ThrowIfNull(clipboardWriter);
+        ArgumentNullException.ThrowIfNull(filePicker);
         ArgumentNullException.ThrowIfNull(timeProvider);
         _daemonClient = daemonClient;
         _dispatcher = dispatcher;
         _shellOpener = shellOpener;
         _clipboardWriter = clipboardWriter;
+        _filePicker = filePicker;
         _timeProvider = timeProvider;
 
         ChainStatus = ChainStatusRow.FromProto(null, timeProvider);
@@ -245,6 +257,16 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         // unmounts and re-mounts it — see TrafficTabViewModel's identical
         // OnDaemonStateChanged pattern.
         _daemonClient.StateChanged += OnDaemonStateChanged;
+
+        // Phase 13.6: re-validate the app-identity form whenever the user
+        // edits the anchor field. AnchorPath is the only field bound TwoWay
+        // in the UI; PickedFilePath / Filename / VariableSegment are derived
+        // from the file-picker result and don't change after a pick.
+        AppIdentityRules.PropertyChanged += (_, e) => {
+            if (e.PropertyName == nameof(AppIdentityRulesRow.AnchorPath)) {
+                ValidateAppIdentityForm();
+            }
+        };
     }
 
     public void Dispose() {
@@ -324,9 +346,16 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
                 new GetStorageStatsRequest(), cancellationToken);
             var settingsTask = _daemonClient.GetSettingsAsync(
                 new GetSettingsRequest(), cancellationToken);
-            await Task.WhenAll(storageTask, settingsTask).ConfigureAwait(false);
+            // Phase 13.6: parallel-load the app identity rules alongside.
+            // One more RPC; same await Task.WhenAll shape.
+            var rulesTask = _daemonClient.ListAppIdentityRulesAsync(
+                new ListAppIdentityRulesRequest(), cancellationToken);
+            AppIdentityRules.IsLoading = true;
+            await Task.WhenAll(storageTask, settingsTask, rulesTask).ConfigureAwait(false);
             ApplyStorageStats(storageTask.Result);
             ApplySettings(settingsTask.Result);
+            ApplyAppIdentityRules(rulesTask.Result);
+            AppIdentityRules.IsLoading = false;
         } catch (OperationCanceledException) {
             // Tab disposed mid-load — drop silently.
         } catch (RpcException ex) {
@@ -357,6 +386,18 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         }
         if (response.Scanner is not null) {
             Scanner.EnableHostnameResolution = response.Scanner.EnableHostnameResolution;
+        }
+    }
+
+    private void ApplyAppIdentityRules(ListAppIdentityRulesResponse response) {
+        AppIdentityRules.Rules.Clear();
+        foreach (var rule in response.Rules) {
+            AppIdentityRules.Rules.Add(new AppIdentityRuleRow(
+                id: rule.Id,
+                anchorPath: rule.AnchorPath,
+                filename: rule.Filename,
+                displayName: string.IsNullOrEmpty(rule.DisplayName) ? null : rule.DisplayName,
+                createdAt: DateTimeOffset.FromUnixTimeMilliseconds(rule.CreatedAtUnixNs / 1_000_000L)));
         }
     }
 
@@ -691,6 +732,179 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
             ErrorMessage = $"Failed to save Scanner settings: {ex.Message}";
         } finally {
             Scanner.IsSavingHostnameResolution = false;
+        }
+    }
+
+    // ---- Phase 13.6: Application Identity Overrides ----
+
+    /// <summary>
+    /// Flips the section into add-mode. The view binds to the row VM's
+    /// IsAdding flag to swap the read-mode list for the input form.
+    /// </summary>
+    [RelayCommand]
+    private void BeginAddAppIdentityRule() {
+        AppIdentityRules.ResetAddState();
+        AppIdentityRules.IsAdding = true;
+    }
+
+    /// <summary>Discards the in-progress form and returns to read mode.</summary>
+    [RelayCommand]
+    private void CancelAddAppIdentityRule() {
+        AppIdentityRules.ResetAddState();
+    }
+
+    /// <summary>
+    /// Opens the OS file picker. On a successful pick, derives FILE,
+    /// VARIABLE, and ANCHOR fields from the path's structure and runs
+    /// validation. User cancel is a silent no-op (no error).
+    /// </summary>
+    [RelayCommand]
+    private async Task PickAppIdentityFile() {
+        try {
+            var path = await _filePicker.PickFileAsync(
+                "Pick the binary that changes folders between versions",
+                CancellationToken.None);
+            if (string.IsNullOrEmpty(path)) return;  // user cancelled
+            ApplyPickedPath(path);
+        } catch (Exception ex) {
+            HasError = true;
+            ErrorMessage = $"Failed to pick file: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Derives filename / variable / anchor from <paramref name="pickedPath"/>
+    /// and runs validation. Exposed for tests so they can drive the validation
+    /// state machine without simulating the picker dialog itself.
+    /// </summary>
+    internal void ApplyPickedPath(string pickedPath) {
+        AppIdentityRules.PickedFilePath = pickedPath;
+        AppIdentityRules.Filename = Path.GetFileName(pickedPath) ?? string.Empty;
+        var parent = Path.GetDirectoryName(pickedPath);
+        AppIdentityRules.VariableSegment = string.IsNullOrEmpty(parent)
+            ? string.Empty
+            : Path.GetFileName(parent) ?? string.Empty;
+        AppIdentityRules.AnchorPath = string.IsNullOrEmpty(parent)
+            ? string.Empty
+            : Path.GetDirectoryName(parent) ?? string.Empty;
+        ValidateAppIdentityForm();
+    }
+
+    /// <summary>
+    /// Called by the view when the user edits the ANCHOR field. Re-runs the
+    /// strict depth-1 validation: the picked file's path must equal
+    /// <c>anchor + sep + &lt;single segment&gt; + sep + filename</c>.
+    /// </summary>
+    internal void ValidateAppIdentityForm() {
+        var picked = AppIdentityRules.PickedFilePath;
+        var anchor = AppIdentityRules.AnchorPath;
+        if (string.IsNullOrEmpty(picked) || string.IsNullOrEmpty(anchor)) {
+            AppIdentityRules.ValidationError = string.Empty;
+            return;
+        }
+        // Compute the picked file's grandparent and compare against anchor.
+        var parent = Path.GetDirectoryName(picked);
+        if (string.IsNullOrEmpty(parent)) {
+            AppIdentityRules.ValidationError = "The picked file has no parent folder.";
+            return;
+        }
+        var grandparent = Path.GetDirectoryName(parent);
+        if (string.IsNullOrEmpty(grandparent)) {
+            AppIdentityRules.ValidationError =
+                "The picked file isn't deep enough — it needs at least one folder above its immediate parent.";
+            return;
+        }
+        var normalizedGrandparent = grandparent.TrimEnd(
+            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normalizedAnchor = anchor.TrimEnd(
+            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!normalizedGrandparent.Equals(normalizedAnchor, comparison)) {
+            AppIdentityRules.ValidationError =
+                "The file you picked isn't exactly one folder below this anchor.";
+            return;
+        }
+        AppIdentityRules.ValidationError = string.Empty;
+    }
+
+    /// <summary>
+    /// Saves the in-progress rule via <c>AddAppIdentityRule</c>. On success,
+    /// appends the new rule to the list + resets the add form. On
+    /// soft-failure (duplicate, persistence-throw) leaves add-mode active +
+    /// shows the daemon's message via the tab-wide error banner.
+    /// </summary>
+    [RelayCommand]
+    private async Task SaveAppIdentityRule() {
+        if (!AppIdentityRules.CanSave) return;
+        AppIdentityRules.IsSaving = true;
+        try {
+            var response = await _daemonClient.AddAppIdentityRuleAsync(
+                new AddAppIdentityRuleRequest {
+                    AnchorPath = AppIdentityRules.AnchorPath.TrimEnd(
+                        Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    Filename = AppIdentityRules.Filename,
+                    DisplayName = AppIdentityRules.DisplayName ?? string.Empty,
+                },
+                CancellationToken.None);
+            if (response.Success && response.Rule is not null) {
+                AppIdentityRules.Rules.Add(new AppIdentityRuleRow(
+                    id: response.Rule.Id,
+                    anchorPath: response.Rule.AnchorPath,
+                    filename: response.Rule.Filename,
+                    displayName: string.IsNullOrEmpty(response.Rule.DisplayName)
+                        ? null : response.Rule.DisplayName,
+                    createdAt: DateTimeOffset.FromUnixTimeMilliseconds(
+                        response.Rule.CreatedAtUnixNs / 1_000_000L)));
+                AppIdentityRules.ResetAddState();
+            } else {
+                HasError = true;
+                ErrorMessage = string.IsNullOrEmpty(response.Message)
+                    ? "Failed to save rule."
+                    : response.Message;
+            }
+        } catch (RpcException ex) {
+            HasError = true;
+            ErrorMessage = $"Failed to save rule: {ex.Status.Detail}";
+        } catch (Exception ex) {
+            HasError = true;
+            ErrorMessage = $"Failed to save rule: {ex.Message}";
+        } finally {
+            AppIdentityRules.IsSaving = false;
+        }
+    }
+
+    /// <summary>
+    /// Removes the given rule via <c>RemoveAppIdentityRule</c>. Optimistic:
+    /// the row is removed from the list immediately; if the RPC fails the
+    /// row is re-inserted and the error banner shows.
+    /// </summary>
+    [RelayCommand]
+    private async Task RemoveAppIdentityRule(AppIdentityRuleRow? row) {
+        if (row is null) return;
+        var index = -1;
+        for (var i = 0; i < AppIdentityRules.Rules.Count; i++) {
+            if (AppIdentityRules.Rules[i].Id == row.Id) { index = i; break; }
+        }
+        if (index < 0) return;
+        AppIdentityRules.Rules.RemoveAt(index);
+        try {
+            var response = await _daemonClient.RemoveAppIdentityRuleAsync(
+                new RemoveAppIdentityRuleRequest { Id = row.Id },
+                CancellationToken.None);
+            if (!response.Removed) {
+                // Already gone server-side — treat as success. (Idempotent.)
+            }
+        } catch (RpcException ex) {
+            // Restore the row + surface the error.
+            AppIdentityRules.Rules.Insert(index, row);
+            HasError = true;
+            ErrorMessage = $"Failed to remove rule: {ex.Status.Detail}";
+        } catch (Exception ex) {
+            AppIdentityRules.Rules.Insert(index, row);
+            HasError = true;
+            ErrorMessage = $"Failed to remove rule: {ex.Message}";
         }
     }
 
