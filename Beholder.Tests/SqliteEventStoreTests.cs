@@ -171,6 +171,41 @@ public sealed class SqliteEventStoreTests : IDisposable {
         Assert.Equal(ExpectedTs, rows[0].TimestampUnixNs);
     }
 
+    [Fact]
+    public async Task TryGetChainHeadAsync_EmptyChain_ReturnsNull() {
+        var head = await _store.TryGetChainHeadAsync(CancellationToken.None);
+        Assert.Null(head);
+    }
+
+    [Fact]
+    public async Task TryGetChainHeadAsync_PopulatedChain_ReturnsLatestRow() {
+        for (var i = 0; i < 3; i++) {
+            await _store.AppendAsync(EventKind.Counter, new byte[] { (byte)i }, CancellationToken.None);
+        }
+
+        var head = await _store.TryGetChainHeadAsync(CancellationToken.None);
+
+        Assert.NotNull(head);
+        Assert.Equal(2L, head.Seq);
+        Assert.Equal(FixedTime.ToUnixTimeMilliseconds(), head.Timestamp.ToUnixTimeMilliseconds());
+        var rows = ReadAllRows();
+        Assert.Equal(rows[^1].RowHash, head.RowHash);
+    }
+
+    [Fact]
+    public async Task TryGetChainHeadAsync_SingleRow_ReturnsThatRow() {
+        var payload = new byte[] { 0xAB, 0xCD };
+        await _store.AppendAsync(EventKind.NewProcess, payload, CancellationToken.None);
+
+        var head = await _store.TryGetChainHeadAsync(CancellationToken.None);
+
+        Assert.NotNull(head);
+        Assert.Equal(0L, head.Seq);
+        var expectedHash = ChainHasher.ComputeRowHash(
+            0L, ExpectedTs, EventKind.NewProcess, payload, ChainHasher.ZeroPrevHash);
+        Assert.Equal(expectedHash, head.RowHash);
+    }
+
     private IReadOnlyList<EventRow> ReadAllRows() {
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();

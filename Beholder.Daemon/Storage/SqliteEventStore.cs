@@ -112,6 +112,28 @@ internal sealed class SqliteEventStore : IEventStore {
     }
 
     /// <inheritdoc />
+    public async Task<ChainHead?> TryGetChainHeadAsync(CancellationToken cancellationToken) {
+        using var connection = _connectionFactory.CreateConnection();
+        using var command = connection.CreateCommand();
+        // No transaction: this is a side-effect-free read, used by the Phase 11
+        // checkpoint signer to know what to attest. WAL gives readers a stable
+        // snapshot for the duration of the query, so a concurrent AppendAsync
+        // can't tear the result.
+        command.CommandText = "SELECT seq, row_hash, ts_unix_ns FROM event_log ORDER BY seq DESC LIMIT 1;";
+
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) return null;
+
+        var seq = reader.GetInt64(0);
+        var rowHash = (byte[])reader.GetValue(1);
+        var timestampUnixNs = reader.GetInt64(2);
+        return new ChainHead(
+            seq,
+            rowHash,
+            DateTimeOffset.FromUnixTimeMilliseconds(timestampUnixNs / 1_000_000L));
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<EventLogEntry>> ListByKindsAsync(
         IReadOnlyCollection<EventKind> kinds, int limit, CancellationToken cancellationToken
     ) {

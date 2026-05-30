@@ -329,6 +329,9 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
         public Task<IReadOnlyList<EventLogEntry>> ListByKindsAsync(
             IReadOnlyCollection<EventKind> kinds, int limit, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<EventLogEntry>>(Array.Empty<EventLogEntry>());
+
+        public Task<ChainHead?> TryGetChainHeadAsync(CancellationToken cancellationToken)
+            => Task.FromResult<ChainHead?>(null);
     }
 
     private sealed class ThrowingFirewallRuleStore : IFirewallRuleStore {

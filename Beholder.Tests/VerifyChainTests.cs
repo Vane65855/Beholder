@@ -219,5 +219,8 @@ public sealed class VerifyChainTests : IDisposable {
         public Task<IReadOnlyList<EventLogEntry>> ListByKindsAsync(
             IReadOnlyCollection<EventKind> kinds, int limit, CancellationToken cancellationToken)
             => throw new InvalidOperationException("Simulated infrastructure failure");
+
+        public Task<ChainHead?> TryGetChainHeadAsync(CancellationToken cancellationToken)
+            => throw new InvalidOperationException("Simulated infrastructure failure");
     }
 }

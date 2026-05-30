@@ -35,6 +35,13 @@ public interface IEventStore {
     /// </summary>
     Task<IReadOnlyList<EventLogEntry>> ListByKindsAsync(
         IReadOnlyCollection<EventKind> kinds, int limit, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns the chain's current head row (latest seq + its row_hash + timestamp)
+    /// or <c>null</c> when the chain is empty. Used by the Phase 11 checkpoint
+    /// signer to know what to attest. Side-effect-free.
+    /// </summary>
+    Task<ChainHead?> TryGetChainHeadAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -48,3 +55,11 @@ public sealed record EventLogEntry(
     EventKind Kind,
     DateTimeOffset Timestamp,
     byte[] Payload);
+
+/// <summary>
+/// The chain's current head — the highest-seq row in <c>event_log</c>, with
+/// its 32-byte <c>row_hash</c> and timestamp. Returned by
+/// <see cref="IEventStore.TryGetChainHeadAsync"/>; consumed by the Phase 11
+/// checkpoint signer.
+/// </summary>
+public sealed record ChainHead(long Seq, byte[] RowHash, DateTimeOffset Timestamp);

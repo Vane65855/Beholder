@@ -42,4 +42,15 @@ internal sealed class FakeEventStore : IEventStore {
             .ToList();
         return Task.FromResult(filtered);
     }
+
+    public Task<ChainHead?> TryGetChainHeadAsync(CancellationToken cancellationToken) {
+        if (_entries.Count == 0) return Task.FromResult<ChainHead?>(null);
+        var latest = _entries[^1];
+        // No real hash chain in the fake — synthesize a deterministic 32-byte
+        // sentinel from the seq so tests that don't care about cryptographic
+        // verification still get a valid-shape ChainHead.
+        var rowHash = new byte[ChainHasher.HashSize];
+        BitConverter.GetBytes(latest.Seq).CopyTo(rowHash, 0);
+        return Task.FromResult<ChainHead?>(new ChainHead(latest.Seq, rowHash, latest.Timestamp));
+    }
 }

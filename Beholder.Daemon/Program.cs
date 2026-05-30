@@ -201,6 +201,8 @@ if (OperatingSystem.IsWindows()) {
         builder.Configuration.GetSection("Firewall"));
     builder.Services.Configure<AlertOptions>(
         builder.Configuration.GetSection("Alert"));
+    builder.Services.Configure<CheckpointOptions>(
+        builder.Configuration.GetSection("Checkpoint"));
 
     builder.Services.AddSingleton<IFirewallEnforcementState, FirewallEnforcementState>();
     builder.Services.AddHostedService<Beholder.Daemon.Pipeline.FirewallEnforcementService>();
@@ -240,6 +242,21 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddHostedService<NewProcessDetector>();
     builder.Services.AddHostedService<BinaryHashMonitor>();
     builder.Services.AddHostedService<ChainIntegrityMonitor>();
+
+    // Phase 11.1: signed chain checkpoints. The signer service writes a
+    // signed row into the `checkpoint` table on each tick when the chain
+    // has advanced; the key provider lazy-loads or generates the Ed25519
+    // keypair from `<dataDir>/keys/` on first use. Registered as a hosted
+    // service alongside the rest of the alert pipeline — order doesn't
+    // strictly matter (the signer is a writer, the alert pipeline is the
+    // reader), but grouping it with ChainIntegrityMonitor keeps the
+    // chain-integrity concerns colocated. See ADR 012 for the trust model.
+    builder.Services.AddSingleton<ICheckpointKeyProvider>(sp => new FileCheckpointKeyProvider(
+        keyFolder: Path.Combine(AppContext.BaseDirectory, "data", "keys"),
+        logger: sp.GetRequiredService<ILogger<FileCheckpointKeyProvider>>()));
+    builder.Services.AddSingleton<ICheckpointStore>(sp => new SqliteCheckpointStore(
+        sp.GetRequiredService<ConnectionFactory>()));
+    builder.Services.AddHostedService<CheckpointSignerService>();
 
     // RollupService must start after FlowEventPipeline so the first rollup
     // tick runs against raw data the engine has already begun producing.

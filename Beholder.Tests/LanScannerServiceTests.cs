@@ -540,6 +540,9 @@ public sealed class LanScannerServiceTests : IDisposable {
         public Task<IReadOnlyList<EventLogEntry>> ListByKindsAsync(
             IReadOnlyCollection<EventKind> kinds, int limit, CancellationToken cancellationToken
         ) => Task.FromResult<IReadOnlyList<EventLogEntry>>([]);
+
+        public Task<ChainHead?> TryGetChainHeadAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<ChainHead?>(null);
     }
 }
 
