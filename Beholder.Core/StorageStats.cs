@@ -40,6 +40,19 @@ namespace Beholder.Core;
 /// field for convenience so the Settings tab's MOTD strip can render
 /// "N LAN devices tracked" without a second lookup over <see cref="Tables"/>.
 /// </param>
+/// <param name="LatestCheckpointSeq">
+/// Sequence number of the most recent signed checkpoint (Phase 11), or null
+/// when no checkpoint has been written yet. Surfaced in the Settings tab's
+/// Maintenance section as "Last checkpoint: seq N · …".
+/// </param>
+/// <param name="LatestCheckpointAt">
+/// Wall-clock time the most recent checkpoint was signed, or null when none
+/// exists. Drives the "N minutes ago" relative-time label beside the seq.
+/// </param>
+/// <param name="LatestCheckpointKeyId">
+/// Key-id fingerprint of the most recent checkpoint's signature, or null when
+/// none exists. Shown truncated so the user can spot a key rotation.
+/// </param>
 public sealed record StorageStats(
     string DatabasePath,
     long DatabaseBytesTotal,
@@ -47,5 +60,8 @@ public sealed record StorageStats(
     ChainStatus? ChainStatus,
     DateTimeOffset? ChainFirstEventAt,
     DateTimeOffset DaemonStartedAt,
-    long LanDeviceCount
+    long LanDeviceCount,
+    long? LatestCheckpointSeq = null,
+    DateTimeOffset? LatestCheckpointAt = null,
+    string? LatestCheckpointKeyId = null
 );

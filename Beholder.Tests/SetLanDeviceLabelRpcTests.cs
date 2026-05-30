@@ -1,4 +1,4 @@
-using Beholder.Core;
+﻿using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
@@ -35,7 +35,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             new FakeEventStore(), new FakeTrafficStore(),
             _lanDeviceStore, TestServiceFactory.CreateInactiveLanScannerService(_lanDeviceStore),
-            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -143,7 +143,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             new FakeEventStore(), new FakeTrafficStore(),
             throwingStore, TestServiceFactory.CreateInactiveLanScannerService(),
-            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -184,7 +184,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             new FakeEventStore(), new FakeTrafficStore(),
             store, TestServiceFactory.CreateInactiveLanScannerService(),
-            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -212,7 +212,7 @@ public sealed class SetLanDeviceLabelRpcTests : IDisposable {
 
     /// <summary>
     /// Store stub that throws <see cref="OperationCanceledException"/> when
-    /// the injected token is cancelled — used to drive the RPC handler's
+    /// the injected token is cancelled â€” used to drive the RPC handler's
     /// cancellation-propagation path without needing a real store.
     /// </summary>
     private sealed class CancellationProbingLanDeviceStore : ILanDeviceStore {

@@ -6,9 +6,8 @@ namespace Beholder.Tests.TestDoubles;
 /// In-memory <see cref="IEventStore"/> for detector tests that need a
 /// controllable Verify result without spinning up a real SQLite chain.
 /// Tests set <see cref="VerifyResult"/> or <see cref="VerifyException"/>
-/// to drive the success / failure / throw paths through
-/// <see cref="ChainIntegrityMonitor"/>. Append + ListByKinds round-trip
-/// in memory so callers needing a non-trivial chain can build one.
+/// to drive the success / failure / throw paths. Append + ListByKinds
+/// round-trip in memory so callers needing a non-trivial chain can build one.
 /// </summary>
 internal sealed class FakeEventStore : IEventStore {
     private readonly List<EventLogEntry> _entries = new();
@@ -32,6 +31,21 @@ internal sealed class FakeEventStore : IEventStore {
         return Task.FromResult(VerifyResult);
     }
 
+    public Task<ChainVerificationResult> VerifyFromAsync(
+        long fromSeq, byte[] expectedPrevHash, CancellationToken cancellationToken
+    ) {
+        if (VerifyException is not null) throw VerifyException;
+        return Task.FromResult(VerifyResult);
+    }
+
+    public Task<byte[]?> TryGetRowHashAsync(long seq, CancellationToken cancellationToken) {
+        var match = _entries.FirstOrDefault(e => e.Seq == seq);
+        if (match is null) return Task.FromResult<byte[]?>(null);
+        var rowHash = new byte[ChainHasher.HashSize];
+        BitConverter.GetBytes(match.Seq).CopyTo(rowHash, 0);
+        return Task.FromResult<byte[]?>(rowHash);
+    }
+
     public Task<IReadOnlyList<EventLogEntry>> ListByKindsAsync(
         IReadOnlyCollection<EventKind> kinds, int limit, CancellationToken cancellationToken
     ) {
@@ -46,9 +60,6 @@ internal sealed class FakeEventStore : IEventStore {
     public Task<ChainHead?> TryGetChainHeadAsync(CancellationToken cancellationToken) {
         if (_entries.Count == 0) return Task.FromResult<ChainHead?>(null);
         var latest = _entries[^1];
-        // No real hash chain in the fake — synthesize a deterministic 32-byte
-        // sentinel from the seq so tests that don't care about cryptographic
-        // verification still get a valid-shape ChainHead.
         var rowHash = new byte[ChainHasher.HashSize];
         BitConverter.GetBytes(latest.Seq).CopyTo(rowHash, 0);
         return Task.FromResult<ChainHead?>(new ChainHead(latest.Seq, rowHash, latest.Timestamp));

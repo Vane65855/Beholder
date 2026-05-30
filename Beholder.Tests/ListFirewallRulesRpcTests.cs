@@ -1,4 +1,4 @@
-using Beholder.Core;
+﻿using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
@@ -43,7 +43,7 @@ public sealed class ListFirewallRulesRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
-            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),

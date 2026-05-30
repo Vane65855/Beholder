@@ -26,6 +26,28 @@ public interface IEventStore {
     Task<ChainVerificationResult> VerifyAsync(CancellationToken cancellationToken);
 
     /// <summary>
+    /// Walks the chain forward from <paramref name="fromSeq"/> (inclusive),
+    /// requiring the first row's <c>prev_hash</c> to equal
+    /// <paramref name="expectedPrevHash"/> and recomputing every row's hash
+    /// from there to the head. <c>VerifyFromAsync(0, ChainHasher.ZeroPrevHash)</c>
+    /// is equivalent to <see cref="VerifyAsync"/>. Used by the checkpoint-anchored
+    /// verifier to skip rows already attested by a signed checkpoint.
+    /// <see cref="ChainVerificationResult.RowsVerified"/> counts only the rows
+    /// actually walked (from <paramref name="fromSeq"/> onward).
+    /// Side-effect-free and idempotent.
+    /// </summary>
+    Task<ChainVerificationResult> VerifyFromAsync(
+        long fromSeq, byte[] expectedPrevHash, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns the stored <c>row_hash</c> for the row at <paramref name="seq"/>,
+    /// or null when no such row exists. Used by the checkpoint-anchored verifier
+    /// to confirm the live chain's row at a checkpoint's seq still matches the
+    /// signed hash before trusting the anchor. Side-effect-free.
+    /// </summary>
+    Task<byte[]?> TryGetRowHashAsync(long seq, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Returns the most recent <paramref name="limit"/> events whose kind appears in
     /// <paramref name="kinds"/>, ordered newest-first by sequence number. Used by
     /// the Firewall tab's activity strip and any future audit views that need a

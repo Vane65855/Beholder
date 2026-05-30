@@ -113,6 +113,8 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
     [NotifyPropertyChangedFor(nameof(LanDeviceCountLabel))]
     [NotifyPropertyChangedFor(nameof(UptimeLabel))]
     [NotifyPropertyChangedFor(nameof(WatchingSinceLabel))]
+    [NotifyPropertyChangedFor(nameof(HasLatestCheckpoint))]
+    [NotifyPropertyChangedFor(nameof(LatestCheckpointLabel))]
     private GetStorageStatsResponse? _storageStats;
 
     /// <summary>Traffic-tier rows (the 5 rollup-cascade tables) in logical
@@ -211,6 +213,28 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
             if (StorageStats is null) return string.Empty;
             var count = StorageStats.LanDeviceCount;
             return count == 1 ? "1 LAN device tracked" : $"{count} LAN devices tracked";
+        }
+    }
+
+    /// <summary>True when at least one signed checkpoint exists (Phase 11.2).
+    /// Drives the visibility of the Maintenance section's "Last checkpoint"
+    /// line — hidden on a fresh install before the signer's first tick.</summary>
+    public bool HasLatestCheckpoint => StorageStats is not null && StorageStats.LatestCheckpointSeq > 0;
+
+    /// <summary>"seq 12,345 · signed 2m ago · key abc12345" — the most recent
+    /// Ed25519 checkpoint over the audit chain. Recomputed on every ticker
+    /// notification (for the relative "ago") + on each StorageStats arrival.</summary>
+    public string LatestCheckpointLabel {
+        get {
+            if (!HasLatestCheckpoint) return string.Empty;
+            var signedAt = FromUnixNs(StorageStats!.LatestCheckpointUnixNs);
+            var ago = Converters.RelativeTimeAgoConverter.Format(signedAt, _timeProvider.GetUtcNow());
+            var keyId = StorageStats.LatestCheckpointKeyId;
+            var keySuffix = string.IsNullOrEmpty(keyId)
+                ? string.Empty
+                : $" · key {keyId[..Math.Min(8, keyId.Length)]}";
+            var seqText = StorageStats.LatestCheckpointSeq.ToString("N0", CultureInfo.InvariantCulture);
+            return $"seq {seqText} · signed {ago}{keySuffix}";
         }
     }
 
@@ -1049,6 +1073,7 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         OnPropertyChanged(nameof(LastRefreshedAtLabel));
         OnPropertyChanged(nameof(UptimeLabel));
         OnPropertyChanged(nameof(WatchingSinceLabel));
+        OnPropertyChanged(nameof(LatestCheckpointLabel));
     }
 
     private static DateTimeOffset FromUnixNs(long unixNs) =>

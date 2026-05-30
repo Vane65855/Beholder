@@ -827,6 +827,11 @@
                                                            Foreground="{DynamicResource TextMuted}"
                                                            VerticalAlignment="Center" />
                                             </StackPanel>
+                                            <TextBlock Text="{Binding LatestCheckpointLabel, StringFormat='Last checkpoint: {0}'}"
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       IsVisible="{Binding HasLatestCheckpoint}"
+                                                       ToolTip.Tip="The most recent Ed25519-signed checkpoint over the audit chain. Checkpoints let verification skip re-hashing older rows and prove the chain head has not been rewritten since it was signed. Created automatically on a periodic timer." />
                                         </StackPanel>
                                         <Button Grid.Column="1"
                                                 Classes="actionButton"

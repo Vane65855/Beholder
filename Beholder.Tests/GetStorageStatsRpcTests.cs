@@ -39,7 +39,7 @@ public sealed class GetStorageStatsRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             new FakeEventStore(), new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
-            _chainStatusCache, _storageStatsProvider,
+            _chainStatusCache, new FakeChainVerifier(), _storageStatsProvider,
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -121,5 +121,47 @@ public sealed class GetStorageStatsRpcTests : IDisposable {
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => _service.GetStorageStats(new Local.GetStorageStatsRequest(), context));
+    }
+
+    [Fact]
+    public async Task GetStorageStats_CheckpointMetadata_FlowsThroughProto() {
+        var signedAt = new DateTimeOffset(2026, 5, 22, 15, 0, 0, TimeSpan.Zero);
+        _storageStatsProvider.Response = new StorageStats(
+            DatabasePath: @"C:\daemon\data\beholder.db",
+            DatabaseBytesTotal: 1024,
+            Tables: Array.Empty<TableStats>(),
+            ChainStatus: null,
+            ChainFirstEventAt: null,
+            DaemonStartedAt: FixedTimestamp,
+            LanDeviceCount: 0,
+            LatestCheckpointSeq: 271,
+            LatestCheckpointAt: signedAt,
+            LatestCheckpointKeyId: "abc1234567890def");
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.GetStorageStats(new Local.GetStorageStatsRequest(), context);
+
+        Assert.Equal(271, response.LatestCheckpointSeq);
+        Assert.Equal(signedAt.ToUnixTimeMilliseconds() * 1_000_000L, response.LatestCheckpointUnixNs);
+        Assert.Equal("abc1234567890def", response.LatestCheckpointKeyId);
+    }
+
+    [Fact]
+    public async Task GetStorageStats_NoCheckpoint_ProtoFieldsZeroEmpty() {
+        _storageStatsProvider.Response = new StorageStats(
+            DatabasePath: @"C:\daemon\data\beholder.db",
+            DatabaseBytesTotal: 1024,
+            Tables: Array.Empty<TableStats>(),
+            ChainStatus: null,
+            ChainFirstEventAt: null,
+            DaemonStartedAt: FixedTimestamp,
+            LanDeviceCount: 0);
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.GetStorageStats(new Local.GetStorageStatsRequest(), context);
+
+        Assert.Equal(0, response.LatestCheckpointSeq);
+        Assert.Equal(0, response.LatestCheckpointUnixNs);
+        Assert.Empty(response.LatestCheckpointKeyId);
     }
 }

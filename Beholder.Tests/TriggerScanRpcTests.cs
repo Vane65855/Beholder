@@ -1,4 +1,4 @@
-using Beholder.Core;
+﻿using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
@@ -50,7 +50,7 @@ public sealed class TriggerScanRpcTests : IDisposable {
 
     [Fact]
     public async Task TriggerScan_NoProbeRegistered_ReturnsSuccessFalseWithMessage() {
-        // Inactive scanner — probe is null. RunOnceManuallyAsync throws
+        // Inactive scanner â€” probe is null. RunOnceManuallyAsync throws
         // InvalidOperationException which the RPC handler converts to
         // success=false rather than RpcException.
         await using var scanner = CreateScanner(probe: null);
@@ -82,7 +82,7 @@ public sealed class TriggerScanRpcTests : IDisposable {
 
     [Fact]
     public async Task TriggerScan_OuterCancellation_PropagatesAsOperationCanceled() {
-        // Caller-side cancellation should NOT be converted to success=false —
+        // Caller-side cancellation should NOT be converted to success=false â€”
         // the RPC handler re-throws so gRPC can surface StatusCode.Cancelled.
         using var cts = new CancellationTokenSource();
         var probeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -181,7 +181,7 @@ public sealed class TriggerScanRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             new FakeEventStore(), new FakeTrafficStore(),
             new FakeLanDeviceStore(), scanner,
-            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),

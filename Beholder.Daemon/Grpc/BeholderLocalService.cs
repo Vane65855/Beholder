@@ -41,6 +41,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     private readonly ILanDeviceStore _lanDeviceStore;
     private readonly LanScannerService _lanScannerService;
     private readonly IChainStatusCache _chainStatusCache;
+    private readonly IChainVerifier _chainVerifier;
     private readonly IStorageStatsProvider _storageStatsProvider;
     private readonly IRecordingSettingsState _recordingSettings;
     private readonly IHostnameResolutionSettingsState _hostnameResolutionSettings;
@@ -63,6 +64,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         ILanDeviceStore lanDeviceStore,
         LanScannerService lanScannerService,
         IChainStatusCache chainStatusCache,
+        IChainVerifier chainVerifier,
         IStorageStatsProvider storageStatsProvider,
         IRecordingSettingsState recordingSettings,
         IHostnameResolutionSettingsState hostnameResolutionSettings,
@@ -84,6 +86,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         ArgumentNullException.ThrowIfNull(lanDeviceStore);
         ArgumentNullException.ThrowIfNull(lanScannerService);
         ArgumentNullException.ThrowIfNull(chainStatusCache);
+        ArgumentNullException.ThrowIfNull(chainVerifier);
         ArgumentNullException.ThrowIfNull(storageStatsProvider);
         ArgumentNullException.ThrowIfNull(recordingSettings);
         ArgumentNullException.ThrowIfNull(hostnameResolutionSettings);
@@ -104,6 +107,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         _lanDeviceStore = lanDeviceStore;
         _lanScannerService = lanScannerService;
         _chainStatusCache = chainStatusCache;
+        _chainVerifier = chainVerifier;
         _storageStatsProvider = storageStatsProvider;
         _recordingSettings = recordingSettings;
         _hostnameResolutionSettings = hostnameResolutionSettings;
@@ -373,8 +377,12 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     public override async Task<Local.VerifyChainResponse> VerifyChain(
         Local.VerifyChainRequest request, ServerCallContext context
     ) {
+        ArgumentNullException.ThrowIfNull(request);
         try {
-            var result = await _eventStore.VerifyAsync(context.CancellationToken)
+            // Phase 11.2: anchor on the latest signed checkpoint unless the
+            // caller forces a full genesis-to-head walk.
+            var result = await _chainVerifier
+                .VerifyAsync(request.ForceFull, context.CancellationToken)
                 .ConfigureAwait(false);
             // Mirror the ChainIntegrityMonitor cache write so user-triggered
             // verifications also update the Settings tab's "last verified at"

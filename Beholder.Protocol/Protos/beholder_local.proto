@@ -174,13 +174,22 @@ message MarkAlertReadRequest {
 
 message MarkAlertReadResponse {}
 
-message VerifyChainRequest {}
+message VerifyChainRequest {
+  // Phase 11.2: when true, walk the whole chain from genesis instead of
+  // anchoring on the latest signed checkpoint. Default false = use the anchor
+  // when a usable checkpoint exists.
+  bool force_full = 1;
+}
 
 message VerifyChainResponse {
   bool is_valid = 1;
-  int64 rows_verified = 2;
+  int64 rows_verified = 2;      // rows actually walked (forward from the anchor when anchored)
   int64 failed_at_seq = 3;      // 0 when is_valid = true
   string error_message = 4;     // "" when is_valid = true
+  // Phase 11.2: the checkpoint this verification anchored on. anchor_seq = 0
+  // and anchor_key_id = "" when the chain was walked in full from genesis.
+  int64 anchor_seq = 5;
+  string anchor_key_id = 6;
 }
 
 // ---- Historical traffic query messages ----
@@ -615,6 +624,12 @@ message GetStorageStatsResponse {
   // convenience. The Settings tab's MOTD strip uses this to render
   // "N LAN devices tracked" without re-scanning the per-table list.
   int64 lan_device_count = 8;
+  // Phase 11.2: latest signed checkpoint metadata for the Maintenance
+  // section's "Last checkpoint: seq N · …" line. latest_checkpoint_seq = 0
+  // and the key id = "" when no checkpoint has been signed yet.
+  int64 latest_checkpoint_seq = 9;
+  int64 latest_checkpoint_unix_ns = 10;
+  string latest_checkpoint_key_id = 11;
 }
 
 // ---- Service ----

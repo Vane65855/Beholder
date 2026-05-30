@@ -1,4 +1,4 @@
-using Beholder.Core;
+﻿using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
@@ -35,7 +35,7 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             new FakeEventStore(), new FakeTrafficStore(),
             _lanDeviceStore, TestServiceFactory.CreateInactiveLanScannerService(_lanDeviceStore),
-            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -90,7 +90,7 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
 
     [Fact]
     public async Task ListLanDevices_LimitZero_UsesServerDefaultOf200() {
-        // Server default is 200 — seed 250 and confirm only the top-200 (newest)
+        // Server default is 200 â€” seed 250 and confirm only the top-200 (newest)
         // come back. Test guards against the default silently widening.
         for (var i = 0; i < 250; i++) {
             _lanDeviceStore.Seed(MakeDevice(
@@ -133,7 +133,7 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
             new Local.ListLanDevicesRequest { Limit = 2 }, context);
 
         Assert.Equal(2, response.Devices.Count);
-        // Newest two — order is LastSeen DESC.
+        // Newest two â€” order is LastSeen DESC.
         Assert.Equal("aa:aa:aa:aa:aa:02", response.Devices[0].Mac);
         Assert.Equal("aa:aa:aa:aa:aa:01", response.Devices[1].Mac);
     }
@@ -183,7 +183,7 @@ public sealed class ListLanDevicesRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             new FakeEventStore(), new FakeTrafficStore(),
             throwingStore, TestServiceFactory.CreateInactiveLanScannerService(),
-            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),

@@ -55,18 +55,32 @@ internal sealed class SqliteEventStore : IEventStore {
     }
 
     /// <inheritdoc />
-    public async Task<ChainVerificationResult> VerifyAsync(CancellationToken cancellationToken) {
+    public Task<ChainVerificationResult> VerifyAsync(CancellationToken cancellationToken) =>
+        VerifyFromAsync(0, ChainHasher.ZeroPrevHash, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<ChainVerificationResult> VerifyFromAsync(
+        long fromSeq, byte[] expectedPrevHash, CancellationToken cancellationToken
+    ) {
+        ArgumentNullException.ThrowIfNull(expectedPrevHash);
+        if (expectedPrevHash.Length != ChainHasher.HashSize) {
+            throw new ArgumentException(
+                $"expectedPrevHash must be exactly {ChainHasher.HashSize} bytes.", nameof(expectedPrevHash));
+        }
+
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT seq, ts_unix_ns, kind, payload, prev_hash, row_hash
             FROM event_log
+            WHERE seq >= $fromSeq
             ORDER BY seq ASC;
             """;
+        command.Parameters.AddWithValue("$fromSeq", fromSeq);
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
-        byte[] expectedPrev = ChainHasher.ZeroPrevHash;
+        byte[] expectedPrev = expectedPrevHash;
         var rowsVerified = 0L;
 
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
@@ -90,6 +104,18 @@ internal sealed class SqliteEventStore : IEventStore {
         }
 
         return ChainVerificationResult.Success(rowsVerified);
+    }
+
+    /// <inheritdoc />
+    public async Task<byte[]?> TryGetRowHashAsync(long seq, CancellationToken cancellationToken) {
+        using var connection = _connectionFactory.CreateConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT row_hash FROM event_log WHERE seq = $seq LIMIT 1;";
+        command.Parameters.AddWithValue("$seq", seq);
+
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) return null;
+        return (byte[])reader.GetValue(0);
     }
 
     private static async Task<(long LastSeq, byte[] PrevHash)> ReadLastRowAsync(

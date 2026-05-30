@@ -1,5 +1,6 @@
 using Beholder.Core;
 using Beholder.Daemon.Storage;
+using Beholder.Tests.TestDoubles;
 
 namespace Beholder.Tests;
 
@@ -108,6 +109,35 @@ public sealed class SqliteStorageStatsProviderTests : IDisposable {
         Assert.Equal(0, stats.LanDeviceCount);
     }
 
-    private SqliteStorageStatsProvider CreateProvider() => new(
-        _connectionFactory, _chainStatusCache, _daemonClock, _databasePath);
+    [Fact]
+    public async Task GetAsync_CheckpointMetadataNull_WhenNoCheckpoint() {
+        var provider = CreateProvider();
+        var stats = await provider.GetAsync(TestContext.Current.CancellationToken);
+        Assert.Null(stats.LatestCheckpointSeq);
+        Assert.Null(stats.LatestCheckpointAt);
+        Assert.Null(stats.LatestCheckpointKeyId);
+    }
+
+    [Fact]
+    public async Task GetAsync_CheckpointMetadataForwarded_WhenCheckpointExists() {
+        var signedAt = new DateTimeOffset(2026, 5, 22, 15, 0, 0, TimeSpan.Zero);
+        var checkpointStore = new FakeCheckpointStore();
+        checkpointStore.Seed(new Checkpoint(
+            Seq: 314,
+            RowHash: new byte[ChainHasher.HashSize],
+            Timestamp: signedAt,
+            Signature: new byte[64],
+            KeyId: "feedface12345678"));
+        var provider = CreateProvider(checkpointStore);
+
+        var stats = await provider.GetAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(314, stats.LatestCheckpointSeq);
+        Assert.Equal(signedAt, stats.LatestCheckpointAt);
+        Assert.Equal("feedface12345678", stats.LatestCheckpointKeyId);
+    }
+
+    private SqliteStorageStatsProvider CreateProvider(ICheckpointStore? checkpointStore = null) => new(
+        _connectionFactory, _chainStatusCache, checkpointStore ?? new FakeCheckpointStore(),
+        _daemonClock, _databasePath);
 }

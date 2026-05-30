@@ -1,4 +1,4 @@
-using Beholder.Core;
+﻿using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
@@ -53,7 +53,7 @@ public sealed class RemoveFirewallRuleRpcTests : IDisposable {
             _firewallController, _enforcementState,
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
-            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -202,7 +202,7 @@ public sealed class RemoveFirewallRuleRpcTests : IDisposable {
             () => _service.RemoveFirewallRule(request, context));
         Assert.Equal(StatusCode.Internal, ex.StatusCode);
 
-        // SQLite must still hold the rule — controller failure aborts before
+        // SQLite must still hold the rule â€” controller failure aborts before
         // persistence, mirroring ApplyFirewallRule's "OS leads" semantics.
         var afterRules = await _firewallStore.ListAllAsync(CancellationToken.None);
         Assert.Single(afterRules);

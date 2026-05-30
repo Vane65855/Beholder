@@ -14,9 +14,9 @@ public sealed class ChainIntegrityMonitorTests {
     [Fact]
     public async Task VerifyOnce_ChainValid_NoAlert() {
         var fixture = new Fixture();
-        fixture.EventStore.VerifyResult = ChainVerificationResult.Success(rowsVerified: 42);
+        fixture.ChainVerifier.Result = ChainVerificationResult.Success(rowsVerified: 42);
 
-        await fixture.Monitor.VerifyOnceAsync(CancellationToken.None);
+        await fixture.Monitor.VerifyOnceAsync(forceFull: false, CancellationToken.None);
 
         Assert.Empty(fixture.Emitter.Emissions);
     }
@@ -24,10 +24,10 @@ public sealed class ChainIntegrityMonitorTests {
     [Fact]
     public async Task VerifyOnce_ChainInvalid_EmitsAlertWithFailedSeq() {
         var fixture = new Fixture();
-        fixture.EventStore.VerifyResult = ChainVerificationResult.Failure(
+        fixture.ChainVerifier.Result = ChainVerificationResult.Failure(
             rowsVerified: 5, failedAtSeq: 6, errorMessage: "row_hash mismatch at seq 6");
 
-        await fixture.Monitor.VerifyOnceAsync(CancellationToken.None);
+        await fixture.Monitor.VerifyOnceAsync(forceFull: false, CancellationToken.None);
 
         var emission = Assert.Single(fixture.Emitter.Emissions);
         Assert.Equal(AlertKind.ChainError, emission.Kind);
@@ -41,9 +41,9 @@ public sealed class ChainIntegrityMonitorTests {
         // VerifyAsync throwing is treated as transient infrastructure
         // failure (DB lock, IO blip), not chain corruption — no alert.
         var fixture = new Fixture();
-        fixture.EventStore.VerifyException = new InvalidOperationException("DB locked");
+        fixture.ChainVerifier.Exception = new InvalidOperationException("DB locked");
 
-        await fixture.Monitor.VerifyOnceAsync(CancellationToken.None);
+        await fixture.Monitor.VerifyOnceAsync(forceFull: false, CancellationToken.None);
 
         Assert.Empty(fixture.Emitter.Emissions);
     }
@@ -54,9 +54,9 @@ public sealed class ChainIntegrityMonitorTests {
         // the wall-clock time into IChainStatusCache so the Settings tab's
         // Maintenance section can render "last verified: 3m ago — valid".
         var fixture = new Fixture();
-        fixture.EventStore.VerifyResult = ChainVerificationResult.Success(rowsVerified: 99);
+        fixture.ChainVerifier.Result = ChainVerificationResult.Success(rowsVerified: 99);
 
-        await fixture.Monitor.VerifyOnceAsync(CancellationToken.None);
+        await fixture.Monitor.VerifyOnceAsync(forceFull: false, CancellationToken.None);
 
         var update = Assert.Single(fixture.ChainStatusCache.UpdateCalls);
         Assert.True(update.Result.IsValid);
@@ -71,10 +71,10 @@ public sealed class ChainIntegrityMonitorTests {
         // whether the chain was valid. (Distinct from VerifyAsync throwing,
         // which is transient infra and is correctly skipped.)
         var fixture = new Fixture();
-        fixture.EventStore.VerifyResult = ChainVerificationResult.Failure(
+        fixture.ChainVerifier.Result = ChainVerificationResult.Failure(
             rowsVerified: 7, failedAtSeq: 8, errorMessage: "hash mismatch");
 
-        await fixture.Monitor.VerifyOnceAsync(CancellationToken.None);
+        await fixture.Monitor.VerifyOnceAsync(forceFull: false, CancellationToken.None);
 
         var update = Assert.Single(fixture.ChainStatusCache.UpdateCalls);
         Assert.False(update.Result.IsValid);
@@ -87,11 +87,24 @@ public sealed class ChainIntegrityMonitorTests {
         // verification result — otherwise a 5-minute DB lock would
         // discard a perfectly good "verified 3 minutes ago" snapshot.
         var fixture = new Fixture();
-        fixture.EventStore.VerifyException = new InvalidOperationException("DB locked");
+        fixture.ChainVerifier.Exception = new InvalidOperationException("DB locked");
 
-        await fixture.Monitor.VerifyOnceAsync(CancellationToken.None);
+        await fixture.Monitor.VerifyOnceAsync(forceFull: false, CancellationToken.None);
 
         Assert.Empty(fixture.ChainStatusCache.UpdateCalls);
+    }
+
+    [Fact]
+    public async Task VerifyOnce_PeriodicTick_UsesAnchoredVerify() {
+        // Phase 11.2: the periodic re-verify uses the fast checkpoint anchor
+        // (forceFull: false). The mandatory startup verify is the only
+        // forceFull: true caller (covered by the StartAsync test below).
+        var fixture = new Fixture();
+        fixture.ChainVerifier.Result = ChainVerificationResult.Success(rowsVerified: 1);
+
+        await fixture.Monitor.VerifyOnceAsync(forceFull: false, CancellationToken.None);
+
+        Assert.Equal(false, fixture.ChainVerifier.LastForceFull);
     }
 
     [Fact]
@@ -102,14 +115,14 @@ public sealed class ChainIntegrityMonitorTests {
         // startup (power loss mid-write, manual SQL tampering between
         // daemon runs); allowing the UI toggle to silence the startup
         // check would silently hide corruption — exactly what the chain
-        // exists to prevent. The toggle now gates only the periodic loop
-        // (see StartAsync_DetectionDisabled_SkipsPeriodicLoop below).
+        // exists to prevent. The toggle now gates only the periodic loop.
+        // Phase 11.2: the startup verify is forceFull: true (full walk).
         var fixture = new Fixture();
         fixture.AlertSettings.SetSettings(
             enableNewProcessDetection: true,
             enableHashChangeDetection: true,
             enableChainIntegrityMonitor: false);
-        fixture.EventStore.VerifyResult = ChainVerificationResult.Failure(
+        fixture.ChainVerifier.Result = ChainVerificationResult.Failure(
             rowsVerified: 0, failedAtSeq: 1, errorMessage: "boom");
 
         var ct = TestContext.Current.CancellationToken;
@@ -118,15 +131,16 @@ public sealed class ChainIntegrityMonitorTests {
         await Task.Delay(50, ct);
         await fixture.Monitor.StopAsync(ct);
 
-        // The startup verify emitted the failure alert.
+        // The startup verify emitted the failure alert, and used the full walk.
         Assert.Single(fixture.Emitter.Emissions);
         Assert.Equal(AlertKind.ChainError, fixture.Emitter.Emissions[0].Kind);
+        Assert.Equal(true, fixture.ChainVerifier.LastForceFull);
     }
 
     [Fact]
-    public void Constructor_NullEventStore_Throws() =>
+    public void Constructor_NullChainVerifier_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new ChainIntegrityMonitor(
-            eventStore: null!,
+            chainVerifier: null!,
             alertEmitter: new FakeAlertEmitter(),
             chainStatusCache: new FakeChainStatusCache(),
             options: new FakeOptionsMonitor<AlertOptions>(new AlertOptions()),
@@ -135,7 +149,7 @@ public sealed class ChainIntegrityMonitorTests {
             logger: NullLogger<ChainIntegrityMonitor>.Instance));
 
     private sealed class Fixture {
-        public FakeEventStore EventStore { get; } = new();
+        public FakeChainVerifier ChainVerifier { get; } = new();
         public FakeAlertEmitter Emitter { get; } = new();
         public FakeChainStatusCache ChainStatusCache { get; } = new();
         public FakeOptionsMonitor<AlertOptions> Options { get; } = new(new AlertOptions());
@@ -145,7 +159,7 @@ public sealed class ChainIntegrityMonitorTests {
 
         public Fixture() {
             Monitor = new ChainIntegrityMonitor(
-                EventStore, Emitter, ChainStatusCache, Options, AlertSettings, Time,
+                ChainVerifier, Emitter, ChainStatusCache, Options, AlertSettings, Time,
                 NullLogger<ChainIntegrityMonitor>.Instance);
         }
     }

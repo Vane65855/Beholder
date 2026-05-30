@@ -150,6 +150,8 @@ internal static class ProtocolConverters {
             RowsVerified = source.RowsVerified,
             FailedAtSeq = source.FailedAtSeq ?? 0,
             ErrorMessage = source.ErrorMessage ?? "",
+            AnchorSeq = source.AnchorSeq ?? 0,
+            AnchorKeyId = source.AnchorKeyId ?? "",
         };
     }
 
@@ -298,6 +300,9 @@ internal static class ProtocolConverters {
             ChainFirstEventUnixNs = source.ChainFirstEventAt?.ToUnixTimeNanoseconds() ?? 0,
             DaemonStartedUnixNs = source.DaemonStartedAt.ToUnixTimeNanoseconds(),
             LanDeviceCount = source.LanDeviceCount,
+            LatestCheckpointSeq = source.LatestCheckpointSeq ?? 0,
+            LatestCheckpointUnixNs = source.LatestCheckpointAt?.ToUnixTimeNanoseconds() ?? 0,
+            LatestCheckpointKeyId = source.LatestCheckpointKeyId ?? "",
         };
         foreach (var table in source.Tables) response.Tables.Add(table.ToProto());
         if (source.ChainStatus is not null) response.ChainStatus = source.ChainStatus.ToProto();

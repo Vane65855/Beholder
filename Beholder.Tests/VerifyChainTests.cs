@@ -1,4 +1,4 @@
-using Beholder.Core;
+﻿using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
@@ -23,6 +23,8 @@ public sealed class VerifyChainTests : IDisposable {
     private readonly FakeTimeProvider _timeProvider;
     private readonly BroadcastService _broadcaster;
     private readonly FakeChainStatusCache _chainStatusCache;
+    private readonly FakeCheckpointStore _checkpointStore;
+    private readonly FakeCheckpointKeyProvider _keyProvider;
     private readonly BeholderLocalService _service;
 
     public VerifyChainTests() {
@@ -46,13 +48,18 @@ public sealed class VerifyChainTests : IDisposable {
             NullLogger<FlowEventPipeline>.Instance, NullLoggerFactory.Instance);
 
         _chainStatusCache = new FakeChainStatusCache();
+        _checkpointStore = new FakeCheckpointStore();
+        _keyProvider = new FakeCheckpointKeyProvider();
 
         _service = new BeholderLocalService(
             _broadcaster, pipeline, firewallStore, alertStore,
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
-            _chainStatusCache, new FakeStorageStatsProvider(),
+            _chainStatusCache,
+            new ChainVerifier(_eventStore, _checkpointStore,
+                _keyProvider, NullLogger<ChainVerifier>.Instance),
+            new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -63,7 +70,49 @@ public sealed class VerifyChainTests : IDisposable {
 
     public void Dispose() {
         _broadcaster.Dispose();
+        _keyProvider.Dispose();
         if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true);
+    }
+
+    [Fact]
+    public async Task VerifyChain_AnchoredRun_PopulatesAnchorSeqOnResponse() {
+        // Phase 11.2: a seeded valid checkpoint makes the RPC anchor; the
+        // response carries anchor_seq + anchor_key_id end-to-end through ToProto.
+        await _eventStore.AppendAsync(EventKind.Counter, new byte[] { 0x01 }, CancellationToken.None);
+        await _eventStore.AppendAsync(EventKind.NewProcess, new byte[] { 0x02 }, CancellationToken.None);
+        await _eventStore.AppendAsync(EventKind.HashChanged, new byte[] { 0x03 }, CancellationToken.None);
+        _checkpointStore.Seed(await SignValidCheckpointAtAsync(1));
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.VerifyChain(new Local.VerifyChainRequest(), context);
+
+        Assert.True(response.IsValid);
+        Assert.Equal(1, response.AnchorSeq);
+        Assert.Equal(_keyProvider.KeyId, response.AnchorKeyId);
+    }
+
+    [Fact]
+    public async Task VerifyChain_ForceFull_BypassesAnchor() {
+        await _eventStore.AppendAsync(EventKind.Counter, new byte[] { 0x01 }, CancellationToken.None);
+        await _eventStore.AppendAsync(EventKind.NewProcess, new byte[] { 0x02 }, CancellationToken.None);
+        _checkpointStore.Seed(await SignValidCheckpointAtAsync(0));
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.VerifyChain(
+            new Local.VerifyChainRequest { ForceFull = true }, context);
+
+        Assert.True(response.IsValid);
+        Assert.Equal(0, response.AnchorSeq);          // 0 = full walk, not anchored
+        Assert.Empty(response.AnchorKeyId);
+        Assert.Equal(2, response.RowsVerified);       // both rows walked from genesis
+    }
+
+    private async Task<Checkpoint> SignValidCheckpointAtAsync(long seq) {
+        var rowHash = (await _eventStore.TryGetRowHashAsync(seq, CancellationToken.None))!;
+        var payload = CheckpointSignaturePayload.Build(
+            seq, rowHash, FixedTimestamp.ToUnixTimeMilliseconds() * 1_000_000L);
+        var signature = _keyProvider.Sign(payload);
+        return new Checkpoint(seq, rowHash, FixedTimestamp, signature, _keyProvider.KeyId);
     }
 
     [Fact]
@@ -177,7 +226,10 @@ public sealed class VerifyChainTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             throwingStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
-            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(),
+            new ChainVerifier(throwingStore, new FakeCheckpointStore(),
+                new FakeCheckpointKeyProvider(), NullLogger<ChainVerifier>.Instance),
+            new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -221,6 +273,13 @@ public sealed class VerifyChainTests : IDisposable {
             => throw new InvalidOperationException("Simulated infrastructure failure");
 
         public Task<ChainHead?> TryGetChainHeadAsync(CancellationToken cancellationToken)
+            => throw new InvalidOperationException("Simulated infrastructure failure");
+
+        public Task<ChainVerificationResult> VerifyFromAsync(
+            long fromSeq, byte[] expectedPrevHash, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("Simulated infrastructure failure");
+
+        public Task<byte[]?> TryGetRowHashAsync(long seq, CancellationToken cancellationToken)
             => throw new InvalidOperationException("Simulated infrastructure failure");
     }
 }

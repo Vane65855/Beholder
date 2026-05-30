@@ -1,4 +1,4 @@
-using Beholder.Core;
+﻿using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
@@ -51,7 +51,7 @@ public sealed class GetFirewallActivityRpcTests : IDisposable {
             _firewallController, _enforcementState,
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
-            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -134,13 +134,13 @@ public sealed class GetFirewallActivityRpcTests : IDisposable {
 
     [Fact]
     public async Task GetFirewallActivity_LimitClampedAtServerCap() {
-        // 600 > hard cap (500) — server clamps without throwing.
+        // 600 > hard cap (500) â€” server clamps without throwing.
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
 
         var response = await _service.GetFirewallActivity(
             new Local.GetFirewallActivityRequest { Limit = 600 }, context);
 
-        // Empty chain → still empty. Validates that the clamp doesn't reject
+        // Empty chain â†’ still empty. Validates that the clamp doesn't reject
         // the call.
         Assert.Empty(response.Events);
     }

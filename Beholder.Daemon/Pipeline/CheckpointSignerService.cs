@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using Beholder.Core;
 using Microsoft.Extensions.Options;
 
@@ -30,11 +29,6 @@ namespace Beholder.Daemon.Pipeline;
 /// </para>
 /// </remarks>
 internal sealed class CheckpointSignerService : IHostedService, IDisposable {
-    /// <summary>
-    /// Big-endian: 8 bytes seq + 32 bytes row_hash + 8 bytes ts_unix_ns.
-    /// </summary>
-    private const int SignedPayloadSize = sizeof(long) + ChainHasher.HashSize + sizeof(long);
-
     private readonly IEventStore _eventStore;
     private readonly ICheckpointStore _checkpointStore;
     private readonly ICheckpointKeyProvider _keyProvider;
@@ -144,7 +138,14 @@ internal sealed class CheckpointSignerService : IHostedService, IDisposable {
             return;
         }
 
-        var signedPayload = BuildSignedPayload(head);
+        // Sign over the SAME timestamp stored in the checkpoint row. The signed
+        // payload and the persisted ts_unix_ns column must agree — the verifier
+        // reconstructs the payload from the stored row, so signing over any
+        // other value (e.g. the head row's own timestamp) makes verification
+        // fail and the anchor silently degrade to a full walk every time.
+        var signingTime = _timeProvider.GetUtcNow();
+        var signedPayload = CheckpointSignaturePayload.Build(
+            head.Seq, head.RowHash, signingTime.ToUnixTimeMilliseconds() * 1_000_000L);
         byte[] signature;
         string keyId;
         try {
@@ -158,7 +159,7 @@ internal sealed class CheckpointSignerService : IHostedService, IDisposable {
         var checkpoint = new Checkpoint(
             Seq: head.Seq,
             RowHash: head.RowHash,
-            Timestamp: _timeProvider.GetUtcNow(),
+            Timestamp: signingTime,
             Signature: signature,
             KeyId: keyId);
 
@@ -170,24 +171,5 @@ internal sealed class CheckpointSignerService : IHostedService, IDisposable {
             _logger.LogError(ex,
                 "CheckpointSignerService: failed to append checkpoint at seq {Seq}", head.Seq);
         }
-    }
-
-    /// <summary>
-    /// Serialises <paramref name="head"/> into the canonical big-endian
-    /// <c>seq(8) ‖ row_hash(32) ‖ ts_unix_ns(8)</c> form that the signature
-    /// covers. Receivers reproduce these bytes to verify.
-    /// </summary>
-    private static byte[] BuildSignedPayload(ChainHead head) {
-        if (head.RowHash.Length != ChainHasher.HashSize) {
-            throw new ArgumentException(
-                $"row_hash must be exactly {ChainHasher.HashSize} bytes", nameof(head));
-        }
-        var buffer = new byte[SignedPayloadSize];
-        BinaryPrimitives.WriteInt64BigEndian(buffer.AsSpan(0, 8), head.Seq);
-        head.RowHash.AsSpan().CopyTo(buffer.AsSpan(8, ChainHasher.HashSize));
-        BinaryPrimitives.WriteInt64BigEndian(
-            buffer.AsSpan(8 + ChainHasher.HashSize, 8),
-            head.Timestamp.ToUnixTimeMilliseconds() * 1_000_000L);
-        return buffer;
     }
 }

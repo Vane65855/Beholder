@@ -206,6 +206,74 @@ public sealed class SqliteEventStoreTests : IDisposable {
         Assert.Equal(expectedHash, head.RowHash);
     }
 
+    [Fact]
+    public async Task VerifyFromAsync_FromGenesis_EqualsFullVerify() {
+        for (var i = 0; i < 4; i++) {
+            await _store.AppendAsync(EventKind.Counter, new byte[] { (byte)i }, CancellationToken.None);
+        }
+
+        var result = await _store.VerifyFromAsync(0, ChainHasher.ZeroPrevHash, CancellationToken.None);
+
+        Assert.True(result.IsValid);
+        Assert.Equal(4, result.RowsVerified);
+    }
+
+    [Fact]
+    public async Task VerifyFromAsync_PartialWalk_VerifiesSubsetFromAnchor() {
+        for (var i = 0; i < 5; i++) {
+            await _store.AppendAsync(EventKind.Counter, new byte[] { (byte)i }, CancellationToken.None);
+        }
+        var anchorRowHash = (await _store.TryGetRowHashAsync(2, CancellationToken.None))!;
+
+        var result = await _store.VerifyFromAsync(3, anchorRowHash, CancellationToken.None);
+
+        Assert.True(result.IsValid);
+        Assert.Equal(2, result.RowsVerified);   // only seqs 3 and 4
+    }
+
+    [Fact]
+    public async Task VerifyFromAsync_WrongExpectedPrev_FailsAtFirstWalkedRow() {
+        for (var i = 0; i < 5; i++) {
+            await _store.AppendAsync(EventKind.Counter, new byte[] { (byte)i }, CancellationToken.None);
+        }
+        var wrongPrev = new byte[ChainHasher.HashSize];
+        Array.Fill(wrongPrev, (byte)0x99);
+
+        var result = await _store.VerifyFromAsync(3, wrongPrev, CancellationToken.None);
+
+        Assert.False(result.IsValid);
+        Assert.Equal(3, result.FailedAtSeq);
+        Assert.Contains("prev_hash mismatch", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task VerifyFromAsync_WrongLengthExpectedPrev_Throws() {
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _store.VerifyFromAsync(0, new byte[8], CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task TryGetRowHashAsync_ExistingSeq_ReturnsStoredHash() {
+        var payload = new byte[] { 0x11, 0x22 };
+        await _store.AppendAsync(EventKind.Counter, payload, CancellationToken.None);
+
+        var rowHash = await _store.TryGetRowHashAsync(0, CancellationToken.None);
+
+        Assert.NotNull(rowHash);
+        var expected = ChainHasher.ComputeRowHash(
+            0L, ExpectedTs, EventKind.Counter, payload, ChainHasher.ZeroPrevHash);
+        Assert.Equal(expected, rowHash);
+    }
+
+    [Fact]
+    public async Task TryGetRowHashAsync_AbsentSeq_ReturnsNull() {
+        await _store.AppendAsync(EventKind.Counter, new byte[] { 0x01 }, CancellationToken.None);
+
+        var rowHash = await _store.TryGetRowHashAsync(999, CancellationToken.None);
+
+        Assert.Null(rowHash);
+    }
+
     private IReadOnlyList<EventRow> ReadAllRows() {
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();

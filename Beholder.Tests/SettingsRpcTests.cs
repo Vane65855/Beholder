@@ -1,4 +1,4 @@
-using Beholder.Core;
+﻿using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
@@ -53,7 +53,7 @@ public sealed class SettingsRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
-            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
             _recordingState, _hostnameState, _alertState, _scannerState, _overridesStore, new FakeAppIdentityRuleStore(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
@@ -187,7 +187,7 @@ public sealed class SettingsRpcTests : IDisposable {
     public async Task SetHostnameResolutionSettings_PartialChange_PersistsAllThreeKeysStill() {
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
 
-        // Only flip one field — the daemon still re-asserts all three values
+        // Only flip one field â€” the daemon still re-asserts all three values
         // to the store so future startup loads see the user's full view.
         var response = await _service.SetHostnameResolutionSettings(
             new Local.SetHostnameResolutionSettingsRequest {

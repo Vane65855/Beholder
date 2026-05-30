@@ -1,4 +1,4 @@
-using Beholder.Daemon;
+﻿using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Storage;
@@ -53,7 +53,7 @@ public sealed class GetProcessDestinationsRpcTests : IDisposable {
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
             eventStore, trafficStore,
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
-            new FakeChainStatusCache(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -71,7 +71,7 @@ public sealed class GetProcessDestinationsRpcTests : IDisposable {
     public async Task GetProcessDestinations_WithCountryAndLimit_FiltersToCountryReturnsTopN() {
         // End-to-end through the gRPC handler. Seed three destinations in
         // different countries with different totals; request country=DE
-        // limit=2 → expect only the DE entry, even though it's not the
+        // limit=2 â†’ expect only the DE entry, even though it's not the
         // global top-2 by bytes.
         var trafficStore = (SqliteTrafficStore)typeof(BeholderLocalService)
             .GetField("_trafficStore", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!

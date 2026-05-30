@@ -20,7 +20,7 @@ namespace Beholder.Daemon.Pipeline;
 /// </para>
 /// </remarks>
 internal sealed class ChainIntegrityMonitor : IHostedService, IDisposable {
-    private readonly IEventStore _eventStore;
+    private readonly IChainVerifier _chainVerifier;
     private readonly IAlertEmitter _alertEmitter;
     private readonly IChainStatusCache _chainStatusCache;
     private readonly IOptionsMonitor<AlertOptions> _options;
@@ -33,7 +33,7 @@ internal sealed class ChainIntegrityMonitor : IHostedService, IDisposable {
     private bool _disposed;
 
     public ChainIntegrityMonitor(
-        IEventStore eventStore,
+        IChainVerifier chainVerifier,
         IAlertEmitter alertEmitter,
         IChainStatusCache chainStatusCache,
         IOptionsMonitor<AlertOptions> options,
@@ -41,14 +41,14 @@ internal sealed class ChainIntegrityMonitor : IHostedService, IDisposable {
         TimeProvider timeProvider,
         ILogger<ChainIntegrityMonitor> logger
     ) {
-        ArgumentNullException.ThrowIfNull(eventStore);
+        ArgumentNullException.ThrowIfNull(chainVerifier);
         ArgumentNullException.ThrowIfNull(alertEmitter);
         ArgumentNullException.ThrowIfNull(chainStatusCache);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(alertSettings);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
-        _eventStore = eventStore;
+        _chainVerifier = chainVerifier;
         _alertEmitter = alertEmitter;
         _chainStatusCache = chainStatusCache;
         // Phase 13.3: numeric interval stays on IOptionsMonitor<AlertOptions>
@@ -99,15 +99,21 @@ internal sealed class ChainIntegrityMonitor : IHostedService, IDisposable {
     private async Task RunLoopAsync(CancellationToken cancellationToken) {
         try {
             // Mandatory startup verify (cannot be disabled via the UI toggle —
-            // see StartAsync's docstring for the rationale). Failure here
-            // produces the alert even before the periodic timer's first tick.
-            await VerifyOnceAsync(cancellationToken).ConfigureAwait(false);
+            // see StartAsync's docstring for the rationale). forceFull: true —
+            // the startup verify walks from genesis so it catches at-rest
+            // corruption in rows before the latest checkpoint (e.g. disk
+            // bit-rot) that the anchored fast path would skip. Phase 11.2.
+            await VerifyOnceAsync(forceFull: true, cancellationToken).ConfigureAwait(false);
 
             var interval = TimeSpan.FromMinutes(_options.CurrentValue.ChainVerifyIntervalMinutes);
             using var timer = new PeriodicTimer(interval, _timeProvider);
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false)) {
                 if (!_alertSettings.EnableChainIntegrityMonitor) continue;
-                await VerifyOnceAsync(cancellationToken).ConfigureAwait(false);
+                // Periodic re-verify uses the fast checkpoint anchor — corruption
+                // that develops while the daemon runs is always cascaded (the
+                // daemon is the sole writer), which the anchor + forward walk
+                // catches. The hourly O(n) walk this replaces is the §5 gap.
+                await VerifyOnceAsync(forceFull: false, cancellationToken).ConfigureAwait(false);
             }
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             // Expected on shutdown.
@@ -119,11 +125,13 @@ internal sealed class ChainIntegrityMonitor : IHostedService, IDisposable {
     /// <summary>
     /// Test seam: synchronously runs one verification pass and emits an
     /// alert on failure. Tests bypass the loop and call this directly.
+    /// <paramref name="forceFull"/> true walks from genesis; false uses the
+    /// checkpoint anchor when available.
     /// </summary>
-    internal async Task VerifyOnceAsync(CancellationToken cancellationToken) {
+    internal async Task VerifyOnceAsync(bool forceFull, CancellationToken cancellationToken) {
         ChainVerificationResult result;
         try {
-            result = await _eventStore.VerifyAsync(cancellationToken).ConfigureAwait(false);
+            result = await _chainVerifier.VerifyAsync(forceFull, cancellationToken).ConfigureAwait(false);
         } catch (OperationCanceledException) {
             throw;
         } catch (Exception ex) {

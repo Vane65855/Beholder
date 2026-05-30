@@ -543,6 +543,13 @@ public sealed class LanScannerServiceTests : IDisposable {
 
         public Task<ChainHead?> TryGetChainHeadAsync(CancellationToken cancellationToken) =>
             Task.FromResult<ChainHead?>(null);
+
+        public Task<ChainVerificationResult> VerifyFromAsync(
+            long fromSeq, byte[] expectedPrevHash, CancellationToken cancellationToken) =>
+            Task.FromResult(ChainVerificationResult.Success(0));
+
+        public Task<byte[]?> TryGetRowHashAsync(long seq, CancellationToken cancellationToken) =>
+            Task.FromResult<byte[]?>(null);
     }
 }
 

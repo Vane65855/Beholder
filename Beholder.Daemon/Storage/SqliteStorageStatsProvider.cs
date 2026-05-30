@@ -23,21 +23,25 @@ internal sealed class SqliteStorageStatsProvider : IStorageStatsProvider {
 
     private readonly ConnectionFactory _connectionFactory;
     private readonly IChainStatusCache _chainStatusCache;
+    private readonly ICheckpointStore _checkpointStore;
     private readonly IDaemonClock _daemonClock;
     private readonly string _databasePath;
 
     public SqliteStorageStatsProvider(
         ConnectionFactory connectionFactory,
         IChainStatusCache chainStatusCache,
+        ICheckpointStore checkpointStore,
         IDaemonClock daemonClock,
         string databasePath
     ) {
         ArgumentNullException.ThrowIfNull(connectionFactory);
         ArgumentNullException.ThrowIfNull(chainStatusCache);
+        ArgumentNullException.ThrowIfNull(checkpointStore);
         ArgumentNullException.ThrowIfNull(daemonClock);
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         _connectionFactory = connectionFactory;
         _chainStatusCache = chainStatusCache;
+        _checkpointStore = checkpointStore;
         _daemonClock = daemonClock;
         _databasePath = databasePath;
     }
@@ -68,6 +72,12 @@ internal sealed class SqliteStorageStatsProvider : IStorageStatsProvider {
         var chainFirstEventAt = await QueryChainFirstEventAtAsync(
             connection, cancellationToken).ConfigureAwait(false);
 
+        // Latest signed checkpoint (Phase 11), read fresh each call so the
+        // Settings tab's "Last checkpoint" line reflects the current signer
+        // state independently of when the chain was last verified.
+        var latestCheckpoint = await _checkpointStore
+            .GetLatestAsync(cancellationToken).ConfigureAwait(false);
+
         return new StorageStats(
             DatabasePath: _databasePath,
             DatabaseBytesTotal: totalBytes,
@@ -75,7 +85,10 @@ internal sealed class SqliteStorageStatsProvider : IStorageStatsProvider {
             ChainStatus: _chainStatusCache.Current,
             ChainFirstEventAt: chainFirstEventAt,
             DaemonStartedAt: _daemonClock.StartedAt,
-            LanDeviceCount: lanDeviceCount);
+            LanDeviceCount: lanDeviceCount,
+            LatestCheckpointSeq: latestCheckpoint?.Seq,
+            LatestCheckpointAt: latestCheckpoint?.Timestamp,
+            LatestCheckpointKeyId: latestCheckpoint?.KeyId);
     }
 
     /// <summary>

@@ -90,6 +90,13 @@ if (OperatingSystem.IsWindows()) {
     // user-triggered VerifyChain RPC; read by the GetStorageStats RPC for
     // the Settings tab's Maintenance section.
     builder.Services.AddSingleton<IChainStatusCache, ChainStatusCache>();
+    // Phase 11.2: chain verifier that anchors on the latest signed checkpoint
+    // (written by CheckpointSignerService) to skip re-walking attested rows on
+    // the periodic re-verify + the user-triggered VerifyChain RPC. Composes
+    // IEventStore + ICheckpointStore + ICheckpointKeyProvider (the latter two
+    // are registered in the Phase 11.1 block below; DI resolution is lazy so
+    // registration order doesn't matter).
+    builder.Services.AddSingleton<IChainVerifier, ChainVerifier>();
     // Phase 13.1: SQLite per-table row counts + database file size, bundled
     // with the cached chain status, for the Settings tab's Data Storage
     // section. The factory lambda passes databasePath directly (rather than
@@ -98,6 +105,7 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<IStorageStatsProvider>(sp => new SqliteStorageStatsProvider(
         connectionFactory: sp.GetRequiredService<ConnectionFactory>(),
         chainStatusCache: sp.GetRequiredService<IChainStatusCache>(),
+        checkpointStore: sp.GetRequiredService<ICheckpointStore>(),
         daemonClock: sp.GetRequiredService<IDaemonClock>(),
         databasePath: databasePath));
     builder.Services.AddSingleton<SqliteFirewallRuleStore>();
