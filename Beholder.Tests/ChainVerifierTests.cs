@@ -124,7 +124,7 @@ public sealed class ChainVerifierTests : IDisposable {
     }
 
     [Fact]
-    public async Task VerifyAsync_ValidAnchor_WalksForwardOnly_WithAnchorMetadata() {
+    public async Task VerifyAsync_ValidAnchor_ReportsFullChainLength_WithAnchorMetadata() {
         await AppendEventsAsync(5);   // seqs 0..4
         _checkpointStore.Seed(await SignValidCheckpointAtAsync(2));
 
@@ -133,19 +133,24 @@ public sealed class ChainVerifierTests : IDisposable {
         Assert.True(result.IsValid);
         Assert.Equal(2, result.AnchorSeq);
         Assert.Equal(_keyProvider.KeyId, result.AnchorKeyId);
-        Assert.Equal(2, result.RowsVerified);   // only seqs 3 and 4 walked
+        // 3 rows attested by the signature (seqs 0,1,2) + 2 re-hashed forward
+        // (seqs 3,4) = the full 5-row chain.
+        Assert.Equal(5, result.RowsVerified);
     }
 
     [Fact]
-    public async Task VerifyAsync_AnchorAtHead_ZeroForwardRows_IsValid() {
-        await AppendEventsAsync(3);   // seqs 0..2, head = 2
+    public async Task VerifyAsync_AnchorAtHead_ReportsFullChainLength_IsValid() {
+        await AppendEventsAsync(3);   // seqs 0..2, head = 2, anchor = 2 (at head)
+
         _checkpointStore.Seed(await SignValidCheckpointAtAsync(2));
 
         var result = await _verifier.VerifyAsync(forceFull: false, CancellationToken.None);
 
         Assert.True(result.IsValid);
         Assert.Equal(2, result.AnchorSeq);
-        Assert.Equal(0, result.RowsVerified);
+        // Zero rows walked forward, but the signature attests all 3 — the user
+        // sees the real chain length, not 0.
+        Assert.Equal(3, result.RowsVerified);
     }
 
     [Fact]

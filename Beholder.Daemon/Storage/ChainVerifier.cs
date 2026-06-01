@@ -92,11 +92,25 @@ internal sealed class ChainVerifier : IChainVerifier {
                     "chain head was altered after it was signed");
         }
 
-        // Case 6: anchor confirmed. Walk forward from the row after the anchor,
-        // expecting its prev_hash to chain off the signed row_hash.
-        var result = await _eventStore
+        // Case 6: anchor confirmed. The Ed25519 signature over the anchor's
+        // row_hash transitively attests every row up to and including the
+        // anchor — it's a hash chain, so row_hash[anchor] commits to all
+        // prior rows. Those count as verified without re-hashing. Walk
+        // forward from the row after the anchor and report the total the
+        // verification vouches for (attested prefix + rows re-hashed), so an
+        // anchored "Verify now" shows the real chain length rather than just
+        // the post-anchor delta (which is 0 when the anchor sits at the head).
+        var attestedPrefix = checkpoint.Seq + 1;  // rows at seqs 0..checkpoint.Seq
+        var forward = await _eventStore
             .VerifyFromAsync(checkpoint.Seq + 1, checkpoint.RowHash, cancellationToken)
             .ConfigureAwait(false);
-        return result.WithAnchor(checkpoint.Seq, checkpoint.KeyId);
+        if (!forward.IsValid) {
+            return ChainVerificationResult
+                .Failure(attestedPrefix + forward.RowsVerified, forward.FailedAtSeq!.Value, forward.ErrorMessage!)
+                .WithAnchor(checkpoint.Seq, checkpoint.KeyId);
+        }
+        return ChainVerificationResult
+            .Success(attestedPrefix + forward.RowsVerified)
+            .WithAnchor(checkpoint.Seq, checkpoint.KeyId);
     }
 }
