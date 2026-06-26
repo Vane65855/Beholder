@@ -81,7 +81,7 @@ Case 5 is the security-critical branch and the reason verification is *not* a pl
     "from_seq": 0, "to_seq": 0,          // requested range; (0,0) = whole chain
     "event_count": 0,
     "events": [
-      { "seq": 0, "ts_unix_ns": 0, "kind": "…",
+      { "seq": 0, "ts_unix_ns": 0, "kind": "Counter", "kind_ordinal": 1,
         "payload_b64": "…", "prev_hash_b64": "…", "row_hash_b64": "…" }
     ]
   },
@@ -103,7 +103,7 @@ This honors the user's "sign the entire envelope, events included" requirement *
 [`ChainExporter.TryVerify`](../../Beholder.Daemon/Storage/ChainExporter.cs) is the reference verification routine, exposed for tests and documented here so a third party can reproduce it in ~30 lines. **Two independent guarantees** a receiver can check, neither requiring access to Beholder's database or private key:
 
 1. **Authenticity** — re-serialize `body` canonically, `SHA-256`, verify `signature_b64` against `public_key_b64` (cross-check `key_id` and `public_key_b64` against a trusted `checkpoint-public.bin` out of band). Proves the daemon produced this exact body.
-2. **Internal consistency** — for each event, recompute `row_hash = SHA-256(seq ‖ ts_unix_ns ‖ kind ‖ payload ‖ prev_hash)` (genesis `prev_hash` = 32 zero bytes) and confirm it matches `row_hash_b64`, and that each event's `prev_hash` equals the previous event's `row_hash`. Proves the chain is unbroken independently of the signature.
+2. **Internal consistency** — for each event, recompute `row_hash = SHA-256( seq(8) ‖ ts_unix_ns(8) ‖ kind_ordinal(4) ‖ payload ‖ prev_hash(32) )` (all integers big-endian; genesis `prev_hash` = 32 zero bytes) and confirm it matches `row_hash_b64`, and that each event's `prev_hash` equals the previous event's `row_hash`. Proves the chain is unbroken independently of the signature. **Note:** the hash covers the event's integer `kind_ordinal` (the 4 big-endian bytes), *not* the human-readable `kind` name beside it — `kind_ordinal` is exported precisely so this recomputation needs nothing outside the envelope (the `kind` string is a convenience for human readers and is itself covered by the signature). [`ChainExporterTests`](../../Beholder.Tests/ChainExporterTests.cs) and [`ExportChainRpcTests`](../../Beholder.Tests/ExportChainRpcTests.cs) exercise exactly this standalone recomputation against a real chain.
 
 The export smoke test ships a Python verifier (mirroring the 11.1 Python checkpoint verifier) that performs both checks, proving the contract cross-implementation.
 

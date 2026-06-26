@@ -1,3 +1,6 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
@@ -125,5 +128,53 @@ public sealed class ExportChainRpcTests : IDisposable {
             new Local.ExportChainRequest { FromSeq = -1, ToSeq = 0 }, context));
 
         Assert.Equal(StatusCode.InvalidArgument, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task ExportChain_EmbeddedHashChain_RecomputesIndependentlyFromEnvelope() {
+        for (var i = 0; i < 5; i++) {
+            await _eventStore.AppendAsync(EventKind.Counter, new byte[] { (byte)i, 0xAB }, CancellationToken.None);
+        }
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.ExportChain(
+            new Local.ExportChainRequest { FromSeq = 0, ToSeq = 0 }, context);
+
+        // Walk the envelope the way a third party with no Beholder install would:
+        // recompute row_hash from (seq, ts, kind_ordinal, payload, prev_hash) and
+        // confirm each event's prev_hash links to the prior row_hash.
+        using var doc = JsonDocument.Parse(response.SignedExport.Memory);
+        var events = doc.RootElement.GetProperty("body").GetProperty("events");
+        byte[] expectedPrev = new byte[32];   // genesis prev_hash = 32 zero bytes
+        foreach (var ev in events.EnumerateArray()) {
+            var prevHash = Convert.FromBase64String(ev.GetProperty("prev_hash_b64").GetString()!);
+            Assert.Equal(expectedPrev, prevHash);   // chain links forward
+
+            var recomputed = RecomputeRowHash(
+                ev.GetProperty("seq").GetInt64(),
+                ev.GetProperty("ts_unix_ns").GetInt64(),
+                ev.GetProperty("kind_ordinal").GetInt32(),
+                Convert.FromBase64String(ev.GetProperty("payload_b64").GetString()!),
+                prevHash);
+            var stored = Convert.FromBase64String(ev.GetProperty("row_hash_b64").GetString()!);
+            Assert.Equal(stored, recomputed);
+
+            expectedPrev = stored;
+        }
+    }
+
+    // Standalone re-implementation of ChainHasher.ComputeRowHash, written here to
+    // prove the envelope is verifiable WITHOUT depending on Beholder's hasher —
+    // exactly what the ADR 012 third-party verifier does.
+    private static byte[] RecomputeRowHash(
+        long seq, long tsUnixNs, int kindOrdinal, byte[] payload, byte[] prevHash
+    ) {
+        var buffer = new byte[8 + 8 + 4 + payload.Length + prevHash.Length];
+        BinaryPrimitives.WriteInt64BigEndian(buffer.AsSpan(0, 8), seq);
+        BinaryPrimitives.WriteInt64BigEndian(buffer.AsSpan(8, 8), tsUnixNs);
+        BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(16, 4), kindOrdinal);
+        payload.CopyTo(buffer.AsSpan(20, payload.Length));
+        prevHash.CopyTo(buffer.AsSpan(20 + payload.Length, prevHash.Length));
+        return SHA256.HashData(buffer);
     }
 }

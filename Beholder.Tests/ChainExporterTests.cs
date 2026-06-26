@@ -52,6 +52,9 @@ public sealed class ChainExporterTests : IDisposable {
         var ev = doc.RootElement.GetProperty("body").GetProperty("events")[0];
         Assert.Equal(0, ev.GetProperty("seq").GetInt64());
         Assert.Equal("Counter", ev.GetProperty("kind").GetString());
+        // The ordinal is what row_hash actually covers (4 BE bytes), so it must
+        // be exported for independent recomputation. Counter = 1.
+        Assert.Equal((int)EventKind.Counter, ev.GetProperty("kind_ordinal").GetInt32());
         Assert.False(string.IsNullOrEmpty(ev.GetProperty("payload_b64").GetString()));
         Assert.False(string.IsNullOrEmpty(ev.GetProperty("prev_hash_b64").GetString()));
         Assert.False(string.IsNullOrEmpty(ev.GetProperty("row_hash_b64").GetString()));

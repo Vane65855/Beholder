@@ -117,6 +117,7 @@ internal sealed class ChainExporter : IChainExporter {
                 Seq = row.Seq,
                 TimestampUnixNs = row.Timestamp.ToUnixTimeMilliseconds() * 1_000_000L,
                 Kind = row.Kind.ToString(),
+                KindOrdinal = (int)row.Kind,
                 PayloadBase64 = Convert.ToBase64String(row.Payload),
                 PrevHashBase64 = Convert.ToBase64String(row.PrevHash),
                 RowHashBase64 = Convert.ToBase64String(row.RowHash),
@@ -198,16 +199,23 @@ internal sealed class ChainExporter : IChainExporter {
         [JsonPropertyOrder(2)]
         public string Kind { get; init; } = "";
 
-        [JsonPropertyName("payload_b64")]
+        // The row hash covers the kind's integer ordinal (4 bytes big-endian),
+        // not the name above. Exported explicitly so a third party can recompute
+        // row_hash from the envelope alone without Beholder's EventKind mapping.
+        [JsonPropertyName("kind_ordinal")]
         [JsonPropertyOrder(3)]
+        public int KindOrdinal { get; init; }
+
+        [JsonPropertyName("payload_b64")]
+        [JsonPropertyOrder(4)]
         public string PayloadBase64 { get; init; } = "";
 
         [JsonPropertyName("prev_hash_b64")]
-        [JsonPropertyOrder(4)]
+        [JsonPropertyOrder(5)]
         public string PrevHashBase64 { get; init; } = "";
 
         [JsonPropertyName("row_hash_b64")]
-        [JsonPropertyOrder(5)]
+        [JsonPropertyOrder(6)]
         public string RowHashBase64 { get; init; } = "";
     }
 }
