@@ -6,6 +6,7 @@ using Beholder.Daemon.Scanner;
 using Beholder.Daemon.Storage;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 #if PLATFORM_WINDOWS
@@ -16,7 +17,27 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 #endif
 
+#if PLATFORM_WINDOWS
+// Phase 12.1: handle the one-shot service-control verbs (--install / --uninstall
+// / --status) before building the host, then exit with their status code. The
+// default verb, Run, falls through to start the daemon. See ADR 013.
+if (OperatingSystem.IsWindows()) {
+    switch (ServiceCommandLine.Parse(args)) {
+        case ServiceCommand.Install: return WindowsServiceInstaller.Install();
+        case ServiceCommand.Uninstall: return WindowsServiceInstaller.Uninstall();
+        case ServiceCommand.Status: return WindowsServiceInstaller.Status();
+        case ServiceCommand.Run: break;
+    }
+}
+#endif
+
 var builder = WebApplication.CreateBuilder(args);
+
+// Phase 12.1: when launched by the Windows SCM, cooperate with the service
+// lifetime (start/stop signals, no console) and route logging to the Windows
+// Event Log. A no-op for a console `dotnet run`, so development is unaffected.
+// See ADR 013.
+builder.Host.UseWindowsService(options => options.ServiceName = "Beholder");
 
 builder.Services.AddSingleton(TimeProvider.System);
 
@@ -26,7 +47,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 // begin work."
 builder.Services.AddSingleton<IDaemonClock, DaemonClock>();
 
-var databasePath = Path.Combine(AppContext.BaseDirectory, "data", "beholder.db");
+var databasePath = Path.Combine(DaemonPaths.WritableDataRoot, "beholder.db");
 new DatabaseInitializer(databasePath).Initialize();
 
 #if PLATFORM_WINDOWS
@@ -50,7 +71,7 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<EtwFlowSource>();
     builder.Services.AddSingleton<IGeoIpResolver>(sp => {
         var logger = sp.GetRequiredService<ILogger<DbIpProvider>>();
-        var mmdbPath = Path.Combine(AppContext.BaseDirectory, "data", "dbip-country-lite.mmdb");
+        var mmdbPath = Path.Combine(DaemonPaths.ReadOnlyAssetRoot, "dbip-country-lite.mmdb");
         if (!File.Exists(mmdbPath)) {
             logger.LogWarning(
                 "DB-IP MMDB file not found at {Path}, using null GeoIP resolver — all flow events will be tagged as Unknown",
@@ -146,7 +167,7 @@ if (OperatingSystem.IsWindows()) {
     // Phase 9.1 (ADR 009): LAN device storage.
     builder.Services.AddSingleton<SqliteLanDeviceStore>();
     builder.Services.AddSingleton<ILanDeviceStore>(sp => sp.GetRequiredService<SqliteLanDeviceStore>());
-    var ouiPath = Path.Combine(AppContext.BaseDirectory, "data", "oui.csv");
+    var ouiPath = Path.Combine(DaemonPaths.ReadOnlyAssetRoot, "oui.csv");
     builder.Services.AddSingleton<IOuiVendorLookup>(sp => new OuiVendorLookup(
         ouiPath, sp.GetRequiredService<ILogger<OuiVendorLookup>>()));
 
@@ -271,7 +292,7 @@ if (OperatingSystem.IsWindows()) {
     // reader), but grouping it with ChainIntegrityMonitor keeps the
     // chain-integrity concerns colocated. See ADR 012 for the trust model.
     builder.Services.AddSingleton<ICheckpointKeyProvider>(sp => new FileCheckpointKeyProvider(
-        keyFolder: Path.Combine(AppContext.BaseDirectory, "data", "keys"),
+        keyFolder: Path.Combine(DaemonPaths.WritableDataRoot, "keys"),
         logger: sp.GetRequiredService<ILogger<FileCheckpointKeyProvider>>()));
     builder.Services.AddSingleton<ICheckpointStore>(sp => new SqliteCheckpointStore(
         sp.GetRequiredService<ConnectionFactory>()));
@@ -286,8 +307,6 @@ if (OperatingSystem.IsWindows()) {
 }
 #endif
 
-builder.Services.AddHostedService<Worker>();
-
 var app = builder.Build();
 
 #if PLATFORM_WINDOWS
@@ -297,3 +316,8 @@ if (OperatingSystem.IsWindows()) {
 #endif
 
 app.Run();
+
+// The service-control verbs above return their own exit codes; a normal host
+// run returns 0 on clean shutdown. An explicit terminal return is required
+// because those early returns make this entry point int-returning.
+return 0;
