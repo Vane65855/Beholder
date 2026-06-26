@@ -23,7 +23,6 @@ Beholder NMT is an open-source network monitoring and firewall management applic
 ### Planned
 - **Uplink to remote aggregator** (Phase 10) — optional outbound TLS gRPC to a centralized aggregator for fleet monitoring. Off by default; the daemon and UI are fully functional standalone.
 - **Linux platform** — `Beholder.Daemon.Linux` (netlink + nftables) and Linux UI port. Project stubs exist; Windows is the primary platform today.
-- **Scanner tab** (Phase 9, unscoped) — feature surface defined by ADR before implementation.
 
 ## Architecture
 
