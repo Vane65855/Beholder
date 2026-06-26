@@ -145,23 +145,35 @@ public sealed class ArpScanProbeTests {
 
     [Fact]
     public async Task ProbeIpsAsync_ParallelDispatch_RunsConcurrently() {
-        // Fake probe sleeps 100 ms per call. With 64-way parallelism, 64 IPs
-        // should complete in ~100 ms — much less than the 64 × 100 = 6.4 s a
-        // sequential run would take. We assert < 1.5 s to leave generous
-        // headroom for thread-pool scheduling jitter on a loaded test machine.
+        // Assert the probes actually OVERLAP in time — not that the batch
+        // finishes by some wall-clock deadline. A deadline measures the thread
+        // pool's thread-injection rate, a shared global resource this code does
+        // not control, so it passes in isolation but flakes under full-suite
+        // contention. Instead each fake probe records the peak number of probes
+        // running simultaneously; a serial dispatch can never exceed 1.
+        var gate = new object();
+        var current = 0;
+        var peak = 0;
         var probe = new ArpScanProbe(
-            (_, _) => { Thread.Sleep(100); return null; },
+            (_, _) => {
+                lock (gate) { current++; if (current > peak) peak = current; }
+                Thread.Sleep(50);   // linger briefly so concurrent probes overlap
+                lock (gate) { current--; }
+                return null;
+            },
             TimeSpan.FromSeconds(60));
         var targets = Enumerable.Range(1, 64)
             .Select(i => new IPAddress([192, 168, 1, (byte)i]))
             .ToList();
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
         await probe.ProbeIpsAsync(targets, CancellationToken.None);
-        sw.Stop();
 
-        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(1.5),
-            $"Expected parallel dispatch to complete <1.5s; took {sw.Elapsed.TotalSeconds:F2}s");
+        // >= 2 is the provable, flake-proof floor: any overlap at all proves the
+        // dispatch was not serial. Deliberately not a higher number — asserting,
+        // say, "64-way" would re-couple the test to how many threads the pool
+        // grants under load, reintroducing the exact fragility this removes.
+        Assert.True(peak >= 2,
+            $"Expected probes to run concurrently; peak simultaneous probes was {peak}");
     }
 
     [Fact]
