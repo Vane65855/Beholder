@@ -69,6 +69,22 @@ public sealed class NewProcessDetectorTests {
         Assert.Null(info);
     }
 
+    [Theory]
+    [InlineData(ProcessSentinels.Unknown)]
+    [InlineData(ProcessSentinels.System)]
+    public async Task FirstFlow_NonTargetableSentinel_NoAlert_NoRegistration(string sentinel) {
+        // ProcessPathResolver emits these placeholders for PIDs it can't map to
+        // a real binary. They're non-actionable, so they must not raise an
+        // alert (which would permanently pollute the append-only chain) or
+        // leave a registry entry.
+        var fixture = new Fixture();
+
+        await fixture.Detector.ProcessAsync(sentinel, CancellationToken.None);
+
+        Assert.Empty(fixture.Emitter.Emissions);
+        Assert.Null(await fixture.Registry.GetByPathAsync(sentinel, CancellationToken.None));
+    }
+
     [Fact]
     public async Task EmitterFailure_Logged_DoesNotCrashDetector() {
         var fixture = new Fixture();

@@ -116,6 +116,16 @@ internal sealed class NewProcessDetector : IHostedService {
         try {
             if (!_alertSettings.EnableNewProcessDetection) return;
 
+            // Suppress the synthetic sentinels ProcessPathResolver emits for
+            // unresolvable PIDs — the kernel pseudo-process ("System") and the
+            // exited/access-denied placeholder ("unknown"). Neither is a
+            // rule-targetable binary, so a "first seen" alert is non-actionable
+            // noise AND would permanently pollute the append-only chain. The
+            // Firewall tab already hides both (FirewallTabViewModel
+            // .IsExcludedProcess); this keeps the alert pipeline consistent.
+            // Skipping here means no alert AND no process_registry entry.
+            if (ProcessSentinels.IsNonTargetable(processPath)) return;
+
             // Tier 1: path-based dedup catches daemon-restart re-observation.
             var existing = await _processRegistry.GetByPathAsync(processPath, cancellationToken)
                 .ConfigureAwait(false);

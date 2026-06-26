@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
+using Beholder.Core;
 
 namespace Beholder.Daemon.Windows;
 
@@ -22,25 +23,25 @@ internal sealed class ProcessPathResolver : IProcessPathResolver {
         // PID 4 is the Windows System process. Opening it as a regular Process handle
         // either fails or yields limited info depending on token privileges, so we
         // short-circuit with a fixed identity.
-        if (processId == 4) return ("System", "System");
+        if (processId == 4) return (ProcessSentinels.System, ProcessSentinels.System);
 
         try {
             using var process = Process.GetProcessById(processId);
             var name = process.ProcessName;
             try {
-                var path = process.MainModule?.FileName ?? "unknown";
+                var path = process.MainModule?.FileName ?? ProcessSentinels.Unknown;
                 return (name, path);
             } catch (Win32Exception) {
                 // Access denied reading MainModule (common for services running as
                 // SYSTEM when the daemon lacks cross-process inspection rights).
                 // We keep the process name — it came from a cheaper API.
-                return (name, "unknown");
+                return (name, ProcessSentinels.Unknown);
             }
         } catch (ArgumentException) {
             // Process already exited between the ETW event and our lookup.
-            return ("unknown", "unknown");
+            return (ProcessSentinels.Unknown, ProcessSentinels.Unknown);
         } catch (InvalidOperationException) {
-            return ("unknown", "unknown");
+            return (ProcessSentinels.Unknown, ProcessSentinels.Unknown);
         }
     }
 }
