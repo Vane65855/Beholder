@@ -15,6 +15,14 @@ public interface INotificationService {
     void Notify(long seq, AlertKind kind, string title, string body);
 
     /// <summary>
+    /// Post a general informational notification not tied to a chain alert
+    /// (e.g. the "still running in the tray" hint). Same best-effort contract as
+    /// <see cref="Notify"/>; carries no seq and never raises
+    /// <see cref="AlertActivated"/>.
+    /// </summary>
+    void NotifyInfo(string title, string body);
+
+    /// <summary>
     /// Fires when the user clicks a notification. Carries the alert's chain
     /// seq so subscribers can deep-link the user to it. Raised on whatever
     /// thread the OS callback runs on; subscribers must marshal to the UI

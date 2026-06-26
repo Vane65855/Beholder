@@ -792,6 +792,33 @@
                             </Grid>
                         </Border>
 
+                        <!-- ──────────  APPLICATION  ────────── -->
+                        <Border x:Name="ApplicationCard" Classes="sectionCard">
+                            <Grid>
+                                <Border Classes="accentStripe neutral" />
+                                <StackPanel Orientation="Vertical" Spacing="16">
+                                    <TextBlock Classes="sectionTitle" Text="APPLICATION" />
+
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="Close button minimizes to tray"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <TextBlock Text="When on, the window's X hides Beholder to the system tray instead of exiting. Monitoring continues either way — the daemon runs as a background service. Right-click the tray icon to reopen or exit."
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <controls:SettingsTogglePill Grid.Column="1"
+                                                                     IsOn="{Binding Application.CloseToTray}"
+                                                                     Command="{Binding ToggleCloseToTrayCommand}"
+                                                                     VerticalAlignment="Center" />
+                                    </Grid>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
                         <!-- ──────────  MAINTENANCE  ────────── -->
                         <Border x:Name="MaintenanceCard" Classes="sectionCard">
                             <Grid>

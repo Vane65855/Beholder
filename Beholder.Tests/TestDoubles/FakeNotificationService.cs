@@ -13,9 +13,16 @@ internal sealed class FakeNotificationService : INotificationService {
     public void Notify(long seq, AlertKind kind, string title, string body) =>
         Calls.Add(new NotifyCall(seq, kind, title, body));
 
+    public List<InfoCall> InfoCalls { get; } = new();
+
+    public void NotifyInfo(string title, string body) =>
+        InfoCalls.Add(new InfoCall(title, body));
+
     public event Action<long>? AlertActivated;
 
     public void RaiseAlertActivated(long seq) => AlertActivated?.Invoke(seq);
 
     public sealed record NotifyCall(long Seq, AlertKind Kind, string Title, string Body);
+
+    public sealed record InfoCall(string Title, string Body);
 }

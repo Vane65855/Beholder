@@ -12,6 +12,8 @@ namespace Beholder.Ui.Services;
 internal sealed class NoopNotificationService : INotificationService {
     public void Notify(long seq, AlertKind kind, string title, string body) { }
 
+    public void NotifyInfo(string title, string body) { }
+
     // Event is declared by the interface but never raised — no OS callback
     // exists to wire to on non-Windows platforms. Pragma silences CS0067
     // (unused event) without obscuring real "unused" warnings elsewhere.

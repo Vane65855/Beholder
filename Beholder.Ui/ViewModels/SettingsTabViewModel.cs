@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Beholder.Protocol.Local;
+using Beholder.Ui.Models;
 using Beholder.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -66,6 +67,7 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
     private readonly IClipboardWriter _clipboardWriter;
     private readonly IFilePicker _filePicker;
     private readonly IFileWriter _fileWriter;
+    private readonly IUiPreferencesStore _uiPreferencesStore;
     private readonly TimeProvider _timeProvider;
 
     private CancellationTokenSource? _activationCts;
@@ -158,6 +160,13 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
     /// <c>RemoveRule</c>, <c>CancelAddRule</c>).
     /// </summary>
     public AppIdentityRulesRow AppIdentityRules { get; } = new();
+
+    /// <summary>
+    /// UI-local application/window preferences (currently the close-to-tray
+    /// toggle). Persisted via <see cref="IUiPreferencesStore"/>, NOT the daemon —
+    /// a window preference must never enter the chain-audited settings.
+    /// </summary>
+    public ApplicationSettingsRow Application { get; } = new();
 
     /// <summary>Cyan-tinted share of the stacked total bar — sum of all
     /// traffic-tier rows divided by grand total. Falls back to 0 when the
@@ -262,6 +271,7 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         IClipboardWriter clipboardWriter,
         IFilePicker filePicker,
         IFileWriter fileWriter,
+        IUiPreferencesStore uiPreferencesStore,
         TimeProvider timeProvider
     ) {
         ArgumentNullException.ThrowIfNull(daemonClient);
@@ -270,6 +280,7 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         ArgumentNullException.ThrowIfNull(clipboardWriter);
         ArgumentNullException.ThrowIfNull(filePicker);
         ArgumentNullException.ThrowIfNull(fileWriter);
+        ArgumentNullException.ThrowIfNull(uiPreferencesStore);
         ArgumentNullException.ThrowIfNull(timeProvider);
         _daemonClient = daemonClient;
         _dispatcher = dispatcher;
@@ -277,10 +288,13 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         _clipboardWriter = clipboardWriter;
         _filePicker = filePicker;
         _fileWriter = fileWriter;
+        _uiPreferencesStore = uiPreferencesStore;
         _timeProvider = timeProvider;
 
         ChainStatus = ChainStatusRow.FromProto(null, timeProvider);
         AboutInfo = AboutInfo.FromRunningAssembly();
+        // Seed the UI-local Application section from the persisted preference.
+        Application.CloseToTray = uiPreferencesStore.Load().CloseToTray;
 
         // Auto-recover when the daemon transitions to Connected: if the tab
         // has previously been activated and is currently in an error state
@@ -516,6 +530,18 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
 
     [RelayCommand]
     private Task RefreshStorageStats() => LoadStorageStatsAsync(CancellationToken.None, isInitialLoad: false);
+
+    /// <summary>
+    /// Flips the close-to-tray preference and persists it locally. UI-only — no
+    /// daemon RPC and no chain event; the write is instant, so (unlike the
+    /// daemon-backed toggles) there's no saving state to surface.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleCloseToTray() {
+        Application.CloseToTray = !Application.CloseToTray;
+        var prefs = _uiPreferencesStore.Load();
+        _uiPreferencesStore.Save(prefs with { CloseToTray = Application.CloseToTray });
+    }
 
     /// <summary>
     /// Phase 13.2: optimistic-flip pattern for the FilterSelfTraffic pill.

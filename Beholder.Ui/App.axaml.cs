@@ -19,6 +19,7 @@ public partial class App : Application {
     private ProcessStateService? _processStateService;
     private MainWindowViewModel? _mainWindowVm;
     private INotificationService? _notifications;
+    private TrayController? _trayController;
 
     public override void Initialize() {
         AvaloniaXamlLoader.Load(this);
@@ -86,14 +87,23 @@ public partial class App : Application {
             // Phase 11.3: file writer persists the signed chain-export bytes
             // to the user-chosen path (Settings → Maintenance → Export chain).
             var fileWriter = new FileWriter();
+            // UI-local preferences (close-to-tray, etc.) — the only client-side
+            // persistence the UI has, deliberately NOT a daemon setting (ADR 010).
+            var uiPreferencesStore = new JsonUiPreferencesStore(
+                loggerFactory.CreateLogger<JsonUiPreferencesStore>());
 
             _mainWindowVm = new MainWindowViewModel(
                 _daemonClient, _processStateService, _streamSubscriber,
                 statusStripVm, historicalChartLoader, dispatcher, _notifications,
-                shellOpener, clipboardWriter, filePicker, fileWriter);
+                shellOpener, clipboardWriter, filePicker, fileWriter, uiPreferencesStore);
             var mainWindow = new MainWindow { DataContext = _mainWindowVm };
             mainWindowRef = mainWindow;
             desktop.MainWindow = mainWindow;
+
+            // Close-to-tray: when the preference is on, the window's X hides it to
+            // the system tray (the daemon service keeps monitoring) rather than
+            // exiting; the tray menu restores or exits. See TrayController.
+            _trayController = new TrayController(desktop, mainWindow, uiPreferencesStore, _notifications);
 
             // Notification click → restore window + deep-link to alert. App
             // is the composition root, so this is the one place we can use
@@ -101,6 +111,7 @@ public partial class App : Application {
             // for VMs to stay testable). The handler must marshal because
             // AlertActivated fires on the OS callback thread.
             _notifications.AlertActivated += seq => Dispatcher.UIThread.Post(() => {
+                mainWindow.Show();   // restore if it was hidden to the tray
                 if (mainWindow.WindowState == WindowState.Minimized)
                     mainWindow.WindowState = WindowState.Normal;
                 mainWindow.Activate();
@@ -114,6 +125,7 @@ public partial class App : Application {
             desktop.ShutdownRequested += async (_, _) => {
                 // Dispose subscribers first so their -= handlers run against
                 // still-live publishers, then tear down the publishers.
+                _trayController?.Dispose();
                 _mainWindowVm?.Dispose();
                 _processStateService?.Dispose();
                 if (_notifications is IDisposable disposableNotifications)

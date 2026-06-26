@@ -54,6 +54,19 @@ internal sealed class WindowsNotificationService : INotificationService, IDispos
         }
     }
 
+    public void NotifyInfo(string title, string body) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentException.ThrowIfNullOrWhiteSpace(body);
+        try {
+            new ToastContentBuilder()
+                .AddText(title)
+                .AddText(body)
+                .Show();
+        } catch (Exception ex) {
+            _logger.LogWarning(ex, "Failed to post info notification: {Title}", title);
+        }
+    }
+
     private void OnToastActivated(ToastNotificationActivatedEventArgsCompat args) {
         try {
             var parsed = ToastArguments.Parse(args.Argument);

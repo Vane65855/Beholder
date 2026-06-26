@@ -20,7 +20,7 @@ public class SettingsTabViewModelTests {
         var time = new FakeTimeProvider(FixedTimestamp);
         var vm = new SettingsTabViewModel(
             client, new SyncDispatcher(), shell, clipboard,
-            new FakeFilePicker(), new FakeFileWriter(), time);
+            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), time);
         return (vm, client, shell, clipboard, time);
     }
 
@@ -67,43 +67,64 @@ public class SettingsTabViewModelTests {
     public void Constructor_NullDaemonClient_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             null!, new SyncDispatcher(), new FakeShellOpener(), new FakeClipboardWriter(),
-            new FakeFilePicker(), new FakeFileWriter(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullDispatcher_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), null!, new FakeShellOpener(), new FakeClipboardWriter(),
-            new FakeFilePicker(), new FakeFileWriter(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullShellOpener_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), null!, new FakeClipboardWriter(),
-            new FakeFilePicker(), new FakeFileWriter(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullClipboardWriter_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(), null!,
-            new FakeFilePicker(), new FakeFileWriter(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullFilePicker_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
-            new FakeClipboardWriter(), null!, new FakeFileWriter(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeClipboardWriter(), null!, new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullFileWriter_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
-            new FakeClipboardWriter(), new FakeFilePicker(), null!, new FakeTimeProvider(FixedTimestamp)));
+            new FakeClipboardWriter(), new FakeFilePicker(), null!, new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp)));
+
+    [Fact]
+    public void Constructor_NullUiPreferencesStore_Throws() =>
+        Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
+            new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
+            new FakeClipboardWriter(), new FakeFilePicker(), new FakeFileWriter(), null!, new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullTimeProvider_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
-            new FakeClipboardWriter(), new FakeFilePicker(), new FakeFileWriter(), null!));
+            new FakeClipboardWriter(), new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), null!));
+
+    [Fact]
+    public void ToggleCloseToTray_FlipsAndPersistsToTheStore() {
+        var store = new FakeUiPreferencesStore();   // defaults CloseToTray = true
+        var vm = new SettingsTabViewModel(
+            new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(), new FakeClipboardWriter(),
+            new FakeFilePicker(), new FakeFileWriter(), store, new FakeTimeProvider(FixedTimestamp));
+
+        Assert.True(vm.Application.CloseToTray);    // seeded from the store on construction
+
+        vm.ToggleCloseToTrayCommand.Execute(null);
+
+        Assert.False(vm.Application.CloseToTray);    // flipped in the row
+        Assert.False(store.Current.CloseToTray);     // persisted to the store
+    }
 
     [Fact]
     public void InitialState_NoStorageStats_NoTables_DefaultPlaceholders() {
@@ -464,7 +485,7 @@ public class SettingsTabViewModelTests {
         var writer = new FakeFileWriter();
         var vm = new SettingsTabViewModel(
             client, new SyncDispatcher(), new FakeShellOpener(), new FakeClipboardWriter(),
-            picker, writer, new FakeTimeProvider(FixedTimestamp));
+            picker, writer, new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp));
         return (vm, client, picker, writer);
     }
 
