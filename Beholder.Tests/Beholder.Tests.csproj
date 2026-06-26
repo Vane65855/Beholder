@@ -39,10 +39,14 @@
        conditional PackageReference] → System.Drawing.Common 4.7.0). Image-
        attachment surface is unused; see Beholder.Ui.csproj for the full
        rationale. The DBus suppression is for Avalonia's Linux-only
-       transitive (safe on Windows). -->
+       transitive (safe on Windows). The SQLite suppression mirrors
+       Beholder.Daemon.csproj — CVE-2025-6965 needs attacker-controlled SQL
+       or a malicious schema, which our first-party static queries never
+       reach; see that project for the full rationale. -->
   <ItemGroup>
     <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-xrw6-gwf8-vvr9" />
     <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-rxg9-xrhp-64gj" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-2m69-gcr7-jv3q" />
   </ItemGroup>
 
   <ItemGroup>

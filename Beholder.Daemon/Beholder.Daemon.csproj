@@ -23,6 +23,23 @@
     <PackageReference Include="NSec.Cryptography" Version="24.4.0" />
   </ItemGroup>
 
+  <!-- Transitive vuln suppression: Microsoft.Data.Sqlite 10.0.5 pins
+       SQLitePCLRaw.bundle_e_sqlite3 2.1.11, whose native binary is SQLite
+       3.49.1 — affected by CVE-2025-6965 (GHSA-2m69-gcr7-jv3q), a memory
+       corruption fixed in SQLite 3.50.2. As of this writing there is no
+       fixed SQLitePCLRaw release on the 2.1.x line and Microsoft.Data.Sqlite
+       10.0.9 still pins 2.1.11; force-overriding to the 3.0.x bundle swaps a
+       major-version-newer native binary Microsoft hasn't validated against
+       10.0.x, trading a warning for real ABI risk. Suppress with cause: the
+       CVE requires attacker-controlled SQL or a malicious database schema,
+       and Beholder reaches neither — every query is first-party static /
+       parameterized (no user-supplied SQL on the IPC surface), and the .db
+       is daemon-owned in a privileged data dir. Drop this once
+       Microsoft.Data.Sqlite ships a bundle with SQLite >= 3.50.2. -->
+  <ItemGroup>
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-2m69-gcr7-jv3q" />
+  </ItemGroup>
+
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
