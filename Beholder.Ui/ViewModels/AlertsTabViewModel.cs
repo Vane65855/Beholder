@@ -279,6 +279,17 @@ internal sealed partial class AlertsTabViewModel : ViewModelBase, IDisposable {
     /// <c>FirewallActivityViewModel.AppendUnique</c>.
     /// </summary>
     private bool AppendUnique(AlertRow row, bool atFront = false) {
+        // Hide alerts for non-targetable sentinel processes — the kernel
+        // "System" pseudo-process and the "unknown" placeholder for PIDs that
+        // couldn't be resolved. The daemon no longer emits these
+        // (NewProcessDetector suppresses them), but pre-fix chains still hold
+        // them; filtering at this single insertion choke point hides the
+        // legacy rows without mutating the append-only chain — the same
+        // exclusion the Firewall and Traffic tabs apply. Fully-qualified
+        // because this file deliberately avoids `using Beholder.Core` (see the
+        // header note on enum aliasing).
+        if (Beholder.Core.ProcessSentinels.IsNonTargetable(row.ProcessPath)) return false;
+
         if (!_seenSeqs.Add(row.Seq)) return false;
 
         if (atFront) Alerts.Insert(0, row);

@@ -144,6 +144,34 @@ public class AlertsTabViewModelTests {
     }
 
     [Fact]
+    public async Task ActivateAsync_FiltersSentinelProcessAlertsFromList() {
+        // Legacy chains may hold NewProcess alerts for the non-targetable
+        // sentinels ("System" / "unknown"). The daemon no longer emits them,
+        // but the UI must hide any already in the chain — the chain keeps them,
+        // the list doesn't (mirrors the Firewall/Traffic exclusion).
+        var snapshot = SnapshotWith(
+            MakeAlert(seq: 100, processPath: @"C:\bin\app.exe", isRead: true),
+            MakeAlert(seq: 99, processPath: "unknown"),
+            MakeAlert(seq: 98, processPath: "System"));
+        var (vm, _, _, _, _) = CreateVm(snapshot);
+
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        var only = Assert.Single(vm.Alerts);
+        Assert.Equal(@"C:\bin\app.exe", only.ProcessPath);
+    }
+
+    [Fact]
+    public async Task OnAlertReceived_SentinelProcessAlert_NotAdded() {
+        var (vm, _, subscriber, _, _) = CreateVm();
+        await vm.ActivateAsync(TestContext.Current.CancellationToken);
+
+        RaiseAlertReceived(subscriber, new AlertEvent { Alert = MakeAlert(seq: 5, processPath: "unknown") });
+
+        Assert.Empty(vm.Alerts);
+    }
+
+    [Fact]
     public async Task ActivateAsync_WithAlerts_AutoSelectsFirstAlert() {
         var snapshot = SnapshotWith(MakeAlert(seq: 100, isRead: true));  // pre-read so auto-mark doesn't fire
         var (vm, _, _, _, _) = CreateVm(snapshot);
