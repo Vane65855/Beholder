@@ -48,7 +48,9 @@ internal sealed class SqliteAlertStore : IAlertStore {
     }
 
     public async Task MarkAlertReadAsync(long seq, DateTimeOffset viewedAt, CancellationToken cancellationToken) {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(seq);
+        // Event-log seq is 0-based; the genesis-row alert is seq 0, so only
+        // negatives are invalid.
+        ArgumentOutOfRangeException.ThrowIfNegative(seq);
 
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();

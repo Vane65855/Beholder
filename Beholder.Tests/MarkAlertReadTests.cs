@@ -77,13 +77,18 @@ public sealed class MarkAlertReadTests : IDisposable {
     }
 
     [Fact]
-    public async Task MarkAlertRead_ZeroSeq_ReturnsInvalidArgument() {
+    public async Task MarkAlertRead_ZeroSeq_MarksRead() {
+        // The event-log is 0-based, so the genesis row (oldest alert) is
+        // legitimately seq 0 — it must be markable, not rejected.
+        await InsertAlertRowAsync(0, "NewProcess", "/bin/genesis", "Genesis alert", FixedTimestamp);
         var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
 
-        var ex = await Assert.ThrowsAsync<RpcException>(
-            () => _service.MarkAlertRead(new Local.MarkAlertReadRequest { Seq = 0 }, context));
+        await _service.MarkAlertRead(new Local.MarkAlertReadRequest { Seq = 0 }, context);
 
-        Assert.Equal(StatusCode.InvalidArgument, ex.StatusCode);
+        var alerts = await _alertStore.GetAlertsAsync(10, TestContext.Current.CancellationToken);
+        var alert = Assert.Single(alerts);
+        Assert.True(alert.IsRead);
+        Assert.NotNull(alert.FirstViewedAt);
     }
 
     [Fact]

@@ -371,8 +371,10 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     public override async Task<Local.MarkAlertReadResponse> MarkAlertRead(
         Local.MarkAlertReadRequest request, ServerCallContext context
     ) {
-        if (request.Seq <= 0)
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "seq must be positive"));
+        // The event-log sequence is 0-based, so the genesis row (the oldest
+        // alert) is legitimately seq 0 — reject only negatives, not 0.
+        if (request.Seq < 0)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "seq must be non-negative"));
 
         var viewedAt = _timeProvider.GetUtcNow();
 

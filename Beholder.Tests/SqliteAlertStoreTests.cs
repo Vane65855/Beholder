@@ -44,9 +44,16 @@ public sealed class SqliteAlertStoreTests : IDisposable {
     }
 
     [Fact]
-    public async Task MarkAlertReadAsync_ZeroSeq_ThrowsArgumentOutOfRangeException() {
+    public async Task MarkAlertReadAsync_ZeroSeq_DoesNotThrow() {
+        // Event-log seq is 0-based, so seq 0 (the genesis row) is a valid alert
+        // seq — marking a not-yet-present seq 0 is a no-op, not an error.
+        await _store.MarkAlertReadAsync(0, DefaultTimestamp, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task MarkAlertReadAsync_NegativeSeq_ThrowsArgumentOutOfRangeException() {
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => _store.MarkAlertReadAsync(0, DefaultTimestamp, CancellationToken.None));
+            () => _store.MarkAlertReadAsync(-1, DefaultTimestamp, CancellationToken.None));
     }
 
     [Fact]
