@@ -31,6 +31,7 @@ public class SettingsTabViewModelTestsPhase132 {
             new FakeShellOpener(),
             new FakeClipboardWriter(),
             new FakeFilePicker(),
+            new FakeFileWriter(),
             new FakeTimeProvider(FixedTimestamp));
         return (vm, client);
     }

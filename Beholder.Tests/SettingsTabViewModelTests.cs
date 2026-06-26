@@ -18,7 +18,9 @@ public class SettingsTabViewModelTests {
         var shell = new FakeShellOpener();
         var clipboard = new FakeClipboardWriter();
         var time = new FakeTimeProvider(FixedTimestamp);
-        var vm = new SettingsTabViewModel(client, new SyncDispatcher(), shell, clipboard, new FakeFilePicker(), time);
+        var vm = new SettingsTabViewModel(
+            client, new SyncDispatcher(), shell, clipboard,
+            new FakeFilePicker(), new FakeFileWriter(), time);
         return (vm, client, shell, clipboard, time);
     }
 
@@ -65,37 +67,43 @@ public class SettingsTabViewModelTests {
     public void Constructor_NullDaemonClient_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             null!, new SyncDispatcher(), new FakeShellOpener(), new FakeClipboardWriter(),
-            new FakeFilePicker(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeFileWriter(), new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullDispatcher_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), null!, new FakeShellOpener(), new FakeClipboardWriter(),
-            new FakeFilePicker(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeFileWriter(), new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullShellOpener_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), null!, new FakeClipboardWriter(),
-            new FakeFilePicker(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeFileWriter(), new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullClipboardWriter_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(), null!,
-            new FakeFilePicker(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeFileWriter(), new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullFilePicker_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
-            new FakeClipboardWriter(), null!, new FakeTimeProvider(FixedTimestamp)));
+            new FakeClipboardWriter(), null!, new FakeFileWriter(), new FakeTimeProvider(FixedTimestamp)));
+
+    [Fact]
+    public void Constructor_NullFileWriter_Throws() =>
+        Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
+            new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
+            new FakeClipboardWriter(), new FakeFilePicker(), null!, new FakeTimeProvider(FixedTimestamp)));
 
     [Fact]
     public void Constructor_NullTimeProvider_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
-            new FakeClipboardWriter(), new FakeFilePicker(), null!));
+            new FakeClipboardWriter(), new FakeFilePicker(), new FakeFileWriter(), null!));
 
     [Fact]
     public void InitialState_NoStorageStats_NoTables_DefaultPlaceholders() {
@@ -445,6 +453,94 @@ public class SettingsTabViewModelTests {
         Assert.True(vm.HasVerifyStatus);
         Assert.True(vm.VerifyStatusIsError);
         Assert.Contains("verify exploded", vm.VerifyStatusMessage);
+    }
+
+    // ---- ExportChainCommand ----
+
+    private static (SettingsTabViewModel Vm, FakeDaemonClient Client, FakeFilePicker Picker, FakeFileWriter Writer)
+    CreateVmForExport() {
+        var client = new FakeDaemonClient();
+        var picker = new FakeFilePicker();
+        var writer = new FakeFileWriter();
+        var vm = new SettingsTabViewModel(
+            client, new SyncDispatcher(), new FakeShellOpener(), new FakeClipboardWriter(),
+            picker, writer, new FakeTimeProvider(FixedTimestamp));
+        return (vm, client, picker, writer);
+    }
+
+    [Fact]
+    public async Task ExportChainCommand_Success_WritesBytesToPickedPathAndShowsBanner() {
+        var (vm, client, picker, writer) = CreateVmForExport();
+        picker.SavePickedPath = @"C:\exports\chain.json";
+        var signed = new byte[] { 0x7B, 0x7D };   // "{}"
+        client.ExportChainResponder = _ => new ExportChainResponse {
+            SignedExport = Google.Protobuf.ByteString.CopyFrom(signed), EventCount = 42,
+        };
+
+        await vm.ExportChainCommand.ExecuteAsync(null);
+
+        Assert.Equal(@"C:\exports\chain.json", writer.LastPath);
+        Assert.Equal(signed, writer.LastBytes);
+        Assert.True(vm.HasVerifyStatus);
+        Assert.False(vm.VerifyStatusIsError);
+        Assert.Contains("42", vm.VerifyStatusMessage);
+        Assert.Contains(@"C:\exports\chain.json", vm.VerifyStatusMessage);
+    }
+
+    [Fact]
+    public async Task ExportChainCommand_RequestsFullChainWithSuggestedFileName() {
+        var (vm, client, picker, _) = CreateVmForExport();
+        picker.SavePickedPath = @"C:\exports\chain.json";
+
+        await vm.ExportChainCommand.ExecuteAsync(null);
+
+        Assert.Equal("beholder-chain-export.json", picker.LastSuggestedFileName);
+        var request = Assert.Single(client.ExportChainCalls);
+        Assert.Equal(0, request.FromSeq);
+        Assert.Equal(0, request.ToSeq);   // v1 button exports the whole chain
+    }
+
+    [Fact]
+    public async Task ExportChainCommand_UserCancels_NoRpcNoWriteNoBanner() {
+        var (vm, client, picker, writer) = CreateVmForExport();
+        picker.SavePickedPath = null;   // user dismissed the save dialog
+
+        await vm.ExportChainCommand.ExecuteAsync(null);
+
+        Assert.Empty(client.ExportChainCalls);
+        Assert.Equal(0, writer.CallCount);
+        Assert.False(vm.HasVerifyStatus);
+    }
+
+    [Fact]
+    public async Task ExportChainCommand_RpcThrows_ShowsErrorBannerAndDoesNotWrite() {
+        var (vm, client, picker, writer) = CreateVmForExport();
+        picker.SavePickedPath = @"C:\exports\chain.json";
+        client.ExportChainException = new RpcException(
+            new Status(StatusCode.Internal, "export exploded"));
+
+        await vm.ExportChainCommand.ExecuteAsync(null);
+
+        Assert.True(vm.HasVerifyStatus);
+        Assert.True(vm.VerifyStatusIsError);
+        Assert.Contains("export exploded", vm.VerifyStatusMessage);
+        Assert.Equal(0, writer.CallCount);
+    }
+
+    [Fact]
+    public async Task ExportChainCommand_FileWriteThrows_ShowsErrorBanner() {
+        var (vm, client, picker, writer) = CreateVmForExport();
+        picker.SavePickedPath = @"C:\exports\chain.json";
+        client.ExportChainResponder = _ => new ExportChainResponse {
+            SignedExport = Google.Protobuf.ByteString.CopyFrom(new byte[] { 0x01 }), EventCount = 1,
+        };
+        writer.Exception = new IOException("disk full");
+
+        await vm.ExportChainCommand.ExecuteAsync(null);
+
+        Assert.True(vm.HasVerifyStatus);
+        Assert.True(vm.VerifyStatusIsError);
+        Assert.Contains("disk full", vm.VerifyStatusMessage);
     }
 
     // ---- OpenDataFolderCommand ----

@@ -19,6 +19,7 @@ internal interface IDaemonClient : IAsyncDisposable {
     Task<SetFirewallEnabledResponse> SetFirewallEnabledAsync(SetFirewallEnabledRequest request, CancellationToken cancellationToken);
     Task<MarkAlertReadResponse> MarkAlertReadAsync(MarkAlertReadRequest request, CancellationToken cancellationToken);
     Task<VerifyChainResponse> VerifyChainAsync(VerifyChainRequest request, CancellationToken cancellationToken);
+    Task<ExportChainResponse> ExportChainAsync(ExportChainRequest request, CancellationToken cancellationToken);
     Task<GetProcessTimelineResponse> GetProcessTimelineAsync(GetProcessTimelineRequest request, CancellationToken cancellationToken);
     Task<GetAggregateTimelineResponse> GetAggregateTimelineAsync(GetAggregateTimelineRequest request, CancellationToken cancellationToken);
     Task<GetProcessDestinationsResponse> GetProcessDestinationsAsync(GetProcessDestinationsRequest request, CancellationToken cancellationToken);

@@ -64,6 +64,20 @@ public interface IEventStore {
     /// signer to know what to attest. Side-effect-free.
     /// </summary>
     Task<ChainHead?> TryGetChainHeadAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns full chain rows (including the hash columns) from
+    /// <paramref name="fromSeq"/> to <paramref name="toSeq"/> inclusive, in
+    /// ascending seq order. <paramref name="toSeq"/> &lt;= 0 means "to the
+    /// chain head". Used by the Phase 11.3 chain exporter to build a signed,
+    /// independently-verifiable snapshot of the audit log. Side-effect-free.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="fromSeq"/> is negative, or when both bounds
+    /// are positive and <paramref name="fromSeq"/> &gt; <paramref name="toSeq"/>.
+    /// </exception>
+    Task<IReadOnlyList<EventLogRow>> ReadRangeAsync(
+        long fromSeq, long toSeq, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -85,3 +99,19 @@ public sealed record EventLogEntry(
 /// checkpoint signer.
 /// </summary>
 public sealed record ChainHead(long Seq, byte[] RowHash, DateTimeOffset Timestamp);
+
+/// <summary>
+/// A complete <c>event_log</c> row, including the chain-hash columns that
+/// <see cref="EventLogEntry"/> omits. Returned by
+/// <see cref="IEventStore.ReadRangeAsync"/>; consumed by the Phase 11.3 chain
+/// exporter, which embeds <see cref="PrevHash"/> and <see cref="RowHash"/> in
+/// the export so a receiver can recompute the SHA-256 chain independently of
+/// the export's Ed25519 signature.
+/// </summary>
+public sealed record EventLogRow(
+    long Seq,
+    DateTimeOffset Timestamp,
+    EventKind Kind,
+    byte[] Payload,
+    byte[] PrevHash,
+    byte[] RowHash);

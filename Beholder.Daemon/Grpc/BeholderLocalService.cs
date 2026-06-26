@@ -30,6 +30,16 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     /// store / wire sizes.</summary>
     private const int MaxLanDeviceLabelLength = 100;
 
+    /// <summary>Phase 11.3: daemon version stamped into chain-export metadata
+    /// for provenance. Read once from the assembly's informational version
+    /// (falls back to the plain assembly version, then "unknown").</summary>
+    private static readonly string DaemonVersion =
+        System.Reflection.Assembly.GetExecutingAssembly()
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            is [System.Reflection.AssemblyInformationalVersionAttribute attr, ..]
+            ? attr.InformationalVersion
+            : System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+
     private readonly BroadcastService _broadcaster;
     private readonly FlowEventPipeline _pipeline;
     private readonly IFirewallRuleStore _firewallStore;
@@ -42,6 +52,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     private readonly LanScannerService _lanScannerService;
     private readonly IChainStatusCache _chainStatusCache;
     private readonly IChainVerifier _chainVerifier;
+    private readonly IChainExporter _chainExporter;
     private readonly IStorageStatsProvider _storageStatsProvider;
     private readonly IRecordingSettingsState _recordingSettings;
     private readonly IHostnameResolutionSettingsState _hostnameResolutionSettings;
@@ -65,6 +76,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         LanScannerService lanScannerService,
         IChainStatusCache chainStatusCache,
         IChainVerifier chainVerifier,
+        IChainExporter chainExporter,
         IStorageStatsProvider storageStatsProvider,
         IRecordingSettingsState recordingSettings,
         IHostnameResolutionSettingsState hostnameResolutionSettings,
@@ -87,6 +99,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         ArgumentNullException.ThrowIfNull(lanScannerService);
         ArgumentNullException.ThrowIfNull(chainStatusCache);
         ArgumentNullException.ThrowIfNull(chainVerifier);
+        ArgumentNullException.ThrowIfNull(chainExporter);
         ArgumentNullException.ThrowIfNull(storageStatsProvider);
         ArgumentNullException.ThrowIfNull(recordingSettings);
         ArgumentNullException.ThrowIfNull(hostnameResolutionSettings);
@@ -108,6 +121,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         _lanScannerService = lanScannerService;
         _chainStatusCache = chainStatusCache;
         _chainVerifier = chainVerifier;
+        _chainExporter = chainExporter;
         _storageStatsProvider = storageStatsProvider;
         _recordingSettings = recordingSettings;
         _hostnameResolutionSettings = hostnameResolutionSettings;
@@ -394,6 +408,29 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
             throw new RpcException(new Status(StatusCode.Internal,
                 $"Chain verification error: {ex.Message}"));
         }
+    }
+
+    /// <summary>
+    /// Phase 11.3: returns a signed JSON export of the chain-hashed event log
+    /// over the requested seq range (both bounds inclusive; 0 = open-ended).
+    /// Read-only — exporting does not mutate or audit the chain. See ADR 012
+    /// for the envelope schema + verification contract.
+    /// </summary>
+    public override Task<Local.ExportChainResponse> ExportChain(
+        Local.ExportChainRequest request, ServerCallContext context
+    ) {
+        ArgumentNullException.ThrowIfNull(request);
+        return ExecuteQueryAsync(nameof(ExportChain), async cancellationToken => {
+            var rows = await _eventStore
+                .ReadRangeAsync(request.FromSeq, request.ToSeq, cancellationToken)
+                .ConfigureAwait(false);
+            var signedExport = _chainExporter.Export(
+                rows, request.FromSeq, request.ToSeq, _timeProvider.GetUtcNow(), DaemonVersion);
+            return new Local.ExportChainResponse {
+                SignedExport = Google.Protobuf.ByteString.CopyFrom(signedExport),
+                EventCount = rows.Count,
+            };
+        }, context);
     }
 
     /// <summary>

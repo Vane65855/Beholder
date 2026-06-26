@@ -118,6 +118,51 @@ internal sealed class SqliteEventStore : IEventStore {
         return (byte[])reader.GetValue(0);
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<EventLogRow>> ReadRangeAsync(
+        long fromSeq, long toSeq, CancellationToken cancellationToken
+    ) {
+        ArgumentOutOfRangeException.ThrowIfNegative(fromSeq);
+        ArgumentOutOfRangeException.ThrowIfNegative(toSeq);
+        if (toSeq > 0 && fromSeq > toSeq) {
+            throw new ArgumentOutOfRangeException(nameof(fromSeq),
+                $"fromSeq ({fromSeq}) must not exceed toSeq ({toSeq}).");
+        }
+
+        using var connection = _connectionFactory.CreateConnection();
+        using var command = connection.CreateCommand();
+        // $toSeq <= 0 means "to the chain head" — the OR short-circuits the
+        // upper bound so the same statement serves both bounded and
+        // open-ended ranges.
+        command.CommandText = """
+            SELECT seq, ts_unix_ns, kind, payload, prev_hash, row_hash
+            FROM event_log
+            WHERE seq >= $fromSeq AND ($toSeq <= 0 OR seq <= $toSeq)
+            ORDER BY seq ASC;
+            """;
+        command.Parameters.AddWithValue("$fromSeq", fromSeq);
+        command.Parameters.AddWithValue("$toSeq", toSeq);
+
+        var rows = new List<EventLogRow>();
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
+            var seq = reader.GetInt64(0);
+            var timestampUnixNs = reader.GetInt64(1);
+            var kind = Enum.Parse<EventKind>(reader.GetString(2));
+            var payload = (byte[])reader.GetValue(3);
+            var prevHash = (byte[])reader.GetValue(4);
+            var rowHash = (byte[])reader.GetValue(5);
+            rows.Add(new EventLogRow(
+                seq,
+                DateTimeOffset.FromUnixTimeMilliseconds(timestampUnixNs / 1_000_000L),
+                kind,
+                payload,
+                prevHash,
+                rowHash));
+        }
+        return rows;
+    }
+
     private static async Task<(long LastSeq, byte[] PrevHash)> ReadLastRowAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,

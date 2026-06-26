@@ -192,6 +192,21 @@ message VerifyChainResponse {
   string anchor_key_id = 6;
 }
 
+// Phase 11.3: signed chain export. Both bounds inclusive; 0 = open-ended.
+// (0, 0) exports the whole chain; (N, 0) exports seq N to the head.
+message ExportChainRequest {
+  int64 from_seq = 1;
+  int64 to_seq = 2;
+}
+
+message ExportChainResponse {
+  // UTF-8 JSON envelope: { body: {metadata + events}, signature_alg, key_id,
+  // public_key_b64, signature_b64 }. Signature is Ed25519 over
+  // SHA-256(canonical body). See ADR 012 for the schema + verification rules.
+  bytes signed_export = 1;
+  int64 event_count = 2;
+}
+
 // ---- Historical traffic query messages ----
 
 message TrafficTimePoint {
@@ -643,6 +658,8 @@ service BeholderLocal {
   rpc SetFirewallEnabled(SetFirewallEnabledRequest) returns (SetFirewallEnabledResponse);
   rpc MarkAlertRead(MarkAlertReadRequest) returns (MarkAlertReadResponse);
   rpc VerifyChain(VerifyChainRequest) returns (VerifyChainResponse);
+  // Phase 11.3 — signed chain export
+  rpc ExportChain(ExportChainRequest) returns (ExportChainResponse);
   rpc GetProcessTimeline(GetProcessTimelineRequest) returns (GetProcessTimelineResponse);
   rpc GetProcessDestinations(GetProcessDestinationsRequest) returns (GetProcessDestinationsResponse);
   rpc GetAggregateTimeline(GetAggregateTimelineRequest) returns (GetAggregateTimelineResponse);

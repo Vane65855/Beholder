@@ -833,12 +833,19 @@
                                                        IsVisible="{Binding HasLatestCheckpoint}"
                                                        ToolTip.Tip="The most recent Ed25519-signed checkpoint over the audit chain. Checkpoints let verification skip re-hashing older rows and prove the chain head has not been rewritten since it was signed. Created automatically on a periodic timer." />
                                         </StackPanel>
-                                        <Button Grid.Column="1"
-                                                Classes="actionButton"
-                                                Content="{Binding VerifyButtonLabel}"
-                                                Command="{Binding VerifyChainCommand}"
-                                                IsEnabled="{Binding !IsVerifyingChain}"
-                                                ToolTip.Tip="Re-hash every row in the chain-audited event log and confirm the chain links are intact. Runs automatically on a periodic timer; this is the manual override." />
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                                                    VerticalAlignment="Center">
+                                            <Button Classes="actionButton"
+                                                    Content="{Binding ExportButtonLabel}"
+                                                    Command="{Binding ExportChainCommand}"
+                                                    IsEnabled="{Binding !IsExportingChain}"
+                                                    ToolTip.Tip="Save the entire chain-audited event log as a signed JSON file. The export is signed with the daemon's Ed25519 key and embeds each row's hash, so a third party can verify both its authenticity and internal integrity." />
+                                            <Button Classes="actionButton"
+                                                    Content="{Binding VerifyButtonLabel}"
+                                                    Command="{Binding VerifyChainCommand}"
+                                                    IsEnabled="{Binding !IsVerifyingChain}"
+                                                    ToolTip.Tip="Re-hash every row in the chain-audited event log and confirm the chain links are intact. Runs automatically on a periodic timer; this is the manual override." />
+                                        </StackPanel>
                                     </Grid>
 
                                     <!-- Open data folder row -->

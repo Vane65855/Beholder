@@ -274,6 +274,63 @@ public sealed class SqliteEventStoreTests : IDisposable {
         Assert.Null(rowHash);
     }
 
+    [Fact]
+    public async Task ReadRangeAsync_FullChain_ReturnsAllRowsWithHashColumns() {
+        for (var i = 0; i < 4; i++) {
+            await _store.AppendAsync(EventKind.Counter, new byte[] { (byte)i }, CancellationToken.None);
+        }
+
+        var rows = await _store.ReadRangeAsync(0, 0, CancellationToken.None);
+
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(0, rows[0].Seq);
+        Assert.Equal(3, rows[^1].Seq);
+        Assert.Equal(ChainHasher.ZeroPrevHash, rows[0].PrevHash);
+        Assert.Equal(rows[0].RowHash, rows[1].PrevHash);   // chain links forward
+        Assert.Equal(ChainHasher.HashSize, rows[0].RowHash.Length);
+    }
+
+    [Fact]
+    public async Task ReadRangeAsync_BoundedRange_ReturnsSubset() {
+        for (var i = 0; i < 6; i++) {
+            await _store.AppendAsync(EventKind.Counter, new byte[] { (byte)i }, CancellationToken.None);
+        }
+
+        var rows = await _store.ReadRangeAsync(2, 4, CancellationToken.None);
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(new[] { 2L, 3L, 4L }, rows.Select(r => r.Seq));
+    }
+
+    [Fact]
+    public async Task ReadRangeAsync_ToZero_MeansToHead() {
+        for (var i = 0; i < 5; i++) {
+            await _store.AppendAsync(EventKind.Counter, new byte[] { (byte)i }, CancellationToken.None);
+        }
+
+        var rows = await _store.ReadRangeAsync(3, 0, CancellationToken.None);
+
+        Assert.Equal(new[] { 3L, 4L }, rows.Select(r => r.Seq));
+    }
+
+    [Fact]
+    public async Task ReadRangeAsync_EmptyChain_ReturnsEmpty() {
+        var rows = await _store.ReadRangeAsync(0, 0, CancellationToken.None);
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public async Task ReadRangeAsync_FromGreaterThanTo_Throws() {
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            _store.ReadRangeAsync(9, 3, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ReadRangeAsync_NegativeFrom_Throws() {
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            _store.ReadRangeAsync(-1, 0, CancellationToken.None));
+    }
+
     private IReadOnlyList<EventRow> ReadAllRows() {
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();

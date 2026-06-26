@@ -69,7 +69,8 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         INotificationService notifications,
         IShellOpener shellOpener,
         IClipboardWriter clipboardWriter,
-        IFilePicker filePicker) {
+        IFilePicker filePicker,
+        IFileWriter fileWriter) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
@@ -80,6 +81,7 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         ArgumentNullException.ThrowIfNull(shellOpener);
         ArgumentNullException.ThrowIfNull(clipboardWriter);
         ArgumentNullException.ThrowIfNull(filePicker);
+        ArgumentNullException.ThrowIfNull(fileWriter);
         _daemonClient = daemonClient;
         _dispatcher = dispatcher;
         _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader, dispatcher);
@@ -101,7 +103,7 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         // section's ADD RULE flow (user picks a binary, VM derives anchor +
         // filename).
         _settingsTab = new SettingsTabViewModel(
-            daemonClient, dispatcher, shellOpener, clipboardWriter, filePicker, TimeProvider.System);
+            daemonClient, dispatcher, shellOpener, clipboardWriter, filePicker, fileWriter, TimeProvider.System);
         StatusStripVm = statusStripVm;
         ActiveTabContent = _trafficTab;
         _daemonClient.StateChanged += OnDaemonStateChanged;

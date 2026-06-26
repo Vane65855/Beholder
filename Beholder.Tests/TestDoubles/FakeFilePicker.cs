@@ -16,11 +16,28 @@ internal sealed class FakeFilePicker : IFilePicker {
     public int CallCount { get; private set; }
     public string? LastTitle { get; private set; }
 
+    /// <summary>Path returned by the next <see cref="PickSaveFileAsync"/>; null = cancel.</summary>
+    public string? SavePickedPath { get; set; }
+    public int SaveCallCount { get; private set; }
+    public string? LastSaveTitle { get; private set; }
+    public string? LastSuggestedFileName { get; private set; }
+
     public Task<string?> PickFileAsync(string title, CancellationToken cancellationToken) {
         cancellationToken.ThrowIfCancellationRequested();
         CallCount++;
         LastTitle = title;
         if (Exception is not null) throw Exception;
         return Task.FromResult(PickedPath);
+    }
+
+    public Task<string?> PickSaveFileAsync(
+        string title, string suggestedFileName, CancellationToken cancellationToken
+    ) {
+        cancellationToken.ThrowIfCancellationRequested();
+        SaveCallCount++;
+        LastSaveTitle = title;
+        LastSuggestedFileName = suggestedFileName;
+        if (Exception is not null) throw Exception;
+        return Task.FromResult(SavePickedPath);
     }
 }

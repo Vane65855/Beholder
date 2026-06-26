@@ -21,4 +21,14 @@ internal interface IFilePicker {
     /// etc.).
     /// </summary>
     Task<string?> PickFileAsync(string title, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Opens a save-file picker pre-filled with <paramref name="suggestedFileName"/>.
+    /// Returns the chosen path on success, or <c>null</c> when the user cancels.
+    /// Introduced for Phase 11.3's "Export chain…" surface — the user picks
+    /// where to save the signed chain-export JSON. Filters to <c>*.json</c>
+    /// with an "All files" fallback.
+    /// </summary>
+    Task<string?> PickSaveFileAsync(
+        string title, string suggestedFileName, CancellationToken cancellationToken);
 }

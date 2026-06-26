@@ -59,4 +59,24 @@ internal sealed class AvaloniaFilePicker : IFilePicker {
         // local filesystem paths make sense — null returns yield a no-op.
         return picked.TryGetLocalPath();
     }
+
+    public async Task<string?> PickSaveFileAsync(
+        string title, string suggestedFileName, CancellationToken cancellationToken
+    ) {
+        cancellationToken.ThrowIfCancellationRequested();
+        var storage = _topLevelAccessor()?.StorageProvider;
+        if (storage is null) return null;
+
+        var result = await storage.SaveFilePickerAsync(new FilePickerSaveOptions {
+            Title = title,
+            SuggestedFileName = suggestedFileName,
+            DefaultExtension = "json",
+            FileTypeChoices = [
+                new FilePickerFileType("JSON") { Patterns = ["*.json"] },
+                new FilePickerFileType("All files") { Patterns = ["*"] },
+            ],
+        }).ConfigureAwait(true);
+
+        return result?.TryGetLocalPath();
+    }
 }

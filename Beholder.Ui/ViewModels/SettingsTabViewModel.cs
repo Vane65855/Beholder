@@ -65,6 +65,7 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
     private readonly IShellOpener _shellOpener;
     private readonly IClipboardWriter _clipboardWriter;
     private readonly IFilePicker _filePicker;
+    private readonly IFileWriter _fileWriter;
     private readonly TimeProvider _timeProvider;
 
     private CancellationTokenSource? _activationCts;
@@ -95,6 +96,12 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
     private bool _isVerifyingChain;
 
     public string VerifyButtonLabel => IsVerifyingChain ? "VERIFYING…" : "VERIFY NOW";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ExportButtonLabel))]
+    private bool _isExportingChain;
+
+    public string ExportButtonLabel => IsExportingChain ? "EXPORTING…" : "EXPORT CHAIN";
 
     [ObservableProperty]
     private bool _hasVerifyStatus;
@@ -254,6 +261,7 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         IShellOpener shellOpener,
         IClipboardWriter clipboardWriter,
         IFilePicker filePicker,
+        IFileWriter fileWriter,
         TimeProvider timeProvider
     ) {
         ArgumentNullException.ThrowIfNull(daemonClient);
@@ -261,12 +269,14 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         ArgumentNullException.ThrowIfNull(shellOpener);
         ArgumentNullException.ThrowIfNull(clipboardWriter);
         ArgumentNullException.ThrowIfNull(filePicker);
+        ArgumentNullException.ThrowIfNull(fileWriter);
         ArgumentNullException.ThrowIfNull(timeProvider);
         _daemonClient = daemonClient;
         _dispatcher = dispatcher;
         _shellOpener = shellOpener;
         _clipboardWriter = clipboardWriter;
         _filePicker = filePicker;
+        _fileWriter = fileWriter;
         _timeProvider = timeProvider;
 
         ChainStatus = ChainStatusRow.FromProto(null, timeProvider);
@@ -972,6 +982,45 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
             SetVerifyStatus($"Verify failed: {ex.Message}", isError: true);
         } finally {
             IsVerifyingChain = false;
+        }
+    }
+
+    /// <summary>
+    /// Phase 11.3: exports the full chain as a signed JSON envelope. Picks a
+    /// save path, calls ExportChain, writes the bytes, and reports the outcome
+    /// via the same transient banner the verify button uses. User cancel at
+    /// the save dialog is a silent no-op.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportChain() {
+        if (IsExportingChain) return;
+        string? savePath;
+        try {
+            savePath = await _filePicker.PickSaveFileAsync(
+                "Export the signed chain audit log", "beholder-chain-export.json",
+                CancellationToken.None);
+        } catch (Exception ex) {
+            SetVerifyStatus($"Export failed: {ex.Message}", isError: true);
+            return;
+        }
+        if (string.IsNullOrEmpty(savePath)) return;  // user cancelled
+
+        IsExportingChain = true;
+        ClearVerifyStatus();
+        try {
+            // from_seq = 0, to_seq = 0 → whole chain.
+            var response = await _daemonClient.ExportChainAsync(
+                new ExportChainRequest { FromSeq = 0, ToSeq = 0 }, CancellationToken.None);
+            await _fileWriter.WriteAllBytesAsync(
+                savePath, response.SignedExport.ToByteArray(), CancellationToken.None);
+            var count = response.EventCount.ToString("N0", CultureInfo.InvariantCulture);
+            SetVerifyStatus($"Exported {count} events to {savePath}", isError: false);
+        } catch (RpcException ex) {
+            SetVerifyStatus($"Export failed: {ex.Status.Detail}", isError: true);
+        } catch (Exception ex) {
+            SetVerifyStatus($"Export failed: {ex.Message}", isError: true);
+        } finally {
+            IsExportingChain = false;
         }
     }
 

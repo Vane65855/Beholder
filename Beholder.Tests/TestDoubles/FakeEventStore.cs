@@ -64,4 +64,21 @@ internal sealed class FakeEventStore : IEventStore {
         BitConverter.GetBytes(latest.Seq).CopyTo(rowHash, 0);
         return Task.FromResult<ChainHead?>(new ChainHead(latest.Seq, rowHash, latest.Timestamp));
     }
+
+    public Task<IReadOnlyList<EventLogRow>> ReadRangeAsync(
+        long fromSeq, long toSeq, CancellationToken cancellationToken
+    ) {
+        IReadOnlyList<EventLogRow> rows = _entries
+            .Where(e => e.Seq >= fromSeq && (toSeq <= 0 || e.Seq <= toSeq))
+            .OrderBy(e => e.Seq)
+            .Select(e => {
+                var rowHash = new byte[ChainHasher.HashSize];
+                BitConverter.GetBytes(e.Seq).CopyTo(rowHash, 0);
+                var prevHash = new byte[ChainHasher.HashSize];
+                BitConverter.GetBytes(e.Seq - 1).CopyTo(prevHash, 0);
+                return new EventLogRow(e.Seq, e.Timestamp, e.Kind, e.Payload, prevHash, rowHash);
+            })
+            .ToList();
+        return Task.FromResult(rows);
+    }
 }

@@ -62,7 +62,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             new FakeTrafficStore(),
             new FakeLanDeviceStore(),
             TestServiceFactory.CreateInactiveLanScannerService(),
-            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeChainExporter(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -177,7 +177,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             _firewallController, new FakeFirewallEnforcementState(),
             failingEventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
-            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeChainExporter(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -259,7 +259,7 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
             firewallController, new FakeFirewallEnforcementState(),
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
-            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeStorageStatsProvider(),
+            new FakeChainStatusCache(), new FakeChainVerifier(), new FakeChainExporter(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
@@ -332,6 +332,10 @@ public sealed class ApplyFirewallRuleTests : IDisposable {
 
         public Task<ChainHead?> TryGetChainHeadAsync(CancellationToken cancellationToken)
             => Task.FromResult<ChainHead?>(null);
+
+        public Task<IReadOnlyList<EventLogRow>> ReadRangeAsync(
+            long fromSeq, long toSeq, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<EventLogRow>>(Array.Empty<EventLogRow>());
 
         public Task<ChainVerificationResult> VerifyFromAsync(
             long fromSeq, byte[] expectedPrevHash, CancellationToken cancellationToken)

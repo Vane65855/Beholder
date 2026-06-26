@@ -37,7 +37,15 @@ if (OperatingSystem.IsWindows()) {
         });
     });
 
-    builder.Services.AddGrpc();
+    // Phase 11.3: a full chain export can exceed gRPC's default 4 MB message
+    // limit on a long-running install. Raise the cap to 64 MB on both
+    // directions; the UI channel sets a matching MaxReceiveMessageSize.
+    // Streaming export is the v2 escape hatch if real exports ever exceed this.
+    const int MaxGrpcMessageBytes = 64 * 1024 * 1024;
+    builder.Services.AddGrpc(options => {
+        options.MaxReceiveMessageSize = MaxGrpcMessageBytes;
+        options.MaxSendMessageSize = MaxGrpcMessageBytes;
+    });
 
     builder.Services.AddSingleton<EtwFlowSource>();
     builder.Services.AddSingleton<IGeoIpResolver>(sp => {
@@ -97,6 +105,9 @@ if (OperatingSystem.IsWindows()) {
     // are registered in the Phase 11.1 block below; DI resolution is lazy so
     // registration order doesn't matter).
     builder.Services.AddSingleton<IChainVerifier, ChainVerifier>();
+    // Phase 11.3: signed chain exporter. Builds a self-verifying JSON envelope
+    // of the event log signed with the same Ed25519 key the checkpoints use.
+    builder.Services.AddSingleton<IChainExporter, ChainExporter>();
     // Phase 13.1: SQLite per-table row counts + database file size, bundled
     // with the cached chain status, for the Settings tab's Data Storage
     // section. The factory lambda passes databasePath directly (rather than

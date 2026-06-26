@@ -64,7 +64,12 @@ internal sealed class DaemonClient : IDaemonClient {
 
             try {
                 _channel?.Dispose();
-                _channel = GrpcChannel.ForAddress("http://127.0.0.1:50051");
+                // Phase 11.3: a full chain export can exceed gRPC's default
+                // 4 MB receive limit on a long-running install; raise it to
+                // 64 MB to match the daemon's send cap.
+                _channel = GrpcChannel.ForAddress("http://127.0.0.1:50051", new GrpcChannelOptions {
+                    MaxReceiveMessageSize = 64 * 1024 * 1024,
+                });
                 _client = new BeholderLocal.BeholderLocalClient(_channel);
 
                 // Health probe — if the daemon is unreachable this throws
@@ -163,6 +168,13 @@ internal sealed class DaemonClient : IDaemonClient {
         ArgumentNullException.ThrowIfNull(request);
         var client = GetConnectedClient();
         return await client.VerifyChainAsync(request, cancellationToken: cancellationToken);
+    }
+
+    public async Task<ExportChainResponse> ExportChainAsync(
+        ExportChainRequest request, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(request);
+        var client = GetConnectedClient();
+        return await client.ExportChainAsync(request, cancellationToken: cancellationToken);
     }
 
     public async Task<GetProcessTimelineResponse> GetProcessTimelineAsync(

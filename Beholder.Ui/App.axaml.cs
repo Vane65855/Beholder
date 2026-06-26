@@ -83,11 +83,14 @@ public partial class App : Application {
             // clipboard writer above — resolves to the live window when the
             // picker is invoked from a VM command.
             var filePicker = new AvaloniaFilePicker(() => mainWindowRef);
+            // Phase 11.3: file writer persists the signed chain-export bytes
+            // to the user-chosen path (Settings → Maintenance → Export chain).
+            var fileWriter = new FileWriter();
 
             _mainWindowVm = new MainWindowViewModel(
                 _daemonClient, _processStateService, _streamSubscriber,
                 statusStripVm, historicalChartLoader, dispatcher, _notifications,
-                shellOpener, clipboardWriter, filePicker);
+                shellOpener, clipboardWriter, filePicker, fileWriter);
             var mainWindow = new MainWindow { DataContext = _mainWindowVm };
             mainWindowRef = mainWindow;
             desktop.MainWindow = mainWindow;

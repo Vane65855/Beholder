@@ -35,6 +35,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? TriggerScanException { get; set; }
     public Exception? SetLanDeviceLabelException { get; set; }
     public Exception? VerifyChainException { get; set; }
+    public Exception? ExportChainException { get; set; }
     public Exception? GetStorageStatsException { get; set; }
     public Exception? GetSettingsException { get; set; }
     public Exception? SetRecordingSettingsException { get; set; }
@@ -85,6 +86,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Func<TriggerScanRequest, TriggerScanResponse>? TriggerScanResponder { get; set; }
     public Func<SetLanDeviceLabelRequest, SetLanDeviceLabelResponse>? SetLanDeviceLabelResponder { get; set; }
     public Func<VerifyChainRequest, VerifyChainResponse>? VerifyChainResponder { get; set; }
+    public Func<ExportChainRequest, ExportChainResponse>? ExportChainResponder { get; set; }
     public Func<GetStorageStatsRequest, GetStorageStatsResponse>? GetStorageStatsResponder { get; set; }
     /// <summary>
     /// Async responder for <see cref="GetStorageStatsAsync"/>. Lets tests gate
@@ -121,6 +123,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public List<TriggerScanRequest> TriggerScanCalls { get; } = new();
     public List<SetLanDeviceLabelRequest> SetLanDeviceLabelCalls { get; } = new();
     public List<VerifyChainRequest> VerifyChainCalls { get; } = new();
+    public List<ExportChainRequest> ExportChainCalls { get; } = new();
     public List<GetStorageStatsRequest> GetStorageStatsCalls { get; } = new();
     public List<GetSettingsRequest> GetSettingsCalls { get; } = new();
     public List<SetRecordingSettingsRequest> SetRecordingSettingsCalls { get; } = new();
@@ -209,6 +212,13 @@ internal sealed class FakeDaemonClient : IDaemonClient {
         VerifyChainCalls.Add(request);
         if (VerifyChainException is not null) throw VerifyChainException;
         return Task.FromResult(VerifyChainResponder?.Invoke(request) ?? new VerifyChainResponse());
+    }
+
+    public Task<ExportChainResponse> ExportChainAsync(
+        ExportChainRequest request, CancellationToken cancellationToken) {
+        ExportChainCalls.Add(request);
+        if (ExportChainException is not null) throw ExportChainException;
+        return Task.FromResult(ExportChainResponder?.Invoke(request) ?? new ExportChainResponse());
     }
 
     public Task<GetProcessTimelineResponse> GetProcessTimelineAsync(

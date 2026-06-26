@@ -59,6 +59,7 @@ public sealed class VerifyChainTests : IDisposable {
             _chainStatusCache,
             new ChainVerifier(_eventStore, _checkpointStore,
                 _keyProvider, NullLogger<ChainVerifier>.Instance),
+            new FakeChainExporter(),
             new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
@@ -229,6 +230,7 @@ public sealed class VerifyChainTests : IDisposable {
             new FakeChainStatusCache(),
             new ChainVerifier(throwingStore, new FakeCheckpointStore(),
                 new FakeCheckpointKeyProvider(), NullLogger<ChainVerifier>.Instance),
+            new FakeChainExporter(),
             new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
@@ -273,6 +275,10 @@ public sealed class VerifyChainTests : IDisposable {
             => throw new InvalidOperationException("Simulated infrastructure failure");
 
         public Task<ChainHead?> TryGetChainHeadAsync(CancellationToken cancellationToken)
+            => throw new InvalidOperationException("Simulated infrastructure failure");
+
+        public Task<IReadOnlyList<EventLogRow>> ReadRangeAsync(
+            long fromSeq, long toSeq, CancellationToken cancellationToken)
             => throw new InvalidOperationException("Simulated infrastructure failure");
 
         public Task<ChainVerificationResult> VerifyFromAsync(
