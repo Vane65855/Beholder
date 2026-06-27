@@ -66,6 +66,18 @@ dotnet run --project Beholder.Ui
 dotnet test
 ```
 
+### Installer (MSI)
+
+Build a single **self-contained** MSI (bundles .NET 10 — no runtime prerequisite on the target) that installs the daemon + UI to `C:\Program Files\Beholder`, registers the auto-start service, creates the `beholder-users` group, and adds Start Menu / Desktop / login-to-tray shortcuts:
+
+```powershell
+# Windows only; restores the WiX v5 local tool on first run
+pwsh ./build-installer.ps1 -Version 0.1.0
+# -> Beholder.Installer/bin/Release/BeholderNMT-0.1.0-win-x64.msi (~93 MB)
+```
+
+The MSI is **unsigned**, so Windows SmartScreen and UAC show an "unknown publisher" warning. After installing, **sign out and back in** (or restart) so your account joins the `beholder-users` group — only then can the Beholder window connect to the monitoring service. See [ADR 015](docs/decisions/015-msi-packaging.md).
+
 ## Project Structure
 
 ```
