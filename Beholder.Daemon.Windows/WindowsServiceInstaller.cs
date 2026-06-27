@@ -39,9 +39,11 @@ public static class WindowsServiceInstaller {
         var dataRoot = ServiceDataRoot();
         HardenDataDirectory(dataRoot);
 
-        // ADR 014: the control pipe's DACL admits the `beholder-users` group;
-        // create it + add the installing user so the UI can connect.
-        var installingUser = WindowsIdentity.GetCurrent().Name;
+        // ADR 014/015: the control pipe's DACL admits the `beholder-users` group;
+        // create it + add the installing user so the UI can connect. Resolve the
+        // real interactive user — under the MSI's LocalSystem custom action,
+        // WindowsIdentity.GetCurrent() is SYSTEM, not the person installing.
+        var installingUser = ResolveInstallingUser();
         EnsureBeholderUsersGroup(installingUser);
 
         var create = RunTool("sc.exe", BuildCreateArguments(exePath));
@@ -58,9 +60,11 @@ public static class WindowsServiceInstaller {
         Console.WriteLine(start.ExitCode == 0
             ? $"Installed and started service '{ServiceName}'. Data directory: {dataRoot}"
             : $"Installed service '{ServiceName}' (not yet started: {start.Output.Trim()}). Data directory: {dataRoot}");
-        Console.WriteLine(
-            $"Control-pipe access: added '{installingUser}' to the '{GroupName}' group — " +
-            $"SIGN OUT AND BACK IN for it to take effect (add others with: net localgroup {GroupName} <DOMAIN\\user> /add).");
+        Console.WriteLine(installingUser is null
+            ? $"Control-pipe access: created the '{GroupName}' group, but could not determine the interactive " +
+              $"user — add yours with: net localgroup {GroupName} <DOMAIN\\user> /add (then sign out and back in)."
+            : $"Control-pipe access: added '{installingUser}' to the '{GroupName}' group — " +
+              $"SIGN OUT AND BACK IN for it to take effect (add others with: net localgroup {GroupName} <DOMAIN\\user> /add).");
         return 0;
     }
 
@@ -142,7 +146,17 @@ public static class WindowsServiceInstaller {
         }
     }
 
-    private static void EnsureBeholderUsersGroup(string installingUser) {
+    // The account to grant control-pipe access. From an elevated console that's
+    // the current identity; from the MSI's LocalSystem custom action
+    // WindowsIdentity.GetCurrent() is SYSTEM, so fall back to the interactive
+    // console user — the person who launched setup (ADR 015). Null when nobody
+    // is signed in at the console.
+    private static string? ResolveInstallingUser() {
+        using var current = WindowsIdentity.GetCurrent();
+        return current.IsSystem ? ConsoleSessionUser.TryResolve() : current.Name;
+    }
+
+    private static void EnsureBeholderUsersGroup(string? installingUser) {
         // Best-effort: `net` returns non-zero when the group already exists or
         // the user is already a member — both are fine for an idempotent install.
         RunTool("net.exe", BuildCreateGroupArguments());
