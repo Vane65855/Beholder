@@ -59,7 +59,7 @@ internal sealed class TrayController : IDisposable {
         exit.Click += (_, _) => RequestExit();
 
         var trayIcon = new TrayIcon {
-            Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://Beholder.Ui/Assets/avalonia-logo.ico"))),
+            Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://Beholder.Ui/Assets/beholder.ico"))),
             ToolTipText = "Beholder NMT",
             Menu = new NativeMenu { Items = { open, exit } },
             IsVisible = true,

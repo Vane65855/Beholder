@@ -13,7 +13,7 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <Icon Id="BeholderIcon" SourceFile="$(var.RepoRoot)\Beholder.Ui\Assets\avalonia-logo.ico" />
+    <Icon Id="BeholderIcon" SourceFile="$(var.RepoRoot)\Beholder.Ui\Assets\beholder.ico" />
     <Property Id="ARPPRODUCTICON" Value="BeholderIcon" />
     <Property Id="ARPHELPLINK" Value="https://github.com/Vane65855/Beholder" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/Vane65855/Beholder" />

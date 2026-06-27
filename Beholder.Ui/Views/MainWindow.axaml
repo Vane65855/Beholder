@@ -8,6 +8,7 @@
         x:Class="Beholder.Ui.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Beholder NMT"
+        Icon="/Assets/beholder.ico"
         Width="1280" Height="800"
         MinWidth="1100" MinHeight="720"
         WindowDecorations="Full"
