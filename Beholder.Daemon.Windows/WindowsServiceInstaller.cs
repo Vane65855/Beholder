@@ -20,6 +20,12 @@ public static class WindowsServiceInstaller {
         "Beholder Network Monitoring Tool — captures per-process network telemetry, " +
         "enforces firewall rules, and maintains the tamper-evident audit chain.";
 
+    // ADR 014: the daemon's control-pipe DACL admits this local group. The
+    // installer creates it + adds the installing user.
+    internal const string GroupName = "beholder-users";
+    private const string GroupComment =
+        "Members may connect to the Beholder daemon local control pipe (ADR 014).";
+
     /// <summary>Registers the auto-start service and hardens its data directory. Returns a process exit code.</summary>
     public static int Install() {
         if (!IsElevated()) return FailNotElevated("install");
@@ -32,6 +38,11 @@ public static class WindowsServiceInstaller {
 
         var dataRoot = ServiceDataRoot();
         HardenDataDirectory(dataRoot);
+
+        // ADR 014: the control pipe's DACL admits the `beholder-users` group;
+        // create it + add the installing user so the UI can connect.
+        var installingUser = WindowsIdentity.GetCurrent().Name;
+        EnsureBeholderUsersGroup(installingUser);
 
         var create = RunTool("sc.exe", BuildCreateArguments(exePath));
         if (create.ExitCode != 0) {
@@ -47,6 +58,9 @@ public static class WindowsServiceInstaller {
         Console.WriteLine(start.ExitCode == 0
             ? $"Installed and started service '{ServiceName}'. Data directory: {dataRoot}"
             : $"Installed service '{ServiceName}' (not yet started: {start.Output.Trim()}). Data directory: {dataRoot}");
+        Console.WriteLine(
+            $"Control-pipe access: added '{installingUser}' to the '{GroupName}' group — " +
+            $"SIGN OUT AND BACK IN for it to take effect (add others with: net localgroup {GroupName} <DOMAIN\\user> /add).");
         return 0;
     }
 
@@ -94,6 +108,12 @@ public static class WindowsServiceInstaller {
     internal static IReadOnlyList<string> BuildDeleteArguments() => ["delete", ServiceName];
     internal static IReadOnlyList<string> BuildQueryArguments() => ["query", ServiceName];
 
+    internal static IReadOnlyList<string> BuildCreateGroupArguments() =>
+        ["localgroup", GroupName, "/add", $"/comment:{GroupComment}"];
+
+    internal static IReadOnlyList<string> BuildAddMemberArguments(string user) =>
+        ["localgroup", GroupName, user, "/add"];
+
     // Strip inherited ACEs (ProgramData grants Users read by default) and grant
     // only LocalSystem + Administrators, so the daemon's Ed25519 private signing
     // key is not readable by other local users. Well-known SIDs keep this
@@ -119,6 +139,15 @@ public static class WindowsServiceInstaller {
         if (acl.ExitCode != 0) {
             Console.Error.WriteLine(
                 $"Warning: could not harden ACLs on {dataRoot} (exit {acl.ExitCode}): {acl.Output.Trim()}");
+        }
+    }
+
+    private static void EnsureBeholderUsersGroup(string installingUser) {
+        // Best-effort: `net` returns non-zero when the group already exists or
+        // the user is already a member — both are fine for an idempotent install.
+        RunTool("net.exe", BuildCreateGroupArguments());
+        if (!string.IsNullOrEmpty(installingUser)) {
+            RunTool("net.exe", BuildAddMemberArguments(installingUser));
         }
     }
 

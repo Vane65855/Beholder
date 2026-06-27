@@ -60,5 +60,19 @@ public class WindowsServiceInstallerTests {
     [Fact]
     public void BuildStartArguments_IsStartThenServiceName() =>
         Assert.Equal(new[] { "start", "Beholder" }, WindowsServiceInstaller.BuildStartArguments());
+
+    [Fact]
+    public void BuildCreateGroupArguments_CreatesTheBeholderUsersLocalGroup() {
+        var args = WindowsServiceInstaller.BuildCreateGroupArguments();
+        Assert.Equal("localgroup", args[0]);
+        Assert.Equal("beholder-users", args[1]);
+        Assert.Contains("/add", args);
+        Assert.Contains(args, a => a.StartsWith("/comment:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildAddMemberArguments_AddsTheUserToTheGroup() =>
+        Assert.Equal(new[] { "localgroup", "beholder-users", @"MACHINE\alice", "/add" },
+            WindowsServiceInstaller.BuildAddMemberArguments(@"MACHINE\alice"));
 }
 #endif

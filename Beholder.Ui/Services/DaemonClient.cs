@@ -49,6 +49,41 @@ internal sealed class DaemonClient : IDaemonClient {
         return _connectTask;
     }
 
+    // ADR 014: the daemon serves the control RPC over a DACL'd named pipe
+    // (\\.\pipe\beholder), not a TCP socket any local process could reach.
+    // Connect via a SocketsHttpHandler whose ConnectCallback opens the pipe; the
+    // channel address is a placeholder since the handler does the real connect.
+    // The 64 MB receive cap matches the daemon's send cap (Phase 11.3 export).
+    private static GrpcChannel CreateChannel() {
+        const int MaxReceiveMessageBytes = 64 * 1024 * 1024;
+#if PLATFORM_WINDOWS
+        var handler = new System.Net.Http.SocketsHttpHandler {
+            ConnectCallback = async (_, ct) => {
+                var pipe = new System.IO.Pipes.NamedPipeClientStream(
+                    ".", Beholder.Protocol.IpcEndpoint.PipeName,
+                    System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+                try {
+                    await pipe.ConnectAsync(ct).ConfigureAwait(false);
+                } catch {
+                    await pipe.DisposeAsync().ConfigureAwait(false);
+                    throw;
+                }
+                return pipe;
+            },
+        };
+        return GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions {
+            MaxReceiveMessageSize = MaxReceiveMessageBytes,
+            HttpHandler = handler,
+        });
+#else
+        // Non-Windows: the Linux daemon (a Unix-domain-socket listener) isn't
+        // built yet; keep the TCP localhost path so a future Linux port works.
+        return GrpcChannel.ForAddress("http://127.0.0.1:50051", new GrpcChannelOptions {
+            MaxReceiveMessageSize = MaxReceiveMessageBytes,
+        });
+#endif
+    }
+
     private async Task ConnectLoopAsync(CancellationToken cancellationToken) {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
         var token = linked.Token;
@@ -64,12 +99,7 @@ internal sealed class DaemonClient : IDaemonClient {
 
             try {
                 _channel?.Dispose();
-                // Phase 11.3: a full chain export can exceed gRPC's default
-                // 4 MB receive limit on a long-running install; raise it to
-                // 64 MB to match the daemon's send cap.
-                _channel = GrpcChannel.ForAddress("http://127.0.0.1:50051", new GrpcChannelOptions {
-                    MaxReceiveMessageSize = 64 * 1024 * 1024,
-                });
+                _channel = CreateChannel();
                 _client = new BeholderLocal.BeholderLocalClient(_channel);
 
                 // Health probe — if the daemon is unreachable this throws

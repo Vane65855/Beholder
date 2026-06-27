@@ -52,8 +52,20 @@ new DatabaseInitializer(databasePath).Initialize();
 
 #if PLATFORM_WINDOWS
 if (OperatingSystem.IsWindows()) {
+    // ADR 014: serve the control RPC over a named pipe DACL'd to the
+    // `beholder-users` group (SYSTEM + Administrators full control; an
+    // INTERACTIVE fallback in dev when the group isn't present) instead of an
+    // unauthenticated TCP localhost socket any local process could reach. The
+    // UI dials the same pipe (IpcEndpoint.PipeName).
+    builder.WebHost.UseNamedPipes(options => {
+        // We supply an explicit DACL, so the transport's default "current user
+        // only" restriction (which would lock the pipe to LocalSystem and shut
+        // the UI out) must be turned off.
+        options.CurrentUserOnly = false;
+        options.PipeSecurity = BeholderPipeSecurity.Create();
+    });
     builder.WebHost.ConfigureKestrel(options => {
-        options.ListenLocalhost(50051, listenOptions => {
+        options.ListenNamedPipe(Beholder.Protocol.IpcEndpoint.PipeName, listenOptions => {
             listenOptions.Protocols = HttpProtocols.Http2;
         });
     });
@@ -312,6 +324,11 @@ var app = builder.Build();
 #if PLATFORM_WINDOWS
 if (OperatingSystem.IsWindows()) {
     app.MapGrpcService<BeholderLocalService>();
+    app.Logger.LogInformation("Local control pipe '{Pipe}': {Mode}",
+        Beholder.Protocol.IpcEndpoint.PipeName,
+        BeholderPipeSecurity.BeholderUsersGroupExists()
+            ? "restricted to the 'beholder-users' group"
+            : "no 'beholder-users' group found — admitting INTERACTIVE users (run --install to restrict)");
 }
 #endif
 
