@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="Beholder NMT"
+           Manufacturer="Beholder NMT"
+           Version="$(var.Version)"
+           UpgradeCode="70B5D0CE-99B3-4153-9F96-B85FCEE1D46C"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <!-- Replace any older version on install; block downgrades. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="BeholderIcon" SourceFile="$(var.RepoRoot)\Beholder.Ui\Assets\avalonia-logo.ico" />
+    <Property Id="ARPPRODUCTICON" Value="BeholderIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/Vane65855/Beholder" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Vane65855/Beholder" />
+
+    <!-- C:\Program Files\Beholder\{Daemon,UI} — the two self-contained apps go in
+         their own subfolders so their bundled runtime DLLs don't collide. -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Beholder">
+        <Directory Id="DaemonDir" Name="Daemon" />
+        <Directory Id="UiDir" Name="UI" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppShortcutFolder" Name="Beholder NMT" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+    <StandardDirectory Id="StartupFolder" />
+
+    <Feature Id="Main" Title="Beholder NMT" Level="1">
+      <ComponentGroupRef Id="DaemonFiles" />
+      <ComponentGroupRef Id="UiFiles" />
+      <ComponentGroupRef Id="Shortcuts" />
+    </Feature>
+
+    <!-- Wizard: Welcome → License → InstallDir → Progress → Finish. -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.RepoRoot)\Beholder.Installer\License.rtf" />
+
+    <!-- The daemon locks its control pipe to the beholder-users group the moment
+         the install verb creates it, but the installing user's logon token only
+         joins that group at next sign-in — so the UI can't connect until the user
+         signs out/in. Surface that on the finish screen (ADR 014). -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT"
+              Value="Sign out and back in (or restart) to finish setup: this adds your account to the beholder-users group so the Beholder window can connect to the monitoring service. The daemon is already running in the background." />
+
+    <!-- Service + group + ACL setup: reuse the daemon's tested install /
+         uninstall verbs (ADR 013/014) as custom actions, rather than re-encoding
+         the service config in WiX — those verbs also create the beholder-users
+         group and harden the ProgramData ACL, which WiX has no primitive for.
+         The verbs run deferred + non-impersonated (as LocalSystem, already
+         elevated). The immediate "Set…" actions resolve [INSTALLFOLDER] into a
+         property whose name matches the deferred action's Id, the only way a
+         deferred action can receive a session-resolved path. The live behavior
+         is verified by the manual elevated smoke test, like the sc/icacls/ETW
+         work — it is not CI-tested. -->
+    <CustomAction Id="SetInstallService" Property="InstallService"
+                  Value="[INSTALLFOLDER]Daemon\Beholder.Daemon.exe" />
+    <CustomAction Id="InstallService" Property="InstallService" ExeCommand="--install"
+                  Execute="deferred" Impersonate="no" Return="check" />
+
+    <CustomAction Id="SetRollbackInstallService" Property="RollbackInstallService"
+                  Value="[INSTALLFOLDER]Daemon\Beholder.Daemon.exe" />
+    <CustomAction Id="RollbackInstallService" Property="RollbackInstallService" ExeCommand="--uninstall"
+                  Execute="rollback" Impersonate="no" Return="ignore" />
+
+    <CustomAction Id="SetUninstallService" Property="UninstallService"
+                  Value="[INSTALLFOLDER]Daemon\Beholder.Daemon.exe" />
+    <CustomAction Id="UninstallService" Property="UninstallService" ExeCommand="--uninstall"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!-- On (re)install: register after files land; roll back the registration
+           if it fails. The rollback is scheduled immediately before the action
+           it undoes. -->
+      <Custom Action="SetRollbackInstallService" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="RollbackInstallService" After="SetRollbackInstallService" Condition="NOT Installed" />
+      <Custom Action="SetInstallService" After="RollbackInstallService" Condition="NOT Installed" />
+      <Custom Action="InstallService" After="SetInstallService" Condition="NOT Installed" />
+      <!-- On uninstall: deregister before the files are removed (the exe must
+           still exist for the uninstall verb to run). -->
+      <Custom Action="SetUninstallService" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot;" />
+      <Custom Action="UninstallService" After="SetUninstallService" Condition="REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+  </Package>
+
+  <!-- Wholesale harvest of each self-contained publish dir (build-installer.ps1
+       strips *.pdb from staging first). The per-file component GUIDs are auto-
+       generated and keyed on the install path, so they stay stable across
+       upgrades as long as the layout holds. -->
+  <Fragment>
+    <ComponentGroup Id="DaemonFiles" Directory="DaemonDir">
+      <Files Include="$(var.DaemonPublishDir)\**" />
+    </ComponentGroup>
+    <ComponentGroup Id="UiFiles" Directory="UiDir">
+      <Files Include="$(var.UiPublishDir)\**" />
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- UI shortcuts. Start Menu + Desktop open the window normally; the per-user
+       Startup shortcut launches it minimized to the tray at login (passing the
+       tray flag). Each carries an HKCU keypath per the per-user-shortcut pattern. -->
+  <Fragment>
+    <ComponentGroup Id="Shortcuts">
+      <Component Id="StartMenuShortcut" Directory="AppShortcutFolder" Guid="*">
+        <Shortcut Id="UiStartMenu" Name="Beholder NMT"
+                  Target="[UiDir]Beholder.Ui.exe" WorkingDirectory="UiDir" Icon="BeholderIcon" />
+        <RemoveFolder Id="RemoveAppShortcutFolder" Directory="AppShortcutFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\Beholder NMT" Name="StartMenuShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="*">
+        <Shortcut Id="UiDesktop" Name="Beholder NMT"
+                  Target="[UiDir]Beholder.Ui.exe" WorkingDirectory="UiDir" Icon="BeholderIcon" />
+        <RegistryValue Root="HKCU" Key="Software\Beholder NMT" Name="DesktopShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="StartupShortcut" Directory="StartupFolder" Guid="*">
+        <Shortcut Id="UiStartup" Name="Beholder NMT"
+                  Target="[UiDir]Beholder.Ui.exe" Arguments="--tray"
+                  WorkingDirectory="UiDir" Icon="BeholderIcon" />
+        <RegistryValue Root="HKCU" Key="Software\Beholder NMT" Name="StartupShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

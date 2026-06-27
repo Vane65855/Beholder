@@ -510,6 +510,13 @@ $RECYCLE.BIN/
 # will restore it.
 /Beholder.Tools.DnsCacheProbe/
 
+# Installer build: self-contained publish staging (named dirs, not covered by
+# the generic publish/ rule) + WiX intermediate symbols. The .msi/.cab outputs
+# are already ignored above.
+/publish-daemon/
+/publish-ui/
+*.wixpdb
+
 # Probe output directory (per-machine, per-run JSON results).
 /probe-results/
 

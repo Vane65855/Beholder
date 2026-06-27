@@ -1,0 +1,23 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <PropertyGroup>
+    <OutputName>BeholderNMT-$(Version)-win-x64</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+
+    <!-- Self-derived repo root + default staging dirs, so a plain
+         `dotnet build` of this project (after a publish) works. The
+         build-installer.ps1 script publishes into these defaults; override
+         with -p:DaemonPublishDir=… / -p:UiPublishDir=… if needed. -->
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))</RepoRoot>
+    <DaemonPublishDir Condition="'$(DaemonPublishDir)' == ''">$(RepoRoot)\publish-daemon</DaemonPublishDir>
+    <UiPublishDir Condition="'$(UiPublishDir)' == ''">$(RepoRoot)\publish-ui</UiPublishDir>
+
+    <!-- Bridge MSBuild properties → WiX preprocessor variables ($(var.X)). -->
+    <DefineConstants>Version=$(Version);RepoRoot=$(RepoRoot);DaemonPublishDir=$(DaemonPublishDir);UiPublishDir=$(UiPublishDir)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+  </ItemGroup>
+
+</Project>
