@@ -20,6 +20,12 @@ public partial class App : Application {
     private MainWindowViewModel? _mainWindowVm;
     private INotificationService? _notifications;
     private TrayController? _trayController;
+    private readonly SingleInstanceGuard? _singleInstance;
+
+    // Avalonia's design-time tooling may construct App parameterless; the real
+    // run goes through the factory in Program.BuildAvaloniaApp with the guard.
+    public App() : this(null) { }
+    internal App(SingleInstanceGuard? singleInstance) => _singleInstance = singleInstance;
 
     public override void Initialize() {
         AvaloniaXamlLoader.Load(this);
@@ -118,18 +124,31 @@ public partial class App : Application {
                 Dispatcher.UIThread.Post(mainWindow.Hide);
             }
 
+            // Show + un-minimize + focus the main window — shared by the
+            // notification deep-link and the single-instance signal (a second
+            // launch surfaces this window instead of starting a new app).
+            void SurfaceMainWindow() {
+                mainWindow.Show();   // restore if it was hidden to the tray
+                if (mainWindow.WindowState == WindowState.Minimized)
+                    mainWindow.WindowState = WindowState.Normal;
+                mainWindow.Activate();
+            }
+
             // Notification click → restore window + deep-link to alert. App
             // is the composition root, so this is the one place we can use
             // Dispatcher.UIThread directly (the IDispatcher abstraction is
             // for VMs to stay testable). The handler must marshal because
             // AlertActivated fires on the OS callback thread.
             _notifications.AlertActivated += seq => Dispatcher.UIThread.Post(() => {
-                mainWindow.Show();   // restore if it was hidden to the tray
-                if (mainWindow.WindowState == WindowState.Minimized)
-                    mainWindow.WindowState = WindowState.Normal;
-                mainWindow.Activate();
+                SurfaceMainWindow();
                 _ = _mainWindowVm.NavigateToAlertAsync(seq);
             });
+
+            // A second launch (e.g. double-clicking the Desktop icon) signals
+            // this instance instead of starting a duplicate process — bring the
+            // window forward. Activated fires on the guard's listener thread.
+            if (_singleInstance is { } guard)
+                guard.Activated += () => Dispatcher.UIThread.Post(SurfaceMainWindow);
 
             // Fire-and-forget — both loops run indefinitely until shutdown
             _ = _daemonClient.ConnectAsync(CancellationToken.None);
