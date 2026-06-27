@@ -460,7 +460,7 @@ Event coverage: `EtwDnsCache.OnEtwEvent` accepts any event from the provider tha
 
 ## IPC Protocol (Daemon ↔ UI)
 
-gRPC over named pipe (`\\.\pipe\beholder` on Windows) or Unix domain socket (`/run/beholder.sock` on Linux). The pipe/socket is DACL'd (Windows) or permission-restricted (Linux) to the local user or a `beholder-users` group.
+gRPC over named pipe (`\\.\pipe\beholder` on Windows) or Unix domain socket (`/run/beholder.sock` on Linux). The pipe/socket is DACL'd (Windows) or permission-restricted (Linux) to the local user or a `beholder-users` group. *(The Windows named pipe + `beholder-users` DACL is implemented as of Phase 12.6 — see [ADR 014](decisions/014-local-control-channel-named-pipe.md); the Linux socket lands with the Linux daemon.)*
 
 The UI is a gRPC client. The daemon is a gRPC server. The primary RPC is a server-streaming call:
 
