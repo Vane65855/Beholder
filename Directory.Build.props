@@ -1,0 +1,13 @@
+<Project>
+
+  <!-- Single source of truth for product version + identity. Feeds the assembly
+       stamp (so the UI About section shows a real version, not "0.0.0.0 /
+       (dev build)") and the MSI ProductVersion (Beholder.Installer reads the
+       same value). The installer build passes -p:Version=… to match. -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Company>Beholder NMT</Company>
+    <Product>Beholder NMT</Product>
+  </PropertyGroup>
+
+</Project>
