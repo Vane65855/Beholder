@@ -105,6 +105,19 @@ public partial class App : Application {
             // exiting; the tray menu restores or exits. See TrayController.
             _trayController = new TrayController(desktop, mainWindow, uiPreferencesStore, _notifications);
 
+            // Login auto-start (the installer's Startup shortcut passes --tray)
+            // comes up hidden in the tray instead of popping the window on every
+            // sign-in. Avalonia auto-shows MainWindow after this method returns,
+            // so start it minimized + unfocused to limit the flash, then hide it
+            // on the next dispatcher turn. ShutdownMode stays OnLastWindowClose —
+            // a hidden window keeps the app alive, the invariant TrayController's
+            // close-to-tray already relies on.
+            if (StartupOptions.StartMinimizedToTray(desktop.Args)) {
+                mainWindow.WindowState = WindowState.Minimized;
+                mainWindow.ShowActivated = false;
+                Dispatcher.UIThread.Post(mainWindow.Hide);
+            }
+
             // Notification click → restore window + deep-link to alert. App
             // is the composition root, so this is the one place we can use
             // Dispatcher.UIThread directly (the IDispatcher abstraction is
