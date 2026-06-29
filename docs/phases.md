@@ -1789,7 +1789,7 @@ Scoped via [ADR 009](decisions/009-scanner-as-lan-device-discovery.md) (Scanner 
 - 12.1 — ✅ Windows service installation: `--install`/`--uninstall`/`--status` self-install via `sc.exe` (auto-start + failure-recovery), LocalSystem, `%ProgramData%\Beholder` data dir with hardened ACLs, Event Log logging. See §2 + [ADR 013](decisions/013-windows-service-model.md). (WiX/MSI packaging deferred.)
 - 12.2 — Error handling sweep (every catch, every log call, every edge case)
 - 12.3 — Performance profiling (24-hour soak test: memory, CPU, SQLite size, GC pressure)
-- 12.4 — Configuration documentation (reference `beholder.toml` with comments)
+- 12.4 — Configuration documentation (reference `appsettings.json` with comments)
 - 12.5 — Startup reconciliation: sync OS firewall rules with SQLite `firewall_rules` table on daemon start
 - Final checkpoint: install on clean machine, run for a week, understand what happened.
 

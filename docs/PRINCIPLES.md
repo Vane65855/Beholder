@@ -168,7 +168,7 @@ The hash chain is the project's core trust mechanism. It must be correct above a
 
 ### Configuration
 
-- All configuration is read from `beholder.toml` at startup and injected via `IOptions<T>` / `IOptionsMonitor<T>`
+- All configuration is read from `appsettings.json` at startup and injected via `IOptions<T>` / `IOptionsMonitor<T>`
 - Secrets (signing keys, uplink tokens) are NEVER in the config file. They are in separate files referenced by path.
 - Every config value has a sensible default. The daemon must start with ZERO user configuration.
 - Config changes that affect the uplink or firewall behavior are logged as events in the chain.

@@ -526,7 +526,7 @@ service BeholderUplink {
 
 The daemon authenticates with a signed JWT (Ed25519) carrying a sensor ID and capability set. The aggregator validates the token against a list of trusted issuer public keys.
 
-Disabled by default. Enabled via `[uplink]` section in `beholder.toml`. The daemon never opens an inbound port.
+Disabled by default. Enabled via the `Uplink` section of `appsettings.json`. The daemon never opens an inbound port.
 
 ## Platform Abstraction
 
