@@ -5,8 +5,13 @@ namespace Beholder.Tests.TestDoubles;
 internal sealed class FakeFirewallController : IFirewallController {
     public List<FirewallRule> AddedRules { get; } = new();
     public List<(string ProcessPath, Direction Direction)> RemovedRules { get; } = new();
+
+    /// <summary>The Beholder rules the OS firewall currently holds (what <see cref="ListRulesAsync"/> returns).</summary>
+    public List<FirewallRule> OsRules { get; } = new();
+
     public Exception? AddRuleException { get; set; }
     public Exception? RemoveRuleException { get; set; }
+    public Exception? ListRulesException { get; set; }
 
     public Task AddRuleAsync(FirewallRule rule, CancellationToken cancellationToken) {
         if (AddRuleException is not null) throw AddRuleException;
@@ -20,6 +25,8 @@ internal sealed class FakeFirewallController : IFirewallController {
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<FirewallRule>> ListRulesAsync(CancellationToken cancellationToken)
-        => Task.FromResult<IReadOnlyList<FirewallRule>>(Array.Empty<FirewallRule>());
+    public Task<IReadOnlyList<FirewallRule>> ListRulesAsync(CancellationToken cancellationToken) {
+        if (ListRulesException is not null) throw ListRulesException;
+        return Task.FromResult<IReadOnlyList<FirewallRule>>(OsRules.ToList());
+    }
 }

@@ -255,6 +255,8 @@ if (OperatingSystem.IsWindows()) {
         builder.Configuration.GetSection("Alert"));
     builder.Services.Configure<CheckpointOptions>(
         builder.Configuration.GetSection("Checkpoint"));
+    builder.Services.Configure<DiagnosticsOptions>(
+        builder.Configuration.GetSection("Diagnostics"));
 
     builder.Services.AddSingleton<IFirewallEnforcementState, FirewallEnforcementState>();
     builder.Services.AddHostedService<Beholder.Daemon.Pipeline.FirewallEnforcementService>();
@@ -272,6 +274,13 @@ if (OperatingSystem.IsWindows()) {
         sp.GetRequiredService<ConnectionFactory>(),
         sp.GetRequiredService<TimeProvider>()));
     builder.Services.AddHostedService<Beholder.Daemon.Pipeline.SettingsOverridesService>();
+
+    // Phase 12.5: on startup, reconcile the OS firewall against the rule store
+    // (the chain-audited source of truth) so manual wf.msc edits or orphan rules
+    // can't drift silently. Registered after SettingsOverridesService so the
+    // master enforcement state is final before it reads it; FirewallEnforcementService
+    // only subscribes at startup, so order relative to it doesn't matter.
+    builder.Services.AddHostedService<Beholder.Daemon.Pipeline.FirewallReconciliationService>();
 
     // Broadcast service must be registered BEFORE the pipeline so its StartAsync
     // runs first and subscribes to ISnapshotBatchSource.OnSnapshotBatch before
@@ -314,6 +323,9 @@ if (OperatingSystem.IsWindows()) {
     // tick runs against raw data the engine has already begun producing.
     builder.Services.AddSingleton<RollupService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<RollupService>());
+
+    // Phase 12.3: opt-in resource sampler for performance soaks (off by default).
+    builder.Services.AddHostedService<Beholder.Daemon.Pipeline.DiagnosticSampler>();
 
     builder.Services.AddSingleton<BeholderLocalService>();
 }
