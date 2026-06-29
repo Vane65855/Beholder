@@ -335,7 +335,11 @@ internal static partial class DnsApiInterop {
             var bytes = new byte[byteCount];
             Marshal.Copy(source, bytes, 0, byteCount);
             return new IPAddress(bytes);
-        } catch (Exception) {
+        } catch (ArgumentException) {
+            // Marshal.Copy / the IPAddress ctor only raise ArgumentExceptions here
+            // (bad length/args from a malformed record) — skip the record rather
+            // than abort the whole enumeration. A bad native pointer would surface
+            // as an uncatchable access violation, not here.
             return null;
         }
     }
