@@ -191,41 +191,6 @@
                     </Border>
                 </StackPanel>
 
-                <!-- Selection bar — hidden until a chart range is selected
-                     (which pauses the live view). Commit 2 fills it with the
-                     window's destinations and a hover-expand list. -->
-                <Border Grid.Column="1"
-                        IsVisible="{Binding IsSelectionActive}"
-                        Background="{DynamicResource BackgroundPanel}"
-                        BorderBrush="{DynamicResource AccentPrimary}"
-                        BorderThickness="1"
-                        CornerRadius="3"
-                        Padding="10,3"
-                        Margin="12,0"
-                        VerticalAlignment="Center">
-                    <Grid ColumnDefinitions="Auto,*,Auto">
-                        <TextBlock Grid.Column="0"
-                                   Text="SELECTION"
-                                   FontSize="{DynamicResource FontSizeCaption}"
-                                   LetterSpacing="1"
-                                   Foreground="{DynamicResource TextMuted}"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,10,0" />
-                        <TextBlock Grid.Column="1"
-                                   Text="{Binding SelectionWindowLabel}"
-                                   FontSize="{DynamicResource FontSizeCaption}"
-                                   Foreground="{DynamicResource TextSecondary}"
-                                   VerticalAlignment="Center"
-                                   TextTrimming="CharacterEllipsis" />
-                        <Button Grid.Column="2"
-                                Content="▶ Resume"
-                                Classes="toolbarPill"
-                                Margin="10,0,0,0"
-                                Command="{Binding ResumeCommand}"
-                                ToolTip.Tip="Resume live monitoring and clear the selection." />
-                    </Grid>
-                </Border>
-
                 <controls:TimeRangeDropdown Grid.Column="2"
                                             SelectedRange="{Binding SelectedTimeRange, Mode=TwoWay}"
                                             VerticalAlignment="Center"
@@ -297,6 +262,139 @@
                                           Message="{Binding ErrorMessage}"
                                           IsVisible="{Binding HasError}"
                                           DismissCommand="{Binding DismissErrorCommand}" />
+
+                    <!-- Selection bar — appears at the top of the chart when a
+                         range is selected (which pauses the live view). The
+                         header stays visible; hovering anywhere on the bar
+                         reveals the full scrollable destinations list. The
+                         self-referential #SelectionOverlay.IsPointerOver keeps
+                         the expand open while the pointer is over the header OR
+                         the list (in-tree, no popup — see UI_QUALITY_STANDARDS §10). -->
+                    <Border x:Name="SelectionOverlay"
+                            IsVisible="{Binding IsSelectionActive}"
+                            VerticalAlignment="Top"
+                            HorizontalAlignment="Stretch"
+                            Margin="8,0,8,0"
+                            Background="{DynamicResource BackgroundPanel}"
+                            BorderBrush="{DynamicResource AccentPrimary}"
+                            BorderThickness="1"
+                            CornerRadius="0,0,4,4">
+                        <DockPanel>
+                            <Grid DockPanel.Dock="Top"
+                                  ColumnDefinitions="Auto,Auto,*,Auto"
+                                  Margin="10,5">
+                                <TextBlock Grid.Column="0"
+                                           Text="{Binding SelectionAppLabel}"
+                                           FontWeight="SemiBold"
+                                           FontSize="{DynamicResource FontSizeCaption}"
+                                           Foreground="{DynamicResource TextPrimary}"
+                                           VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="220"
+                                           Margin="0,0,10,0" />
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding SelectionWindowLabel}"
+                                           FontSize="{DynamicResource FontSizeCaption}"
+                                           Foreground="{DynamicResource TextMuted}"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding SelectionDestinations.Count, StringFormat='{}{0} destinations  ·  hover to expand'}"
+                                           FontSize="{DynamicResource FontSizeCaption}"
+                                           Foreground="{DynamicResource TextMuted}"
+                                           VerticalAlignment="Center"
+                                           HorizontalAlignment="Right"
+                                           Margin="12,0" />
+                                <Button Grid.Column="3"
+                                        Content="▶ Resume"
+                                        Classes="toolbarPill"
+                                        Command="{Binding ResumeCommand}"
+                                        ToolTip.Tip="Resume live monitoring and clear the selection." />
+                            </Grid>
+
+                            <Grid IsVisible="{Binding #SelectionOverlay.IsPointerOver}"
+                                  MinHeight="80"
+                                  MaxHeight="320">
+                                <Border BorderBrush="{DynamicResource DividerHorizontal}"
+                                        BorderThickness="0,1,0,0">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  IsVisible="{Binding !SelectionLoading}">
+                                        <ItemsControl ItemsSource="{Binding SelectionDestinations}"
+                                                      Margin="10,6">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <VirtualizingStackPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:SelectionDestinationRow">
+                                                    <Grid ColumnDefinitions="*,Auto,Auto" Height="24" Margin="0,0,0,2">
+                                                        <StackPanel Grid.Column="0"
+                                                                    Orientation="Horizontal"
+                                                                    Spacing="8"
+                                                                    VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding DisplayName}"
+                                                                       Foreground="{DynamicResource TextPrimary}"
+                                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                                       VerticalAlignment="Center"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding RemoteAddress}"
+                                                                       IsVisible="{Binding ShowAddress}"
+                                                                       FontFamily="Cascadia Code, Consolas, monospace"
+                                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                                       Foreground="{DynamicResource TextMuted}"
+                                                                       VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding SpeedLabel}"
+                                                                   Foreground="{DynamicResource AccentPrimary}"
+                                                                   FontSize="{DynamicResource FontSizeBody}"
+                                                                   VerticalAlignment="Center"
+                                                                   Margin="0,0,16,0" />
+                                                        <TextBlock Grid.Column="2"
+                                                                   Text="{Binding BytesLabel}"
+                                                                   Foreground="{DynamicResource TextSecondary}"
+                                                                   FontSize="{DynamicResource FontSizeBody}"
+                                                                   VerticalAlignment="Center"
+                                                                   MinWidth="70"
+                                                                   TextAlignment="Right" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </Border>
+
+                                <TextBlock Text="Loading destinations…"
+                                           IsVisible="{Binding SelectionLoading}"
+                                           Foreground="{DynamicResource TextMuted}"
+                                           FontSize="{DynamicResource FontSizeBody}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+
+                                <StackPanel IsVisible="{Binding SelectionEmpty}"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Spacing="2">
+                                    <TextBlock Text="No destinations in this window"
+                                               Foreground="{DynamicResource TextSecondary}"
+                                               FontSize="{DynamicResource FontSizeBody}"
+                                               HorizontalAlignment="Center" />
+                                    <TextBlock Text="The selected app reached no resolvable host in this range."
+                                               Foreground="{DynamicResource TextMuted}"
+                                               FontSize="{DynamicResource FontSizeCaption}"
+                                               HorizontalAlignment="Center" />
+                                </StackPanel>
+
+                                <TextBlock Text="Destinations unavailable."
+                                           IsVisible="{Binding SelectionFailed}"
+                                           Foreground="{DynamicResource TextMuted}"
+                                           FontSize="{DynamicResource FontSizeBody}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                        </DockPanel>
+                    </Border>
                 </Grid>
 
                 <!-- COLS view: Hosts / Traffic Type / Countries bar lists.

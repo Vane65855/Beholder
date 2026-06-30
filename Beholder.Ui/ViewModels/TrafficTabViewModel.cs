@@ -147,9 +147,28 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     private string _selectionWindowLabel = string.Empty;
 
     // Absolute window the active selection resolves to, captured when the
-    // selection is made. Commit 2 fetches its destinations for this range.
+    // selection is made. The destinations fetch targets this range.
     private DateTimeOffset _selectionFrom;
     private DateTimeOffset _selectionTo;
+
+    /// <summary>Destinations (host/IP + speed) reached in the selected window, fastest first.</summary>
+    public ObservableCollection<SelectionDestinationRow> SelectionDestinations { get; } = [];
+
+    [ObservableProperty]
+    private bool _selectionLoading;
+
+    [ObservableProperty]
+    private bool _selectionEmpty;
+
+    [ObservableProperty]
+    private bool _selectionFailed;
+
+    /// <summary>The app the selection is scoped to ("All processes" or a process name).</summary>
+    [ObservableProperty]
+    private string _selectionAppLabel = string.Empty;
+
+    // Single-flight CTS for the selection's destinations fetch.
+    private CancellationTokenSource? _selectionCts;
 
     /// <summary>
     /// Per-country byte totals for the MAP sub-view, filtered to real
@@ -260,6 +279,8 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         _mapCts?.Dispose();
         _topDestCts?.Cancel();
         _topDestCts?.Dispose();
+        _selectionCts?.Cancel();
+        _selectionCts?.Dispose();
     }
 
     /// <summary>
@@ -309,7 +330,13 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
 
     partial void OnChartSelectionChanged(ChartSelectionRange? value) {
         if (value is null) {
+            _selectionCts?.Cancel();
             SelectionWindowLabel = string.Empty;
+            SelectionAppLabel = string.Empty;
+            SelectionDestinations.Clear();
+            SelectionLoading = false;
+            SelectionEmpty = false;
+            SelectionFailed = false;
             // Resume the frozen live view immediately rather than waiting for the
             // next broadcast tick.
             if (SelectedTimeRange.IsLive && _lastStates is not null) UpdateFromStates(_lastStates);
@@ -323,6 +350,54 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         _selectionFrom = window.From + span * value.Value.StartFraction;
         _selectionTo = window.From + span * value.Value.EndFraction;
         SelectionWindowLabel = FormatSelectionWindow(_selectionFrom, _selectionTo);
+
+        var processPath = SelectedProcess is null || SelectedProcess.IsAll ? null : SelectedProcess.ProcessPath;
+        SelectionAppLabel = processPath is null ? "All processes" : SelectedProcess!.DisplayName;
+        _selectionCts?.Cancel();
+        _selectionCts?.Dispose();
+        _selectionCts = new CancellationTokenSource();
+        _ = FetchSelectionDestinationsAsync(_selectionFrom, _selectionTo, processPath, _selectionCts.Token);
+    }
+
+    private async Task FetchSelectionDestinationsAsync(
+        DateTimeOffset from, DateTimeOffset to, string? processPath, CancellationToken cancellationToken) {
+        SelectionLoading = true;
+        SelectionFailed = false;
+        SelectionEmpty = false;
+        try {
+            var request = new GetProcessDestinationsRequest {
+                ProcessPath = processPath ?? string.Empty,
+                FromUnixNs = from.ToUnixTimeMilliseconds() * 1_000_000L,
+                ToUnixNs = to.ToUnixTimeMilliseconds() * 1_000_000L,
+            };
+            var response = await _daemonClient.GetProcessDestinationsAsync(request, cancellationToken);
+            if (cancellationToken.IsCancellationRequested) return;
+
+            // Average speed = total bytes over the window; with a shared window
+            // this preserves the daemon's fastest-first (bytes-desc) order.
+            var windowSeconds = Math.Max(1.0, (to - from).TotalSeconds);
+            SelectionDestinations.Clear();
+            foreach (var d in response.Destinations) {
+                var hasHost = !string.IsNullOrWhiteSpace(d.Hostname);
+                var total = d.TotalBytesIn + d.TotalBytesOut;
+                SelectionDestinations.Add(new SelectionDestinationRow(
+                    DisplayName: hasHost ? d.Hostname : d.RemoteAddress,
+                    RemoteAddress: d.RemoteAddress,
+                    ShowAddress: hasHost,
+                    SpeedLabel: ByteFormatter.FormatRate((long)(total / windowSeconds)),
+                    BytesLabel: ByteFormatter.FormatBytes(total)));
+            }
+            SelectionLoading = false;
+            SelectionEmpty = SelectionDestinations.Count == 0;
+        } catch (OperationCanceledException) {
+            // Superseded by a newer selection or cleared — the new fetch owns state.
+        } catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled) {
+            // grpc-dotnet surfaces cancellation as RpcException.Cancelled.
+        } catch (RpcException) {
+            if (cancellationToken.IsCancellationRequested) return;
+            SelectionLoading = false;
+            SelectionFailed = true;
+        }
     }
 
     private static string FormatSelectionWindow(DateTimeOffset from, DateTimeOffset to) {

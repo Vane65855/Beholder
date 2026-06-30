@@ -817,4 +817,58 @@ public class TrafficTabViewModelTests {
 
         Assert.Null(vm.ChartSelection);
     }
+
+    [Fact]
+    public async Task ChartSelection_FetchesDestinationsForWindow() {
+        var (vm, client) = CreateViewModelWithClient();
+        client.ProcessDestinationsResponder = _ => {
+            var response = new GetProcessDestinationsResponse();
+            response.Destinations.Add(new DestinationSummary {
+                RemoteAddress = "1.1.1.1", Hostname = "one.example",
+                Country = "US", TotalBytesIn = 1000, TotalBytesOut = 500, ConnectionCount = 2,
+            });
+            return response;
+        };
+
+        vm.ChartSelection = new ChartSelectionRange(0.2, 0.8);
+        for (var i = 0; i < 10 && vm.SelectionDestinations.Count == 0; i++) await Task.Yield();
+
+        var row = Assert.Single(vm.SelectionDestinations);
+        Assert.Equal("one.example", row.DisplayName);
+        Assert.Equal("1.1.1.1", row.RemoteAddress);
+        Assert.True(row.ShowAddress);
+        Assert.NotEmpty(row.SpeedLabel);
+        Assert.False(vm.SelectionLoading);
+    }
+
+    [Fact]
+    public void ChartSelection_AllProcesses_SetsAllProcessesAppLabel() {
+        var (vm, client) = CreateViewModelWithClient();
+        client.ProcessDestinationsResponder = _ => new GetProcessDestinationsResponse();
+
+        vm.ChartSelection = new ChartSelectionRange(0.1, 0.4);
+
+        Assert.Equal("All processes", vm.SelectionAppLabel);
+    }
+
+    [Fact]
+    public async Task Resume_ClearsSelectionDestinations() {
+        var (vm, client) = CreateViewModelWithClient();
+        client.ProcessDestinationsResponder = _ => {
+            var response = new GetProcessDestinationsResponse();
+            response.Destinations.Add(new DestinationSummary {
+                RemoteAddress = "1.1.1.1", Hostname = "one", Country = "US",
+                TotalBytesIn = 10, TotalBytesOut = 5, ConnectionCount = 1,
+            });
+            return response;
+        };
+        vm.ChartSelection = new ChartSelectionRange(0.2, 0.8);
+        for (var i = 0; i < 10 && vm.SelectionDestinations.Count == 0; i++) await Task.Yield();
+        Assert.NotEmpty(vm.SelectionDestinations);
+
+        vm.ResumeCommand.Execute(null);
+
+        Assert.Empty(vm.SelectionDestinations);
+        Assert.Empty(vm.SelectionAppLabel);
+    }
 }
