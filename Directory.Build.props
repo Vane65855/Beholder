@@ -1,11 +1,15 @@
 <Project>
 
-  <!-- Single source of truth for product version + identity. Feeds the assembly
-       stamp (so the UI About section shows a real version, not "0.0.0.0 /
-       (dev build)") and the MSI ProductVersion (Beholder.Installer reads the
-       same value). The installer build passes -p:Version=… to match. -->
+  <!-- version.json (repo root) is the single source of truth for the product
+       version. This file derives <Version> from it so the assembly stamp (the
+       UI About section shows a real version, not "0.0.0.0 / (dev build)") and
+       the MSI ProductVersion (Beholder.Installer reads the same <Version>) stay
+       in lockstep from one edit point. build-installer.ps1 reads version.json
+       for its -Version default too. The regex pulls the first dotted-number
+       triplet out of the JSON — no MSBuild JSON reader exists, and matching the
+       version literal avoids brittle capture-group indexing. -->
   <PropertyGroup>
-    <Version>0.1.1</Version>
+    <Version>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)version.json')), '[0-9]+\.[0-9]+\.[0-9]+').Value)</Version>
     <Company>Beholder NMT</Company>
     <Product>Beholder NMT</Product>
   </PropertyGroup>

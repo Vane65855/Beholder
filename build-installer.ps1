@@ -11,10 +11,15 @@
     Windows-only (WiX builds MSIs on Windows).
 
 .EXAMPLE
-    pwsh ./build-installer.ps1 -Version 0.1.0
+    pwsh ./build-installer.ps1
+    Builds the MSI at the version in version.json (the single source of truth).
+
+.EXAMPLE
+    pwsh ./build-installer.ps1 -Version 0.2.0-rc1
+    Overrides the version for a one-off build without editing version.json.
 #>
 param(
-    [string]$Version = "0.1.0",
+    [string]$Version = (Get-Content (Join-Path $PSScriptRoot "version.json") -Raw | ConvertFrom-Json).version,
     [string]$Config  = "Release"
 )
 
