@@ -1,30 +1,33 @@
 using Beholder.Core;
 using Beholder.Daemon.Storage;
+using Microsoft.Extensions.Options;
 
 namespace Beholder.Daemon.Pipeline;
 
 /// <summary>
-/// On daemon start, reconciles the OS firewall against the SQLite rule store
-/// (the source of truth) so the two cannot drift silently — a Beholder rule
-/// deleted in <c>wf.msc</c>, an action hand-edited there, or an orphan rule left
-/// by a crash. When enforcement is on the OS should mirror the store exactly;
-/// when off the OS should carry no Beholder rules (the store copies are kept so
-/// the master toggle can re-apply them). Every drift it corrects is appended to
-/// the hash chain — drift is itself a security signal — while a startup that
-/// finds everything already in sync stays silent.
+/// Reconciles the OS firewall against the SQLite rule store (the source of truth)
+/// so the two cannot drift silently — a Beholder rule deleted in <c>wf.msc</c>, an
+/// action hand-edited there, or an orphan rule left by a crash. When enforcement
+/// is on the OS should mirror the store exactly; when off the OS should carry no
+/// Beholder rules (the store copies are kept so the master toggle can re-apply
+/// them). Every drift it corrects is appended to the hash chain — drift is itself
+/// a security signal — while a pass that finds everything in sync stays quiet.
 /// </summary>
 /// <remarks>
-/// Runs once, awaited in <see cref="StartAsync"/> (the rule set is small and the
-/// controller serialises its own COM calls). Any failure is logged and
-/// swallowed: reconciliation is best-effort hardening and must never abort
-/// daemon startup. Registered before <see cref="FirewallEnforcementService"/> so
-/// the OS is reconciled before the enforcement toggle is armed.
+/// Runs a first pass on startup, then re-checks every
+/// <see cref="FirewallOptions.ReconcileIntervalMinutes"/> minutes. A service runs
+/// for days across logout/login, so a startup-only pass would let drift sit until
+/// the next service restart; the timer closes that gap to minutes. Each pass is
+/// best-effort — any failure is logged and swallowed so it never tears down the
+/// loop. Set the interval to 0 to reconcile only at startup.
 /// </remarks>
-internal sealed class FirewallReconciliationService : IHostedService {
+internal sealed class FirewallReconciliationService : BackgroundService {
     private readonly IFirewallRuleStore _ruleStore;
     private readonly IFirewallController _controller;
     private readonly IFirewallEnforcementState _enforcement;
     private readonly IEventStore _eventStore;
+    private readonly TimeProvider _timeProvider;
+    private readonly int _intervalMinutes;
     private readonly ILogger<FirewallReconciliationService> _logger;
 
     public FirewallReconciliationService(
@@ -32,36 +35,61 @@ internal sealed class FirewallReconciliationService : IHostedService {
         IFirewallController controller,
         IFirewallEnforcementState enforcement,
         IEventStore eventStore,
+        IOptions<FirewallOptions> options,
+        TimeProvider timeProvider,
         ILogger<FirewallReconciliationService> logger
     ) {
         ArgumentNullException.ThrowIfNull(ruleStore);
         ArgumentNullException.ThrowIfNull(controller);
         ArgumentNullException.ThrowIfNull(enforcement);
         ArgumentNullException.ThrowIfNull(eventStore);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _ruleStore = ruleStore;
         _controller = controller;
         _enforcement = enforcement;
         _eventStore = eventStore;
+        _timeProvider = timeProvider;
+        _intervalMinutes = options.Value.ReconcileIntervalMinutes;
         _logger = logger;
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken) {
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
+        var interval = TimeSpan.FromMinutes(_intervalMinutes);
+        if (interval > TimeSpan.Zero) {
+            _logger.LogInformation(
+                "Firewall reconciliation active — first pass now, then every {Minutes} min", _intervalMinutes);
+        } else {
+            _logger.LogInformation("Firewall reconciliation active — startup pass only (periodic disabled)");
+        }
+
+        try {
+            await SafeReconcileAsync(stoppingToken).ConfigureAwait(false);
+            if (interval <= TimeSpan.Zero) return;
+
+            using var timer = new PeriodicTimer(interval, _timeProvider);
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+                await SafeReconcileAsync(stoppingToken).ConfigureAwait(false);
+        } catch (OperationCanceledException) {
+            // Normal shutdown.
+        }
+    }
+
+    private async Task SafeReconcileAsync(CancellationToken cancellationToken) {
         try {
             await ReconcileAsync(cancellationToken).ConfigureAwait(false);
         } catch (OperationCanceledException) {
             throw;
         } catch (Exception ex) {
-            _logger.LogError(ex, "Firewall reconciliation failed; continuing startup");
+            _logger.LogError(ex, "Firewall reconciliation pass failed; will retry next interval");
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
     /// <summary>
-    /// Test seam: the reconciliation pass itself, without the <see cref="StartAsync"/>
-    /// guard. Makes the OS Beholder-rule set match the store (or empty, when
-    /// enforcement is off), chain-logging only the rules it actually changes.
+    /// Test seam: a single reconciliation pass, without the timer loop or its
+    /// best-effort guard. Makes the OS Beholder-rule set match the store (or empty,
+    /// when enforcement is off), chain-logging only the rules it actually changes.
     /// </summary>
     internal async Task ReconcileAsync(CancellationToken cancellationToken) {
         var dbRules = await _ruleStore.ListAllAsync(cancellationToken).ConfigureAwait(false);
@@ -118,7 +146,7 @@ internal sealed class FirewallReconciliationService : IHostedService {
         }
 
         if (added + changed + removed == 0) {
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Firewall reconciliation: OS already in sync ({Count} Beholder rules)", osRules.Count);
         } else {
             _logger.LogWarning(

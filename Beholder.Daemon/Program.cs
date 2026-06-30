@@ -275,11 +275,12 @@ if (OperatingSystem.IsWindows()) {
         sp.GetRequiredService<TimeProvider>()));
     builder.Services.AddHostedService<Beholder.Daemon.Pipeline.SettingsOverridesService>();
 
-    // Phase 12.5: on startup, reconcile the OS firewall against the rule store
-    // (the chain-audited source of truth) so manual wf.msc edits or orphan rules
-    // can't drift silently. Registered after SettingsOverridesService so the
-    // master enforcement state is final before it reads it; FirewallEnforcementService
-    // only subscribes at startup, so order relative to it doesn't matter.
+    // Phase 12.5: reconcile the OS firewall against the rule store (the
+    // chain-audited source of truth) so manual wf.msc edits or orphan rules can't
+    // drift silently — a first pass on startup, then every FirewallOptions
+    // .ReconcileIntervalMinutes. As a BackgroundService its first pass runs after
+    // every StartAsync (incl. SettingsOverridesService), so the master enforcement
+    // state is final before it reads it.
     builder.Services.AddHostedService<Beholder.Daemon.Pipeline.FirewallReconciliationService>();
 
     // Broadcast service must be registered BEFORE the pipeline so its StartAsync

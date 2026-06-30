@@ -17,4 +17,13 @@ internal sealed class FirewallOptions {
     /// on later, or for debugging without modifying live firewall state.
     /// </summary>
     public bool EnableEnforcement { get; set; } = true;
+
+    /// <summary>
+    /// How often, in minutes, the daemon re-checks that the OS firewall still
+    /// matches the rule store and corrects any drift (a Beholder rule deleted or
+    /// hand-edited in <c>wf.msc</c>, an orphan left by a crash). A first pass runs
+    /// at startup; this governs the cadence afterward. Set to 0 to reconcile only
+    /// at startup. Default 5.
+    /// </summary>
+    public int ReconcileIntervalMinutes { get; set; } = 5;
 }

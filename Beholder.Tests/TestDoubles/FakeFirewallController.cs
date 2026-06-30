@@ -25,7 +25,11 @@ internal sealed class FakeFirewallController : IFirewallController {
         return Task.CompletedTask;
     }
 
+    /// <summary>Number of times <see cref="ListRulesAsync"/> was called — one per reconciliation pass.</summary>
+    public int ListCallCount { get; private set; }
+
     public Task<IReadOnlyList<FirewallRule>> ListRulesAsync(CancellationToken cancellationToken) {
+        ListCallCount++;
         if (ListRulesException is not null) throw ListRulesException;
         return Task.FromResult<IReadOnlyList<FirewallRule>>(OsRules.ToList());
     }
