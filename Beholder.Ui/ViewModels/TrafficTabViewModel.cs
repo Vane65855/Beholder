@@ -130,6 +130,28 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     public bool HasRemoteAddressFilter => !string.IsNullOrEmpty(RemoteAddressFilter);
 
     /// <summary>
+    /// The active range selection on the chart (plot-width fractions), or null
+    /// when nothing is selected. Two-way bound to the chart control: set by a
+    /// click/drag gesture, cleared (null) by Resume. While non-null the live view
+    /// is paused — <see cref="UpdateFromStates"/> stops refreshing the chart +
+    /// process list so the user can inspect a frozen window.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSelectionActive))]
+    private ChartSelectionRange? _chartSelection;
+
+    public bool IsSelectionActive => ChartSelection is not null;
+
+    /// <summary>Human-readable window of the active selection, e.g. "14:05:00 – 14:20:00".</summary>
+    [ObservableProperty]
+    private string _selectionWindowLabel = string.Empty;
+
+    // Absolute window the active selection resolves to, captured when the
+    // selection is made. Commit 2 fetches its destinations for this range.
+    private DateTimeOffset _selectionFrom;
+    private DateTimeOffset _selectionTo;
+
+    /// <summary>
     /// Per-country byte totals for the MAP sub-view, filtered to real
     /// (non-sentinel) country codes — "--" (Local) and "??" (Unknown)
     /// surface in <see cref="LocalAndUnknownCaption"/> instead of on the
@@ -283,6 +305,35 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     }
 
     [RelayCommand]
+    private void Resume() => ChartSelection = null;
+
+    partial void OnChartSelectionChanged(ChartSelectionRange? value) {
+        if (value is null) {
+            SelectionWindowLabel = string.Empty;
+            // Resume the frozen live view immediately rather than waiting for the
+            // next broadcast tick.
+            if (SelectedTimeRange.IsLive && _lastStates is not null) UpdateFromStates(_lastStates);
+            return;
+        }
+
+        // Map the plot-width fractions onto the chart's current window, captured
+        // now so a live window doesn't shift under the selection.
+        var window = SelectedTimeRange.Resolve();
+        var span = window.To - window.From;
+        _selectionFrom = window.From + span * value.Value.StartFraction;
+        _selectionTo = window.From + span * value.Value.EndFraction;
+        SelectionWindowLabel = FormatSelectionWindow(_selectionFrom, _selectionTo);
+    }
+
+    private static string FormatSelectionWindow(DateTimeOffset from, DateTimeOffset to) {
+        var f = from.ToLocalTime();
+        var t = to.ToLocalTime();
+        return f.Date == t.Date
+            ? $"{f:HH:mm:ss} – {t:HH:mm:ss}"
+            : $"{f:MMM d, HH:mm} – {t:MMM d, HH:mm}";
+    }
+
+    [RelayCommand]
     private void SetGraphView() => ViewMode = TrafficViewMode.Graph;
 
     [RelayCommand]
@@ -357,13 +408,17 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             // GetProcessDestinations / GetProtocolBreakdown /
             // GetCountryBreakdown calls completes. Skipped in historical
             // mode where the data is fixed for the queried range.
-            if (ViewMode == TrafficViewMode.Cols && SelectedTimeRange.IsLive) {
+            if (ViewMode == TrafficViewMode.Cols && SelectedTimeRange.IsLive && !IsSelectionActive) {
                 _ = RefreshColsAsync();
             }
         });
     }
 
     partial void OnSelectedTimeRangeChanged(TimeRangeSelection value) {
+        // A new range invalidates any active chart selection (its window no
+        // longer matches), which also lifts the pause.
+        ChartSelection = null;
+
         if (value.IsLive) {
             // Switching TO live mode — cancel any in-flight historical query
             // (the live path doesn't hit the daemon, so we don't need a fresh
@@ -410,6 +465,11 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     internal void UpdateFromStates(IReadOnlyDictionary<string, ProcessState> states) {
         _lastStates = states;
         IsLoading = false;
+
+        // A chart range selection pauses the live view — the latest states are
+        // still recorded (so Resume catches up) but the chart + process list
+        // freeze on the current frame.
+        if (IsSelectionActive) return;
 
         // In historical mode, live ticks still flow for the status strip, but
         // the chart and process list are frozen on the historical snapshot.
@@ -465,6 +525,9 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             SelectedProcess = _processList.AllProcessesItem;
             return;
         }
+        // Changing the process invalidates any active chart selection (its
+        // destinations were scoped to the prior process), lifting the pause.
+        ChartSelection = null;
         if (SelectedTimeRange.IsLive) {
             if (_lastStates is not null)
                 RebuildChartData(_lastStates);

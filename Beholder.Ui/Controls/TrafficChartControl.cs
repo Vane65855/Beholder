@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
 using Beholder.Ui.Helpers;
 
@@ -27,6 +28,15 @@ internal sealed class TrafficChartControl : Control {
     /// <summary>Font size for axis labels. Mirrors <c>FontSizeSmall</c> in the theme tokens.</summary>
     private const double AxisLabelFontSize = 10;
 
+    /// <summary>A release within this many px of the press is a click (min-range), not a drag.</summary>
+    private const double ClickThresholdPx = 4;
+
+    /// <summary>Width (px) a single click selects; a fixed width spans more time on a longer view.</summary>
+    private const double ClickSelectionWidthPx = 24;
+
+    /// <summary>Alpha for the translucent selection band fill.</summary>
+    private const byte SelectionFillAlpha = 48;
+
     // Typeface is content-independent. Cached statically so FormattedText
     // construction at each tick avoids the FontManager resolution inside.
     private static readonly Typeface s_axisLabelTypeface = new(
@@ -41,6 +51,18 @@ internal sealed class TrafficChartControl : Control {
     private IBrush GridlineBrush => _gridlineBrush ??= ResolveBrush("ChartGridline");
     private IBrush AxisLabelBrush => _axisLabelBrush ??= ResolveBrush("ChartAxisLabel");
     private Pen GridlinePen => _gridlinePen ??= new Pen(GridlineBrush, 1);
+
+    // Selection band brushes — theme-resolved, cleared on ResourcesChanged.
+    private IBrush? _selectionFill;
+    private Pen? _selectionEdgePen;
+    private IBrush SelectionFill => _selectionFill ??= BuildSelectionFill();
+    private Pen SelectionEdgePen => _selectionEdgePen ??= new Pen(ResolveBrush("AccentPrimary"), 1);
+
+    // In-progress drag state — true between PointerPressed and PointerReleased.
+    // The committed selection lives in the Selection property.
+    private bool _dragging;
+    private double _dragStartX;
+    private double _dragCurrentX;
 
     // Per-series-color cache. Practical cardinality is 2 (Download teal,
     // Upload purple); bounded by the 12-entry series palette if future phases
@@ -75,14 +97,31 @@ internal sealed class TrafficChartControl : Control {
         set => SetValue(DataSpanProperty, value);
     }
 
+    /// <summary>
+    /// The user's active range selection on the chart, as plot-width fractions,
+    /// or null when nothing is selected. Two-way: the control writes it on a
+    /// click/drag gesture; the view-model writes null to clear the band (Resume).
+    /// </summary>
+    public static readonly StyledProperty<ChartSelectionRange?> SelectionProperty =
+        AvaloniaProperty.Register<TrafficChartControl, ChartSelectionRange?>(nameof(Selection));
+
+    public ChartSelectionRange? Selection {
+        get => GetValue(SelectionProperty);
+        set => SetValue(SelectionProperty, value);
+    }
+
     static TrafficChartControl() {
-        AffectsRender<TrafficChartControl>(SeriesDataProperty, DataSpanProperty);
+        AffectsRender<TrafficChartControl>(SeriesDataProperty, DataSpanProperty, SelectionProperty);
     }
 
     public override void Render(DrawingContext context) {
         base.Render(context);
         var bounds = Bounds;
         if (bounds.Width < 1 || bounds.Height < 1) return;
+
+        // A transparent fill makes the whole control hit-testable, so range
+        // selection registers anywhere over the plot, not only on drawn geometry.
+        context.FillRectangle(Brushes.Transparent, new Rect(bounds.Size));
 
         var chartLeft = LeftMargin;
         var chartTop = TopMargin;
@@ -149,6 +188,9 @@ internal sealed class TrafficChartControl : Control {
 
         // Draw border
         DrawAxes(context, chartLeft, chartTop, chartRight, chartBottom, GridlinePen);
+
+        // Selection band, on top of the series and axes.
+        DrawSelection(context, chartLeft, chartTop, chartRight, chartBottom);
     }
 
     private static void DrawAxes(DrawingContext context, double left, double top,
@@ -370,6 +412,81 @@ internal sealed class TrafficChartControl : Control {
         return cached;
     }
 
+    private IBrush BuildSelectionFill() {
+        var accent = ResolveBrush("AccentPrimary") as ISolidColorBrush;
+        var c = accent?.Color ?? Colors.SteelBlue;
+        return new SolidColorBrush(Color.FromArgb(SelectionFillAlpha, c.R, c.G, c.B));
+    }
+
+    private (double Left, double Right) PlotXRange() =>
+        (LeftMargin, Math.Max(LeftMargin, Bounds.Width - RightMargin));
+
+    private void DrawSelection(DrawingContext context, double left, double top,
+        double right, double bottom) {
+        double bandLeft, bandRight;
+        if (_dragging) {
+            bandLeft = Math.Min(_dragStartX, _dragCurrentX);
+            bandRight = Math.Max(_dragStartX, _dragCurrentX);
+        } else if (Selection is { } selection) {
+            var width = right - left;
+            bandLeft = left + selection.StartFraction * width;
+            bandRight = left + selection.EndFraction * width;
+        } else {
+            return;
+        }
+
+        bandLeft = Math.Clamp(bandLeft, left, right);
+        bandRight = Math.Clamp(bandRight, left, right);
+        if (bandRight - bandLeft < 0.5) return;
+
+        context.FillRectangle(SelectionFill, new Rect(bandLeft, top, bandRight - bandLeft, bottom - top));
+        context.DrawLine(SelectionEdgePen, new Point(bandLeft, top), new Point(bandLeft, bottom));
+        context.DrawLine(SelectionEdgePen, new Point(bandRight, top), new Point(bandRight, bottom));
+    }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e) {
+        base.OnPointerPressed(e);
+        var point = e.GetCurrentPoint(this);
+        if (!point.Properties.IsLeftButtonPressed) return;
+        var (left, right) = PlotXRange();
+        if (right - left < 10) return;
+        _dragging = true;
+        _dragStartX = Math.Clamp(point.Position.X, left, right);
+        _dragCurrentX = _dragStartX;
+        e.Pointer.Capture(this);
+        e.Handled = true;
+        InvalidateVisual();
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e) {
+        base.OnPointerMoved(e);
+        if (!_dragging) return;
+        var (left, right) = PlotXRange();
+        _dragCurrentX = Math.Clamp(e.GetPosition(this).X, left, right);
+        InvalidateVisual();
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e) {
+        base.OnPointerReleased(e);
+        if (!_dragging) return;
+        _dragging = false;
+        e.Pointer.Capture(null);
+
+        var (left, right) = PlotXRange();
+        var width = right - left;
+        if (width < 10) {
+            InvalidateVisual();
+            return;
+        }
+
+        var (start, end) = ChartSelectionMath.IsClick(_dragStartX, _dragCurrentX, ClickThresholdPx)
+            ? ChartSelectionMath.ClickRange(_dragStartX, left, width, ClickSelectionWidthPx)
+            : ChartSelectionMath.DragRange(_dragStartX, _dragCurrentX, left, width);
+        Selection = new ChartSelectionRange(start, end);
+        e.Handled = true;
+        InvalidateVisual();
+    }
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e) {
         base.OnAttachedToVisualTree(e);
         ResourcesChanged += OnResourcesChanged;
@@ -386,6 +503,8 @@ internal sealed class TrafficChartControl : Control {
         _gridlineBrush = null;
         _axisLabelBrush = null;
         _gridlinePen = null;
+        _selectionFill = null;
+        _selectionEdgePen = null;
         _seriesCache.Clear();
         InvalidateVisual();
     }

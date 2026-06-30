@@ -144,7 +144,7 @@
 
             <!-- Top bar: chart title + range selector + view switcher -->
             <Grid DockPanel.Dock="Top"
-                  ColumnDefinitions="*,Auto,Auto"
+                  ColumnDefinitions="Auto,*,Auto,Auto"
                   Margin="16,10,16,6">
                 <StackPanel Grid.Column="0"
                             Orientation="Horizontal"
@@ -191,12 +191,47 @@
                     </Border>
                 </StackPanel>
 
-                <controls:TimeRangeDropdown Grid.Column="1"
+                <!-- Selection bar — hidden until a chart range is selected
+                     (which pauses the live view). Commit 2 fills it with the
+                     window's destinations and a hover-expand list. -->
+                <Border Grid.Column="1"
+                        IsVisible="{Binding IsSelectionActive}"
+                        Background="{DynamicResource BackgroundPanel}"
+                        BorderBrush="{DynamicResource AccentPrimary}"
+                        BorderThickness="1"
+                        CornerRadius="3"
+                        Padding="10,3"
+                        Margin="12,0"
+                        VerticalAlignment="Center">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <TextBlock Grid.Column="0"
+                                   Text="SELECTION"
+                                   FontSize="{DynamicResource FontSizeCaption}"
+                                   LetterSpacing="1"
+                                   Foreground="{DynamicResource TextMuted}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,10,0" />
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding SelectionWindowLabel}"
+                                   FontSize="{DynamicResource FontSizeCaption}"
+                                   Foreground="{DynamicResource TextSecondary}"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                        <Button Grid.Column="2"
+                                Content="▶ Resume"
+                                Classes="toolbarPill"
+                                Margin="10,0,0,0"
+                                Command="{Binding ResumeCommand}"
+                                ToolTip.Tip="Resume live monitoring and clear the selection." />
+                    </Grid>
+                </Border>
+
+                <controls:TimeRangeDropdown Grid.Column="2"
                                             SelectedRange="{Binding SelectedTimeRange, Mode=TwoWay}"
                                             VerticalAlignment="Center"
                                             Margin="0,0,12,0" />
 
-                <StackPanel Grid.Column="2"
+                <StackPanel Grid.Column="3"
                             Orientation="Horizontal"
                             Spacing="2">
                     <Button Content="GRAPH"
@@ -223,6 +258,7 @@
                 <Grid IsVisible="{Binding IsGraphActive}">
                     <controls:TrafficChartControl SeriesData="{Binding ChartData}"
                                                  DataSpan="{Binding ChartDataSpan}"
+                                                 Selection="{Binding ChartSelection, Mode=TwoWay}"
                                                  HorizontalAlignment="Stretch"
                                                  VerticalAlignment="Stretch"
                                                  Margin="8,0,8,8" />

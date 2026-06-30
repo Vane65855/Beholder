@@ -1,6 +1,7 @@
 using System.Reflection;
 using Beholder.Protocol.Local;
 using Beholder.Tests.TestDoubles;
+using Beholder.Ui.Controls;
 using Beholder.Ui.Models;
 using Beholder.Ui.Services;
 using Beholder.Ui.ViewModels;
@@ -749,5 +750,71 @@ public class TrafficTabViewModelTests {
         Assert.False(vm.HasRemoteAddressFilter);
         Assert.Null(vm.RemoteAddressFilter);
         Assert.True(vm.SelectedTimeRange.IsLive);
+    }
+
+    // ---- Chart range selection + pause (GlassWire-style drill-down) ----
+
+    [Fact]
+    public void ChartSelection_Set_ActivatesAndSetsWindowLabel() {
+        var vm = CreateViewModel();
+        vm.UpdateFromStates(new Dictionary<string, ProcessState> {
+            ["a.exe"] = MakeState("a.exe", "a", [10], [1]),
+        });
+        Assert.False(vm.IsSelectionActive);
+
+        vm.ChartSelection = new ChartSelectionRange(0.1, 0.4);
+
+        Assert.True(vm.IsSelectionActive);
+        Assert.NotEmpty(vm.SelectionWindowLabel);
+    }
+
+    [Fact]
+    public void ChartSelection_PausesLiveUpdates_ThenResumeCatchesUp() {
+        var vm = CreateViewModel();
+        vm.UpdateFromStates(new Dictionary<string, ProcessState> {
+            ["a.exe"] = MakeState("a.exe", "a", [10, 20, 30], [1, 2, 3]),
+        });
+        Assert.Equal(new long[] { 10, 20, 30 }, vm.ChartData![0].Values);
+
+        // Selecting a range pauses the live view — a fresh tick must not change
+        // the frozen chart.
+        vm.ChartSelection = new ChartSelectionRange(0.2, 0.6);
+        vm.UpdateFromStates(new Dictionary<string, ProcessState> {
+            ["a.exe"] = MakeState("a.exe", "a", [100, 200, 300], [5, 10, 15]),
+        });
+        Assert.Equal(new long[] { 10, 20, 30 }, vm.ChartData![0].Values);
+
+        // Resume lifts the pause and catches the chart up to the latest tick.
+        vm.ResumeCommand.Execute(null);
+
+        Assert.False(vm.IsSelectionActive);
+        Assert.Equal(new long[] { 100, 200, 300 }, vm.ChartData![0].Values);
+    }
+
+    [Fact]
+    public void RangeChange_ClearsChartSelection() {
+        var vm = CreateViewModel();
+        vm.ChartSelection = new ChartSelectionRange(0.1, 0.4);
+        Assert.True(vm.IsSelectionActive);
+
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last1Hour);
+
+        Assert.Null(vm.ChartSelection);
+        Assert.False(vm.IsSelectionActive);
+    }
+
+    [Fact]
+    public void ProcessChange_ClearsChartSelection() {
+        var vm = CreateViewModel();
+        vm.UpdateFromStates(new Dictionary<string, ProcessState> {
+            ["a.exe"] = MakeState("a.exe", "a", [100], [50]),
+        });
+        vm.ChartSelection = new ChartSelectionRange(0.1, 0.4);
+        Assert.True(vm.IsSelectionActive);
+
+        var aItem = vm.ProcessList.First(p => p.ProcessPath == "a.exe");
+        vm.SelectedProcess = aItem;
+
+        Assert.Null(vm.ChartSelection);
     }
 }
