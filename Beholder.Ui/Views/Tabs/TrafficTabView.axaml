@@ -26,6 +26,25 @@
         <Style Selector="Button.toolbarPill:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
         </Style>
+
+        <!-- Resume button: a muted green (the theme's success/"online" color) so
+             it reads clearly as the "roll the live view again" action, distinct
+             from the teal accent everywhere else in the selection bar. -->
+        <Style Selector="Button.resumePill">
+            <Setter Property="MinWidth" Value="64" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SeveritySuccess}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource SeveritySuccess}" />
+        </Style>
+        <Style Selector="Button.resumePill:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BackgroundHover}" />
+        </Style>
     </UserControl.Styles>
 
     <Grid ColumnDefinitions="280,*">
@@ -306,7 +325,7 @@
                                            Margin="12,0" />
                                 <Button Grid.Column="3"
                                         Content="▶ Resume"
-                                        Classes="toolbarPill"
+                                        Classes="resumePill"
                                         Command="{Binding ResumeCommand}"
                                         ToolTip.Tip="Resume live monitoring and clear the selection." />
                             </Grid>
