@@ -24,7 +24,7 @@
                            FontWeight="SemiBold" FontSize="{DynamicResource FontSizeHeading}"
                            LetterSpacing="2"
                            VerticalAlignment="Center" />
-                <TextBlock Text="v0.1.0"
+                <TextBlock Text="{Binding VersionLabel}"
                            Foreground="{DynamicResource TextMuted}"
                            FontSize="{DynamicResource FontSizeCaption}"
                            VerticalAlignment="Center" />

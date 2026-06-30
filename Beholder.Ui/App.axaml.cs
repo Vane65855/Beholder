@@ -74,7 +74,8 @@ public partial class App : Application {
             _notifications = new NoopNotificationService();
 #endif
 
-            var statusStripVm = new StatusStripViewModel(_processStateService, dispatcher);
+            var buildVersion = BuildVersion.FromRunningAssembly();
+            var statusStripVm = new StatusStripViewModel(_processStateService, dispatcher, buildVersion);
             var historicalChartLoader = new HistoricalChartLoader(_daemonClient);
 
             var shellOpener = new ShellOpener();
@@ -101,7 +102,8 @@ public partial class App : Application {
             _mainWindowVm = new MainWindowViewModel(
                 _daemonClient, _processStateService, _streamSubscriber,
                 statusStripVm, historicalChartLoader, dispatcher, _notifications,
-                shellOpener, clipboardWriter, filePicker, fileWriter, uiPreferencesStore);
+                shellOpener, clipboardWriter, filePicker, fileWriter, uiPreferencesStore,
+                buildVersion);
             var mainWindow = new MainWindow { DataContext = _mainWindowVm };
             mainWindowRef = mainWindow;
             desktop.MainWindow = mainWindow;

@@ -36,15 +36,18 @@ internal sealed partial class StatusStripViewModel : ViewModelBase, IDisposable 
     private bool _hasTraffic;
 
     [ObservableProperty]
-    private string _deviceIdLabel = "DEV-0000";
+    private string _deviceIdLabel;
 
     public double InboundRatio => 1.0 - OutboundRatio;
 
-    public StatusStripViewModel(ProcessStateService processStateService, IDispatcher dispatcher) {
+    public StatusStripViewModel(
+        ProcessStateService processStateService, IDispatcher dispatcher, BuildVersion buildVersion) {
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(dispatcher);
+        ArgumentNullException.ThrowIfNull(buildVersion);
         _processStateService = processStateService;
         _dispatcher = dispatcher;
+        _deviceIdLabel = buildVersion.DeviceLabel;
         _processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
     }
 

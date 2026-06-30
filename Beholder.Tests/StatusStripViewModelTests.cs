@@ -15,16 +15,22 @@ public class StatusStripViewModelTests {
     private static readonly DateTimeOffset FixedLastSeen =
         new(2026, 4, 10, 12, 0, 0, TimeSpan.Zero);
 
-    private static (StatusStripViewModel Vm, ProcessStateService Service) CreateViewModelWithService() {
+    private static readonly BuildVersion SampleBuild = BuildVersion.Parse("0.1.1+abcdef1234567", null);
+
+    private static ProcessStateService CreateService() {
         var fakeClient = new FakeDaemonClient();
         var subscriber = new DaemonStreamSubscriber(
             fakeClient,
             TimeProvider.System,
             NullLogger<DaemonStreamSubscriber>.Instance);
-        var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
+        return new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
+    }
+
+    private static (StatusStripViewModel Vm, ProcessStateService Service) CreateViewModelWithService() {
+        var service = CreateService();
         // SyncDispatcher runs IDispatcher.Post actions immediately on the
         // calling thread — production handlers run synchronously under test.
-        var vm = new StatusStripViewModel(service, new SyncDispatcher());
+        var vm = new StatusStripViewModel(service, new SyncDispatcher(), SampleBuild);
         return (vm, service);
     }
 
@@ -66,7 +72,12 @@ public class StatusStripViewModelTests {
     [Fact]
     public void Ctor_NullService_Throws() =>
         Assert.Throws<ArgumentNullException>("processStateService",
-            () => new StatusStripViewModel(null!, new SyncDispatcher()));
+            () => new StatusStripViewModel(null!, new SyncDispatcher(), SampleBuild));
+
+    [Fact]
+    public void Ctor_NullBuildVersion_Throws() =>
+        Assert.Throws<ArgumentNullException>("buildVersion",
+            () => new StatusStripViewModel(CreateService(), new SyncDispatcher(), null!));
 
     [Fact]
     public void UpdateFromStates_AggregatesAcrossProcesses_UpdatesTotals() {

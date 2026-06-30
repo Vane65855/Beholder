@@ -69,7 +69,8 @@ internal sealed class AboutInfo {
     /// </summary>
     public static AboutInfo FromRunningAssembly() {
         var assembly = Assembly.GetExecutingAssembly();
-        var version = assembly.GetName().Version?.ToString() ?? "0.0.0.0";
+        var build = BuildVersion.FromRunningAssembly();
+        var assemblyVersion = assembly.GetName().Version?.ToString() ?? "0.0.0.0";
         var informational = assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion;
@@ -78,12 +79,12 @@ internal sealed class AboutInfo {
         // useless to users. Strip the metadata suffix when it matches the
         // 4-segment version (i.e. nothing meaningful was set) and surface
         // a clear placeholder instead.
-        var buildInfo = string.IsNullOrWhiteSpace(informational) || informational == version
+        var buildInfo = string.IsNullOrWhiteSpace(informational) || informational == assemblyVersion
             ? "(dev build)"
             : informational;
 
         return new AboutInfo(
-            version: version,
+            version: build.DisplayVersion,
             buildInfo: buildInfo,
             attributions: [
                 new Attribution(

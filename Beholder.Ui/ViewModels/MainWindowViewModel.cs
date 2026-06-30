@@ -59,6 +59,8 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
 
     public StatusStripViewModel StatusStripVm { get; }
 
+    public string VersionLabel { get; }
+
     public MainWindowViewModel(
         IDaemonClient daemonClient,
         ProcessStateService processStateService,
@@ -71,7 +73,8 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         IClipboardWriter clipboardWriter,
         IFilePicker filePicker,
         IFileWriter fileWriter,
-        IUiPreferencesStore uiPreferencesStore) {
+        IUiPreferencesStore uiPreferencesStore,
+        BuildVersion buildVersion) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
@@ -84,6 +87,7 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         ArgumentNullException.ThrowIfNull(filePicker);
         ArgumentNullException.ThrowIfNull(fileWriter);
         ArgumentNullException.ThrowIfNull(uiPreferencesStore);
+        ArgumentNullException.ThrowIfNull(buildVersion);
         _daemonClient = daemonClient;
         _dispatcher = dispatcher;
         _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader, dispatcher);
@@ -108,6 +112,7 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
             daemonClient, dispatcher, shellOpener, clipboardWriter, filePicker, fileWriter,
             uiPreferencesStore, TimeProvider.System);
         StatusStripVm = statusStripVm;
+        VersionLabel = $"v{buildVersion.DisplayVersion}";
         ActiveTabContent = _trafficTab;
         _daemonClient.StateChanged += OnDaemonStateChanged;
     }
