@@ -20,7 +20,7 @@
 
 Beholder is an open-source **network monitor and application firewall** for Windows. It shows you every connection your apps make — *who, how much, and where on Earth it's going* — lets you block anything you don't trust with a single click, and keeps a tamper-proof, cryptographically signed record of all of it.
 
-**No account. No cloud. No subscription.** The all-seeing eye works for you, and only you.
+**No account. No cloud. No subscription.** The eye tyrant works for you, and only you.
 
 > You've seen monitors like this — the live traffic graph, the per-app firewall, the glowing world map, the *"a new app just connected"* alerts. Beholder gives you all of it, then strips away everything you never asked for: the sign-up, the cloud sync, the renewal notice, and the closed-source black box you're simply told to trust.
 
