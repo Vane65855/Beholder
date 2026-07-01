@@ -10,8 +10,8 @@
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg)
 ![.NET 10](https://img.shields.io/badge/.NET-10-512BD4.svg)
 ![UI: Avalonia](https://img.shields.io/badge/UI-Avalonia%2012-7c3aed.svg)
-![Tests: 1496 passing](https://img.shields.io/badge/tests-1496%20passing-22c55e.svg)
-![Status: pre-release 0.1.0](https://img.shields.io/badge/status-pre--release%200.1.0-f59e0b.svg)
+![Tests: 1527 passing](https://img.shields.io/badge/tests-1527%20passing-22c55e.svg)
+![Status: pre-release 0.1](https://img.shields.io/badge/status-pre--release%200.1-f59e0b.svg)
 
 </div>
 

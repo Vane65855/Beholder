@@ -1,15 +1,15 @@
 <Project>
 
-  <!-- version.json (repo root) is the single source of truth for the product
-       version. This file derives <Version> from it so the assembly stamp (the
-       UI About section shows a real version, not "0.0.0.0 / (dev build)") and
-       the MSI ProductVersion (Beholder.Installer reads the same <Version>) stay
-       in lockstep from one edit point. build-installer.ps1 reads version.json
-       for its -Version default too. The regex pulls the first dotted-number
-       triplet out of the JSON — no MSBuild JSON reader exists, and matching the
-       version literal avoids brittle capture-group indexing. -->
+  <!-- version.json (repo root) holds the release line only — major.minor, e.g.
+       "0.1". The patch is derived automatically from the git commit count, so the
+       full product version is 0.1.<commit-count> with no hand-edits:
+       Directory.Build.targets computes it for local/dev builds, and
+       build-installer.ps1 passes an explicit 3-part -p:Version for release
+       artifacts (MSI + published assemblies). VersionPrefix feeds both; if git is
+       unavailable the version falls back to <prefix>.0. The regex pulls the
+       major.minor pair out of the JSON (no MSBuild JSON reader exists). -->
   <PropertyGroup>
-    <Version>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)version.json')), '[0-9]+\.[0-9]+\.[0-9]+').Value)</Version>
+    <VersionPrefix>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)version.json')), '[0-9]+\.[0-9]+').Value)</VersionPrefix>
     <Company>Beholder NMT</Company>
     <Product>Beholder NMT</Product>
   </PropertyGroup>

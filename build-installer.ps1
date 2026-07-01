@@ -12,14 +12,15 @@
 
 .EXAMPLE
     pwsh ./build-installer.ps1
-    Builds the MSI at the version in version.json (the single source of truth).
+    Builds the MSI at 0.1.<git commit count> — version.json holds the "0.1" line
+    and the patch is derived from the commit count automatically.
 
 .EXAMPLE
     pwsh ./build-installer.ps1 -Version 0.2.0-rc1
-    Overrides the version for a one-off build without editing version.json.
+    Overrides the version for a one-off build without touching version.json/git.
 #>
 param(
-    [string]$Version = (Get-Content (Join-Path $PSScriptRoot "version.json") -Raw | ConvertFrom-Json).version,
+    [string]$Version = "$((Get-Content (Join-Path $PSScriptRoot 'version.json') -Raw | ConvertFrom-Json).version).$(git -C $PSScriptRoot rev-list --count HEAD)",
     [string]$Config  = "Release"
 )
 

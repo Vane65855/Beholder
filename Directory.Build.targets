@@ -1,0 +1,27 @@
+<Project>
+
+  <!-- Auto-derive the patch from the git commit count so the product version is
+       0.1.<commit-count> with no manual bumps (see Directory.Build.props). This
+       runs for local/dev builds; release builds pass an explicit 3-part
+       -p:Version (build-installer.ps1), so the condition below no-ops there. If
+       git is unavailable (e.g. building from a source archive) it falls back to
+       <prefix>.0. -->
+  <Target Name="_BeholderGitPatchVersion"
+          BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo;CoreCompile"
+          Condition="'$(Version)' == '$(VersionPrefix)'">
+    <Exec Command="git rev-list --count HEAD"
+          ConsoleToMSBuild="true"
+          ContinueOnError="true"
+          StandardOutputImportance="low"
+          WorkingDirectory="$(MSBuildThisFileDirectory)">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_BeholderCommitCount" />
+      <Output TaskParameter="ExitCode" PropertyName="_BeholderGitExitCode" />
+    </Exec>
+    <PropertyGroup>
+      <_BeholderPatch>$([System.Text.RegularExpressions.Regex]::Match('$(_BeholderCommitCount)', '[0-9]+').Value)</_BeholderPatch>
+      <_BeholderPatch Condition="'$(_BeholderGitExitCode)' != '0' or '$(_BeholderPatch)' == ''">0</_BeholderPatch>
+      <Version>$(VersionPrefix).$(_BeholderPatch)</Version>
+    </PropertyGroup>
+  </Target>
+
+</Project>
