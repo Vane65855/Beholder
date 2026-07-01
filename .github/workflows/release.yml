@@ -1,35 +1,70 @@
 name: Release
 
-# Manual trigger: run this from the Actions tab ("Run workflow"). It builds the
-# MSI at the current auto-version (0.1.<commit-count>), then creates a GitHub
-# Release tagged v<version> with the installer attached.
+# Daily release: once a day, if master got a new commit in the last day AND the
+# full test suite is green, build the auto-versioned MSI and publish it as a
+# GitHub Release. A manual "Run workflow" always builds + releases (skips the
+# new-commit check), handy for an on-demand release.
 on:
+  schedule:
+    - cron: '0 6 * * *'   # 06:00 UTC daily (GitHub may delay scheduled runs)
   workflow_dispatch:
 
 permissions:
-  contents: write   # create the tag/release and upload the MSI asset
+  contents: write          # create the tag/release and upload the MSI asset
 
 jobs:
-  installer:
-    name: Build MSI & publish release
+  release:
+    name: Daily release (new commits + green tests)
     runs-on: windows-latest
     steps:
-      # Full history so build-installer.ps1's git-commit-count version is correct.
+      # Full history so build-installer.ps1's git-commit-count version is correct
+      # and the "commits in the last day" check can see them.
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
+      - name: Decide whether to release
+        id: gate
+        shell: pwsh
+        run: |
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            Write-Host 'Manual run — proceeding regardless of recent commits.'
+            'proceed=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            $count = [int](git rev-list --count --since='1 day ago' HEAD)
+            $proceed = if ($count -gt 0) { 'true' } else { 'false' }
+            Write-Host "master had $count commit(s) in the last day; proceed=$proceed"
+            "proceed=$proceed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
       - name: Set up .NET 10
+        if: steps.gate.outputs.proceed == 'true'
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
 
+      # Gate the release on green tests: this step fails if any test fails, which
+      # stops the job (the MSI/publish steps below carry the implicit success()
+      # check), so a red suite never ships an installer.
+      - name: Build & test
+        if: steps.gate.outputs.proceed == 'true'
+        shell: pwsh
+        run: |
+          dotnet build Beholder.slnx -c Debug
+          $exe = Get-ChildItem -Path Beholder.Tests/bin/Debug -Recurse -Filter Beholder.Tests.exe |
+                 Where-Object { $_.FullName -like '*windows*' } | Select-Object -First 1
+          if (-not $exe) { throw 'Test executable (Windows TFM) not found.' }
+          & $exe.FullName
+          if ($LASTEXITCODE -ne 0) { throw "Tests failed (exit $LASTEXITCODE) — not releasing." }
+
       - name: Restore local tools (WiX)
+        if: steps.gate.outputs.proceed == 'true'
         run: dotnet tool restore
 
       - name: Build MSI installer
         id: build
+        if: steps.gate.outputs.proceed == 'true'
         shell: pwsh
         run: |
           ./build-installer.ps1
@@ -41,6 +76,7 @@ jobs:
           Write-Host "Built $($msi.Name) (v$version)"
 
       - name: Publish GitHub Release
+        if: steps.gate.outputs.proceed == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.build.outputs.version }}
@@ -49,5 +85,6 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            Windows installer — self-contained x64 MSI (carries .NET 10, no runtime
-            needed). Unsigned, so Windows SmartScreen may warn on first run.
+            Automated daily build. Windows installer — self-contained x64 MSI
+            (carries .NET 10, no runtime needed). Unsigned, so Windows SmartScreen
+            may warn on first run.
