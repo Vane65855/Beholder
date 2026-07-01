@@ -1,0 +1,53 @@
+name: Release
+
+# Manual trigger: run this from the Actions tab ("Run workflow"). It builds the
+# MSI at the current auto-version (0.1.<commit-count>), then creates a GitHub
+# Release tagged v<version> with the installer attached.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create the tag/release and upload the MSI asset
+
+jobs:
+  installer:
+    name: Build MSI & publish release
+    runs-on: windows-latest
+    steps:
+      # Full history so build-installer.ps1's git-commit-count version is correct.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore local tools (WiX)
+        run: dotnet tool restore
+
+      - name: Build MSI installer
+        id: build
+        shell: pwsh
+        run: |
+          ./build-installer.ps1
+          $msi = Get-ChildItem -Path Beholder.Installer/bin/Release -Filter *.msi | Select-Object -First 1
+          if (-not $msi) { throw 'MSI not found after build.' }
+          $version = $msi.BaseName -replace '^BeholderNMT-' -replace '-win-x64$'
+          "msi=$($msi.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$version"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Built $($msi.Name) (v$version)"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.build.outputs.version }}
+          name: Beholder NMT v${{ steps.build.outputs.version }}
+          files: ${{ steps.build.outputs.msi }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            Windows installer — self-contained x64 MSI (carries .NET 10, no runtime
+            needed). Unsigned, so Windows SmartScreen may warn on first run.

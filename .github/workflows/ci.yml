@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-test:
+    name: Build & test (Windows)
+    runs-on: windows-latest
+    steps:
+      # Full history so the git-commit-count version (Directory.Build.targets)
+      # resolves — a shallow clone would count 1 commit and stamp 0.1.1.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build Beholder.slnx -c Debug
+
+      # The suite uses Microsoft.Testing.Platform (not VSTest). Run the built
+      # executable directly rather than `dotnet test`, and pick the Windows-TFM
+      # output (a stale net10.0/ folder can otherwise run a frozen subset).
+      - name: Test
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path Beholder.Tests/bin/Debug -Recurse -Filter Beholder.Tests.exe |
+                 Where-Object { $_.FullName -like '*windows*' } |
+                 Select-Object -First 1
+          if (-not $exe) { throw 'Test executable (Windows TFM) not found.' }
+          Write-Host "Running $($exe.FullName)"
+          & $exe.FullName
+          if ($LASTEXITCODE -ne 0) { throw "Tests failed (exit $LASTEXITCODE)." }

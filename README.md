@@ -7,6 +7,7 @@
 ### See everything your machine says to the network — and make it answer to you.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-3b82f6.svg)](LICENSE)
+[![CI](https://github.com/Vane65855/Beholder/actions/workflows/ci.yml/badge.svg)](https://github.com/Vane65855/Beholder/actions/workflows/ci.yml)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg)
 ![.NET 10](https://img.shields.io/badge/.NET-10-512BD4.svg)
 ![UI: Avalonia](https://img.shields.io/badge/UI-Avalonia%2012-7c3aed.svg)
