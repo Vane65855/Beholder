@@ -404,8 +404,8 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         var f = from.ToLocalTime();
         var t = to.ToLocalTime();
         return f.Date == t.Date
-            ? $"{f:HH:mm:ss} – {t:HH:mm:ss}"
-            : $"{f:MMM d, HH:mm} – {t:MMM d, HH:mm}";
+            ? FormattableString.Invariant($"{f:HH:mm:ss} – {t:HH:mm:ss}")
+            : FormattableString.Invariant($"{f:MMM d, HH:mm} – {t:MMM d, HH:mm}");
     }
 
     [RelayCommand]
