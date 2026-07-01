@@ -21,7 +21,7 @@ public class DiagnosticSamplerTests {
         var stats = new FakeStorageStatsProvider();
         var sampler = Build(stats, enabled: true);
 
-        await sampler.SampleAsync(default);
+        await sampler.SampleAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, stats.CallCount);
     }
@@ -31,7 +31,7 @@ public class DiagnosticSamplerTests {
         var stats = new FakeStorageStatsProvider { Exception = new InvalidOperationException("db locked") };
         var sampler = Build(stats, enabled: true);
 
-        await sampler.SampleAsync(default);
+        await sampler.SampleAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, stats.CallCount);
     }
@@ -41,8 +41,8 @@ public class DiagnosticSamplerTests {
         var stats = new FakeStorageStatsProvider();
         var sampler = Build(stats, enabled: false);
 
-        await sampler.StartAsync(default);
-        await sampler.StopAsync(default);
+        await sampler.StartAsync(TestContext.Current.CancellationToken);
+        await sampler.StopAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, stats.CallCount);
     }

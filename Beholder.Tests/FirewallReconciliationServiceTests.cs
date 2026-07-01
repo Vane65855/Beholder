@@ -48,10 +48,10 @@ public class FirewallReconciliationServiceTests {
     public async Task Reconcile_OsAlreadyInSync_MakesNoChangesAndLogsNoEvents() {
         var (service, controller, store, events, _) = Build(enabled: true);
         var rule = Rule(@"C:\app.exe", Direction.Outbound, FirewallAction.Block);
-        await store.UpsertAsync(rule, default);
+        await store.UpsertAsync(rule, TestContext.Current.CancellationToken);
         controller.OsRules.Add(rule);
 
-        await service.ReconcileAsync(default);
+        await service.ReconcileAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(controller.AddedRules);
         Assert.Empty(controller.RemovedRules);
@@ -61,9 +61,9 @@ public class FirewallReconciliationServiceTests {
     [Fact]
     public async Task Reconcile_DbRuleMissingFromOs_ReAppliesAndChainLogsCreated() {
         var (service, controller, store, events, _) = Build(enabled: true);
-        await store.UpsertAsync(Rule(@"C:\app.exe", Direction.Outbound, FirewallAction.Block), default);
+        await store.UpsertAsync(Rule(@"C:\app.exe", Direction.Outbound, FirewallAction.Block), TestContext.Current.CancellationToken);
 
-        await service.ReconcileAsync(default);
+        await service.ReconcileAsync(TestContext.Current.CancellationToken);
 
         var added = Assert.Single(controller.AddedRules);
         Assert.Equal(@"C:\app.exe", added.ProcessPath);
@@ -75,7 +75,7 @@ public class FirewallReconciliationServiceTests {
         var (service, controller, store, events, _) = Build(enabled: true);
         controller.OsRules.Add(Rule(@"C:\stray.exe", Direction.Inbound, FirewallAction.Allow));
 
-        await service.ReconcileAsync(default);
+        await service.ReconcileAsync(TestContext.Current.CancellationToken);
 
         var removed = Assert.Single(controller.RemovedRules);
         Assert.Equal(@"C:\stray.exe", removed.ProcessPath);
@@ -85,10 +85,10 @@ public class FirewallReconciliationServiceTests {
     [Fact]
     public async Task Reconcile_ActionMismatch_ReAppliesAndChainLogsChanged() {
         var (service, controller, store, events, _) = Build(enabled: true);
-        await store.UpsertAsync(Rule(@"C:\app.exe", Direction.Outbound, FirewallAction.Block), default);
+        await store.UpsertAsync(Rule(@"C:\app.exe", Direction.Outbound, FirewallAction.Block), TestContext.Current.CancellationToken);
         controller.OsRules.Add(Rule(@"C:\app.exe", Direction.Outbound, FirewallAction.Allow));
 
-        await service.ReconcileAsync(default);
+        await service.ReconcileAsync(TestContext.Current.CancellationToken);
 
         var added = Assert.Single(controller.AddedRules);
         Assert.Equal(FirewallAction.Block, added.Action);
@@ -100,24 +100,24 @@ public class FirewallReconciliationServiceTests {
     public async Task Reconcile_EnforcementDisabled_RemovesOsRulesButKeepsStore() {
         var (service, controller, store, events, _) = Build(enabled: false);
         var rule = Rule(@"C:\app.exe", Direction.Outbound, FirewallAction.Block);
-        await store.UpsertAsync(rule, default);
+        await store.UpsertAsync(rule, TestContext.Current.CancellationToken);
         controller.OsRules.Add(rule);
 
-        await service.ReconcileAsync(default);
+        await service.ReconcileAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(controller.RemovedRules);
         Assert.Empty(controller.AddedRules);
         Assert.Single(events.Appended, e => e.Kind == EventKind.FirewallRuleRemoved);
-        Assert.Single(await store.ListAllAsync(default));
+        Assert.Single(await store.ListAllAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task Reconcile_OsEnumerationFails_DoesNotThrowOrChange() {
         var (service, controller, store, events, _) = Build(enabled: true);
-        await store.UpsertAsync(Rule(@"C:\app.exe", Direction.Outbound, FirewallAction.Block), default);
+        await store.UpsertAsync(Rule(@"C:\app.exe", Direction.Outbound, FirewallAction.Block), TestContext.Current.CancellationToken);
         controller.ListRulesException = new InvalidOperationException("COM boom");
 
-        await service.ReconcileAsync(default);
+        await service.ReconcileAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(controller.AddedRules);
         Assert.Empty(controller.RemovedRules);
@@ -129,27 +129,27 @@ public class FirewallReconciliationServiceTests {
         var (service, controller, _, _, time) = Build(enabled: true, intervalMinutes: 5);
         controller.OsRules.Add(Rule(@"C:\stray.exe", Direction.Inbound, FirewallAction.Allow));
 
-        await service.StartAsync(default);
+        await service.StartAsync(TestContext.Current.CancellationToken);
         await WaitForAsync(() => controller.ListCallCount >= 1, "the startup reconciliation pass");
-        await Task.Delay(50);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
 
         time.Advance(TimeSpan.FromMinutes(5));
 
         await WaitForAsync(() => controller.ListCallCount >= 2, "a reconciliation pass after one interval");
-        await service.StopAsync(default);
+        await service.StopAsync(TestContext.Current.CancellationToken);
     }
 
     [Fact]
     public async Task ExecuteAsync_IntervalZero_ReconcilesOnceThenStaysIdle() {
         var (service, controller, _, _, time) = Build(enabled: true, intervalMinutes: 0);
 
-        await service.StartAsync(default);
+        await service.StartAsync(TestContext.Current.CancellationToken);
         await WaitForAsync(() => controller.ListCallCount >= 1, "the startup reconciliation pass");
 
         time.Advance(TimeSpan.FromHours(1));
-        await Task.Delay(100);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, controller.ListCallCount);
-        await service.StopAsync(default);
+        await service.StopAsync(TestContext.Current.CancellationToken);
     }
 }

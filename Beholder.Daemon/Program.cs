@@ -57,12 +57,17 @@ if (OperatingSystem.IsWindows()) {
     // INTERACTIVE fallback in dev when the group isn't present) instead of an
     // unauthenticated TCP localhost socket any local process could reach. The
     // UI dials the same pipe (IpcEndpoint.PipeName).
+    // Build the DACL outside the options lambda: CA1416's platform-guard flow
+    // analysis doesn't reach into lambdas, so calling the Windows-only
+    // BeholderPipeSecurity.Create() out here — still inside the
+    // OperatingSystem.IsWindows() guard — keeps the analyzer satisfied.
+    var pipeSecurity = BeholderPipeSecurity.Create();
     builder.WebHost.UseNamedPipes(options => {
         // We supply an explicit DACL, so the transport's default "current user
         // only" restriction (which would lock the pipe to LocalSystem and shut
         // the UI out) must be turned off.
         options.CurrentUserOnly = false;
-        options.PipeSecurity = BeholderPipeSecurity.Create();
+        options.PipeSecurity = pipeSecurity;
     });
     builder.WebHost.ConfigureKestrel(options => {
         options.ListenNamedPipe(Beholder.Protocol.IpcEndpoint.PipeName, listenOptions => {

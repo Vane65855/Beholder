@@ -39,7 +39,7 @@ public class SingleInstanceGuardTests {
 
         second.SignalActivation();
 
-        Assert.True(activated.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(activated.Wait(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
     }
 
     [Fact]
