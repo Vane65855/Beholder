@@ -2,10 +2,19 @@ using Beholder.Protocol.Local;
 using Beholder.Ui.Services;
 using Grpc.Core;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Beholder.Tests;
 
 public class ProcessStateServiceTests {
+    private const long NsPerSecond = 1_000_000_000;
+
+    private static readonly DateTimeOffset SeedNow =
+        new(2026, 7, 1, 10, 0, 0, TimeSpan.Zero);
+
+    private static readonly long SeedNowUnixNs =
+        SeedNow.ToUnixTimeMilliseconds() * 1_000_000;
+
     private static (ProcessStateService Service, DaemonStreamSubscriber Subscriber) CreateService() {
         var fakeClient = new FakeDaemonClient();
         var subscriber = new DaemonStreamSubscriber(
@@ -257,6 +266,183 @@ public class ProcessStateServiceTests {
         await service.SeedAsync(CancellationToken.None);
 
         Assert.Equal(2, service.TrackedProcessCount);
+    }
+
+    // ---- ADR 017: tick-timestamp gap-fill (1 buffer sample = 1 second) ----
+
+    private static CounterBatch BuildTickedBatch(long tickUnixNs, params (string Path, long DeltaIn)[] snapshots) {
+        var batch = new CounterBatch { TickTimestampUnixNs = tickUnixNs };
+        foreach (var (path, deltaIn) in snapshots) {
+            batch.Snapshots.Add(new CounterSnapshot {
+                ProcessPath = path, ProcessName = path,
+                TotalBytesIn = long.MaxValue / 2,  // constant: never triggers restart detection
+                DeltaBytesIn = deltaIn,
+            });
+        }
+        return batch;
+    }
+
+    [Fact]
+    public void OnCounterBatch_TickGap_BackfillsZeroSamples() {
+        // Two batches 4 seconds apart mean 3 seconds passed with no batch —
+        // the buffer must gain 3 zero samples between them so 1 sample keeps
+        // meaning 1 wall-clock second.
+        var (service, _) = CreateService();
+        service.OnCounterBatch(BuildTickedBatch(SeedNowUnixNs, ("test.exe", 42)));
+
+        service.OnCounterBatch(BuildTickedBatch(SeedNowUnixNs + 4 * NsPerSecond, ("test.exe", 10)));
+
+        IReadOnlyDictionary<string, ProcessState>? received = null;
+        service.ProcessStatesUpdated += states => received = states;
+        service.OnCounterBatch(BuildTickedBatch(SeedNowUnixNs + 5 * NsPerSecond, ("test.exe", 7)));
+
+        Assert.NotNull(received);
+        var buffer = received["test.exe"].RecentDeltaIn;
+        Assert.Equal(6, buffer.Count);
+        Assert.Equal(42, buffer[0]);
+        Assert.Equal(0, buffer[1]);
+        Assert.Equal(0, buffer[2]);
+        Assert.Equal(0, buffer[3]);
+        Assert.Equal(10, buffer[4]);
+        Assert.Equal(7, buffer[5]);
+    }
+
+    [Fact]
+    public void OnCounterBatch_TickGap_BackfillsProcessesAbsentFromTheBatch() {
+        var (service, _) = CreateService();
+        service.OnCounterBatch(BuildTickedBatch(
+            SeedNowUnixNs, ("a.exe", 1), ("b.exe", 2)));
+
+        // 3 missed seconds; b.exe is also absent from the new batch, so it
+        // gets 3 gap zeros plus the idle-process zero for this tick.
+        service.OnCounterBatch(BuildTickedBatch(SeedNowUnixNs + 4 * NsPerSecond, ("a.exe", 3)));
+
+        Assert.Equal(2, service.TrackedProcessCount);
+        IReadOnlyDictionary<string, ProcessState>? received = null;
+        service.ProcessStatesUpdated += states => received = states;
+        service.OnCounterBatch(BuildTickedBatch(SeedNowUnixNs + 5 * NsPerSecond, ("a.exe", 4)));
+
+        Assert.NotNull(received);
+        Assert.Equal(6, received["a.exe"].RecentDeltaIn.Count);
+        Assert.Equal(6, received["b.exe"].RecentDeltaIn.Count);
+    }
+
+    [Fact]
+    public void OnCounterBatch_FirstBatchWithTick_DoesNotBackfill() {
+        var (service, _) = CreateService();
+
+        IReadOnlyDictionary<string, ProcessState>? received = null;
+        service.ProcessStatesUpdated += states => received = states;
+        service.OnCounterBatch(BuildTickedBatch(SeedNowUnixNs, ("test.exe", 42)));
+
+        Assert.NotNull(received);
+        Assert.Equal(1, received["test.exe"].RecentDeltaIn.Count);
+    }
+
+    [Fact]
+    public void OnCounterBatch_BackwardsClockStep_DoesNotBackfill() {
+        var (service, _) = CreateService();
+        service.OnCounterBatch(BuildTickedBatch(SeedNowUnixNs, ("test.exe", 42)));
+
+        IReadOnlyDictionary<string, ProcessState>? received = null;
+        service.ProcessStatesUpdated += states => received = states;
+        service.OnCounterBatch(BuildTickedBatch(SeedNowUnixNs - 10 * NsPerSecond, ("test.exe", 10)));
+
+        Assert.NotNull(received);
+        Assert.Equal(2, received["test.exe"].RecentDeltaIn.Count);
+    }
+
+    [Fact]
+    public void OnCounterBatch_HugeTickGap_CapsBackfillAtWindowSize() {
+        // A gap longer than the 5-minute window (sleep/resume) zeroes the
+        // whole visible history; the fill must not spin for hours of zeros.
+        var (service, _) = CreateService();
+        service.OnCounterBatch(BuildTickedBatch(SeedNowUnixNs, ("test.exe", 42)));
+
+        IReadOnlyDictionary<string, ProcessState>? received = null;
+        service.ProcessStatesUpdated += states => received = states;
+        service.OnCounterBatch(BuildTickedBatch(
+            SeedNowUnixNs + 10_000 * NsPerSecond, ("test.exe", 10)));
+
+        Assert.NotNull(received);
+        var buffer = received["test.exe"].RecentDeltaIn;
+        Assert.Equal(ProcessState.RecentWindowSampleCount, buffer.Count);
+        Assert.Equal(10, buffer[buffer.Count - 1]);
+        Assert.Equal(0, buffer[buffer.Count - 2]);
+    }
+
+    // ---- ADR 017: seed alignment (buffer right edge = now) ----
+
+    private static (ProcessStateService Service, FakeDaemonClient Client) CreateSeededServiceAtSeedNow() {
+        var fakeClient = new FakeDaemonClient();
+        var time = new FakeTimeProvider(SeedNow);
+        var subscriber = new DaemonStreamSubscriber(
+            fakeClient, time, NullLogger<DaemonStreamSubscriber>.Instance);
+        var service = new ProcessStateService(subscriber, fakeClient, time);
+        return (service, fakeClient);
+    }
+
+    private static GetProcessTimelineResponse BuildTimeline(params (long AgeSeconds, long BytesIn)[] points) {
+        var response = new GetProcessTimelineResponse();
+        foreach (var (ageSeconds, bytesIn) in points) {
+            response.Points.Add(new TrafficTimePoint {
+                TimestampUnixNs = SeedNowUnixNs - ageSeconds * NsPerSecond,
+                BytesIn = bytesIn,
+                BytesOut = 0,
+            });
+        }
+        return response;
+    }
+
+    [Fact]
+    public async Task SeedAsync_TrailingIdleSeconds_PadsBufferToNow() {
+        // The process last moved bytes 60 seconds ago. Without trailing
+        // padding its seeded buffer would end at that sample and the chart
+        // would draw minute-old traffic at the "now" edge.
+        var (service, client) = CreateSeededServiceAtSeedNow();
+        var snapshot = new GetSnapshotResponse();
+        snapshot.Snapshots.Add(new CounterSnapshot { ProcessPath = "a.exe", ProcessName = "a.exe" });
+        client.SnapshotResponse = snapshot;
+        client.ProcessTimelineResponder = _ => BuildTimeline((60, 100), (59, 200));
+
+        IReadOnlyDictionary<string, ProcessState>? received = null;
+        service.ProcessStatesUpdated += states => received = states;
+        await service.SeedAsync(CancellationToken.None);
+
+        Assert.NotNull(received);
+        var buffer = received["a.exe"].RecentDeltaIn;
+        // 2 data samples + 58 trailing zeros = the last bucket sits 59
+        // samples back from the right edge, i.e. 59 seconds before now.
+        Assert.Equal(60, buffer.Count);
+        Assert.Equal(100, buffer[0]);
+        Assert.Equal(200, buffer[1]);
+        Assert.Equal(0, buffer[2]);
+        Assert.Equal(0, buffer[59]);
+    }
+
+    [Fact]
+    public async Task SeedAsync_SetsTickBaseline_FirstLiveBatchGapFillsFromSeedTime() {
+        // Seed aligns buffers to `now`; the first live batch 10 seconds later
+        // must add 9 gap zeros + its own sample — measured from the seed
+        // instant, not treated as an unknown baseline.
+        var (service, client) = CreateSeededServiceAtSeedNow();
+        var snapshot = new GetSnapshotResponse();
+        snapshot.Snapshots.Add(new CounterSnapshot { ProcessPath = "a.exe", ProcessName = "a.exe" });
+        client.SnapshotResponse = snapshot;
+        client.ProcessTimelineResponder = _ => BuildTimeline((1, 100));
+        await service.SeedAsync(CancellationToken.None);
+
+        IReadOnlyDictionary<string, ProcessState>? received = null;
+        service.ProcessStatesUpdated += states => received = states;
+        service.OnCounterBatch(BuildTickedBatch(
+            SeedNowUnixNs + 10 * NsPerSecond, ("a.exe", 7)));
+
+        Assert.NotNull(received);
+        var buffer = received["a.exe"].RecentDeltaIn;
+        Assert.Equal(11, buffer.Count);
+        Assert.Equal(100, buffer[0]);
+        Assert.Equal(0, buffer[1]);
+        Assert.Equal(7, buffer[10]);
     }
 
     [Fact]

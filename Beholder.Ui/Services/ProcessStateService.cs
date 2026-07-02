@@ -30,6 +30,18 @@ internal sealed class ProcessStateService : IDisposable {
     private readonly Dictionary<string, ProcessState> _states = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// Tick timestamp of the most recent counter batch (or the seed's "now"),
+    /// in Unix nanoseconds. 0 = unknown (no batch yet, or a daemon that
+    /// doesn't stamp ticks). Baseline for <see cref="OnCounterBatch"/>'s
+    /// gap-fill: the live chart assumes 1 buffer sample = 1 wall-clock
+    /// second, so seconds with no received batch (dropped by the broadcast
+    /// channel, OS sleep, old daemon skipping idle ticks) must be
+    /// backfilled with zero samples or the chart's time axis silently
+    /// compresses (ADR 017).
+    /// </summary>
+    private long _lastTickUnixNs;
+
+    /// <summary>
     /// Fired after each <see cref="CounterBatch"/> is processed or after
     /// <see cref="SeedAsync"/> populates historical state.
     /// The dictionary is a defensive snapshot — safe to read on any thread.
@@ -83,7 +95,9 @@ internal sealed class ProcessStateService : IDisposable {
                 _states[snap.ProcessPath] = state;
 
                 // Backfill the 5-minute circular buffer from per-process
-                // historical timeline (1-second resolution from traffic_raw).
+                // historical timeline (1-second buckets from traffic_raw,
+                // gap-free — the stitcher zero-fills idle seconds inside the
+                // data extent per ADR 017).
                 try {
                     var request = new GetProcessTimelineRequest {
                         ProcessPath = snap.ProcessPath,
@@ -96,12 +110,17 @@ internal sealed class ProcessStateService : IDisposable {
                         state.RecentDeltaIn.Add(point.BytesIn);
                         state.RecentDeltaOut.Add(point.BytesOut);
                     }
+                    AppendTrailingZerosUpTo(state, timeline.Points, now);
                 } catch (OperationCanceledException) {
                     throw;  // propagate to the outer try so SeedAsync honors its CT
                 } catch (RpcException) {
                     // Per-process backfill is best-effort — live stream fills in.
                 }
             }
+
+            // Seeded buffers are aligned to `now`; make the first live batch's
+            // gap-fill measure from the same instant instead of double-filling.
+            _lastTickUnixNs = now.ToUnixTimeMilliseconds() * 1_000_000;
 
             ProcessStatesUpdated?.Invoke(_states);
         } catch (OperationCanceledException) {
@@ -122,6 +141,8 @@ internal sealed class ProcessStateService : IDisposable {
                 break;
             }
         }
+
+        BackfillMissedSeconds(batch.TickTimestampUnixNs);
 
         // Track which processes appeared in this batch so we can push zero deltas
         // for processes that didn't report in this tick
@@ -165,6 +186,60 @@ internal sealed class ProcessStateService : IDisposable {
         // same callback thread (DaemonStreamSubscriber's consume loop), so consumers
         // reading on the UI thread after Post() see a consistent state.
         ProcessStatesUpdated?.Invoke(_states);
+    }
+
+    /// <summary>
+    /// Pads a seeded buffer with zero samples for the seconds between the
+    /// timeline's last bucket and <paramref name="now"/>, so the buffer's
+    /// right edge means "now" rather than "whenever this process last moved
+    /// bytes" — without this, a process idle for the last N seconds renders
+    /// its stale activity at the chart's right edge (ADR 017). An empty
+    /// timeline needs no padding: an empty buffer already renders flat.
+    /// </summary>
+    private static void AppendTrailingZerosUpTo(
+        ProcessState state,
+        IReadOnlyList<TrafficTimePoint> points,
+        DateTimeOffset now
+    ) {
+        if (points.Count == 0) return;
+        var lastBucketUnixNs = points[^1].TimestampUnixNs;
+        var nowUnixNs = now.ToUnixTimeMilliseconds() * 1_000_000;
+        var elapsedSeconds = (long)((nowUnixNs - lastBucketUnixNs) / 1_000_000_000.0);
+        var missingSamples = (int)Math.Clamp(
+            elapsedSeconds - 1, 0, ProcessState.RecentWindowSampleCount);
+        for (var i = 0; i < missingSamples; i++) {
+            state.RecentDeltaIn.Add(0);
+            state.RecentDeltaOut.Add(0);
+        }
+    }
+
+    /// <summary>
+    /// Appends one zero sample per wall-clock second that elapsed between the
+    /// previous tick and <paramref name="tickUnixNs"/> without a batch
+    /// arriving, to every tracked state's rate buffers. Keeps the buffers
+    /// 1 sample = 1 second regardless of dropped batches, OS sleep/resume, or
+    /// daemons that skip idle ticks. A zero or unknown timestamp on either
+    /// side disables the fill (old daemons, first batch); a backwards clock
+    /// step just resets the baseline. Capped at the buffer window — a longer
+    /// gap zeroes the whole visible history anyway.
+    /// </summary>
+    private void BackfillMissedSeconds(long tickUnixNs) {
+        if (tickUnixNs <= 0) return;
+        var previousTickUnixNs = _lastTickUnixNs;
+        _lastTickUnixNs = tickUnixNs;
+        if (previousTickUnixNs <= 0) return;
+
+        var elapsedSeconds = (long)Math.Round((tickUnixNs - previousTickUnixNs) / 1_000_000_000.0);
+        var missedSeconds = (int)Math.Clamp(
+            elapsedSeconds - 1, 0, ProcessState.RecentWindowSampleCount);
+        if (missedSeconds == 0) return;
+
+        foreach (var state in _states.Values) {
+            for (var i = 0; i < missedSeconds; i++) {
+                state.RecentDeltaIn.Add(0);
+                state.RecentDeltaOut.Add(0);
+            }
+        }
     }
 
     /// <summary>
