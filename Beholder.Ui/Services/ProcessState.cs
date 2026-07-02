@@ -8,6 +8,14 @@ namespace Beholder.Ui.Services;
 /// Tracks lifetime totals, per-tick deltas, and a 5-minute sliding window of rate history.
 /// </summary>
 internal sealed class ProcessState {
+    /// <summary>
+    /// Capacity of the live rate-history window: 300 samples = 5 minutes at
+    /// 1 sample/sec. The live chart always renders exactly this many samples
+    /// (zero-padded at the front for young processes) so its time axis stays
+    /// pinned at −5:00 → now instead of stretching as a buffer fills.
+    /// </summary>
+    public const int RecentWindowSampleCount = 300;
+
     public required string ProcessPath { get; init; }
     public required string DisplayName { get; init; }
     public long TotalBytesIn { get; set; }
@@ -25,9 +33,9 @@ internal sealed class ProcessState {
     /// </summary>
     public int ActiveConnectionCount { get; set; }
 
-    /// <summary>300 samples = 5 minutes at 1 sample/sec.</summary>
-    public CircularBuffer<long> RecentDeltaIn { get; } = new(300);
+    /// <summary>See <see cref="RecentWindowSampleCount"/>.</summary>
+    public CircularBuffer<long> RecentDeltaIn { get; } = new(RecentWindowSampleCount);
 
-    /// <summary>300 samples = 5 minutes at 1 sample/sec.</summary>
-    public CircularBuffer<long> RecentDeltaOut { get; } = new(300);
+    /// <summary>See <see cref="RecentWindowSampleCount"/>.</summary>
+    public CircularBuffer<long> RecentDeltaOut { get; } = new(RecentWindowSampleCount);
 }

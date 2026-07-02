@@ -32,12 +32,13 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     private TrafficColsViewModel? _colsVm;
     private IReadOnlyDictionary<string, ProcessState>? _lastStates;
 
-    // Cached live-mode chart buffers. Reused across 1-Hz RebuildChartData calls
-    // once the live circular buffers saturate (~300 samples = 5 min). Aliasing
-    // is safe: all mutations happen on the UI thread inside RebuildChartData,
-    // and Avalonia's Render also runs on the UI thread, so there's no observer
-    // between Array.Clear and the ChartData reassignment that would see
-    // partial buffer state. Null until the first live tick.
+    // Cached live-mode chart buffers, always the fixed 5-minute window length
+    // (ProcessState.RecentWindowSampleCount), so every 1-Hz RebuildChartData
+    // call after the first reuses them. Aliasing is safe: all mutations happen
+    // on the UI thread inside RebuildChartData, and Avalonia's Render also
+    // runs on the UI thread, so there's no observer between Array.Clear and
+    // the ChartData reassignment that would see partial buffer state. Null
+    // until the first live tick.
     private long[]? _cachedDownloadBuffer;
     private long[]? _cachedUploadBuffer;
 
@@ -853,19 +854,23 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         var selected = SelectedProcess;
         var showAll = selected is null || selected.IsAll;
 
+        // The live chart always renders the full 5-minute window. Young
+        // buffers right-align with leading zeros, so a new process draws a
+        // flat line with its activity at the right edge instead of the time
+        // axis stretching from −0:30 out to −5:00 as its buffer fills.
+        const int length = ProcessState.RecentWindowSampleCount;
         long[] downloadValues;
         long[] uploadValues;
 
         if (showAll) {
-            var length = ComputeMaxLength(states);
             downloadValues = RentOrAllocate(ref _cachedDownloadBuffer, length);
             uploadValues = RentOrAllocate(ref _cachedUploadBuffer, length);
             AggregateAllInto(states, downloadValues, uploadValues, length);
         } else if (states.TryGetValue(selected!.ProcessPath, out var state)) {
-            downloadValues = RentOrAllocate(ref _cachedDownloadBuffer, state.RecentDeltaIn.Count);
-            uploadValues = RentOrAllocate(ref _cachedUploadBuffer, state.RecentDeltaOut.Count);
-            FillBufferInto(state.RecentDeltaIn, downloadValues);
-            FillBufferInto(state.RecentDeltaOut, uploadValues);
+            downloadValues = RentOrAllocate(ref _cachedDownloadBuffer, length);
+            uploadValues = RentOrAllocate(ref _cachedUploadBuffer, length);
+            FillBufferRightAlignedInto(state.RecentDeltaIn, downloadValues);
+            FillBufferRightAlignedInto(state.RecentDeltaOut, uploadValues);
         } else {
             ChartData = [];
             return;
@@ -967,19 +972,15 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         return buffer;
     }
 
-    private static void FillBufferInto(CircularBuffer<long> source, long[] destination) {
+    /// <summary>
+    /// Copies <paramref name="source"/> into the tail of the (pre-cleared)
+    /// <paramref name="destination"/>, leaving leading zeros — the fixed
+    /// 5-minute window's padding for a buffer that hasn't saturated yet.
+    /// </summary>
+    private static void FillBufferRightAlignedInto(CircularBuffer<long> source, long[] destination) {
+        var offset = destination.Length - source.Count;
         for (var i = 0; i < source.Count; i++)
-            destination[i] = source[i];
-    }
-
-    private int ComputeMaxLength(IReadOnlyDictionary<string, ProcessState> states) {
-        var max = 0;
-        foreach (var s in states.Values) {
-            if (_totalsExclusions.IsExcluded(s.ProcessPath)) continue;
-            if (s.RecentDeltaIn.Count > max) max = s.RecentDeltaIn.Count;
-            if (s.RecentDeltaOut.Count > max) max = s.RecentDeltaOut.Count;
-        }
-        return max;
+            destination[offset + i] = source[i];
     }
 
     /// <summary>

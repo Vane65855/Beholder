@@ -30,6 +30,19 @@ public class TrafficTabViewModelTests {
         return state;
     }
 
+    /// <summary>
+    /// Live charts always render the fixed 5-minute window: exactly
+    /// <see cref="ProcessState.RecentWindowSampleCount"/> samples, zero-padded
+    /// at the front, with the newest data at the right edge. Asserts the full
+    /// contract: length, leading zeros, and the expected tail.
+    /// </summary>
+    private static void AssertLiveSeries(long[] expectedTail, IReadOnlyList<long> actual) {
+        Assert.Equal(ProcessState.RecentWindowSampleCount, actual.Count);
+        var offset = actual.Count - expectedTail.Length;
+        for (var i = 0; i < offset; i++) Assert.Equal(0, actual[i]);
+        for (var i = 0; i < expectedTail.Length; i++) Assert.Equal(expectedTail[i], actual[offset + i]);
+    }
+
     [Fact]
     public void UpdateFromStates_AllSelected_ProducesExactlyTwoSeries() {
         var vm = CreateViewModel();
@@ -56,10 +69,8 @@ public class TrafficTabViewModelTests {
 
         vm.UpdateFromStates(states);
 
-        var download = vm.ChartData![0].Values;
-        var upload = vm.ChartData[1].Values;
-        Assert.Equal(new long[] { 110, 220, 330 }, download);
-        Assert.Equal(new long[] { 6, 12, 18 }, upload);
+        AssertLiveSeries([110, 220, 330], vm.ChartData![0].Values);
+        AssertLiveSeries([6, 12, 18], vm.ChartData[1].Values);
     }
 
     [Fact]
@@ -75,10 +86,8 @@ public class TrafficTabViewModelTests {
         var bItem = vm.ProcessList.First(p => p.ProcessPath == "b.exe");
         vm.SelectedProcess = bItem;
 
-        var download = vm.ChartData![0].Values;
-        var upload = vm.ChartData[1].Values;
-        Assert.Equal(new long[] { 100, 200, 300 }, download);
-        Assert.Equal(new long[] { 5, 10, 15 }, upload);
+        AssertLiveSeries([100, 200, 300], vm.ChartData![0].Values);
+        AssertLiveSeries([5, 10, 15], vm.ChartData[1].Values);
     }
 
     [Fact]
@@ -101,7 +110,7 @@ public class TrafficTabViewModelTests {
         // after switching to b.exe, the chart shows b.exe's recent window,
         // not the previous aggregate [110, 220, 330].
         Assert.NotSame(allChart, vm.ChartData);
-        Assert.Equal(new long[] { 100, 200, 300 }, vm.ChartData![0].Values);
+        AssertLiveSeries([100, 200, 300], vm.ChartData![0].Values);
     }
 
     [Fact]
@@ -120,6 +129,25 @@ public class TrafficTabViewModelTests {
         Assert.Equal("loud", vm.ProcessList[1].DisplayName);
         Assert.Equal("medium", vm.ProcessList[2].DisplayName);
         Assert.Equal("quiet", vm.ProcessList[3].DisplayName);
+    }
+
+    [Fact]
+    public void UpdateFromStates_YoungBuffers_RenderTheFixedFiveMinuteWindow() {
+        // UX contract: the live chart's time axis is pinned at −5:00 → now.
+        // A brand-new process (3 samples) renders as 300 samples with leading
+        // zeros and its activity at the right edge — the axis must NOT
+        // stretch from −0:03 outward as the buffer fills.
+        var vm = CreateViewModel();
+        var states = new Dictionary<string, ProcessState> {
+            ["new.exe"] = MakeState("new.exe", "new", [7, 8, 9], [1, 2, 3]),
+        };
+
+        vm.UpdateFromStates(states);
+        var aItem = vm.ProcessList.First(p => p.ProcessPath == "new.exe");
+        vm.SelectedProcess = aItem;
+
+        AssertLiveSeries([7, 8, 9], vm.ChartData![0].Values);
+        AssertLiveSeries([1, 2, 3], vm.ChartData[1].Values);
     }
 
     [Fact]
@@ -774,7 +802,7 @@ public class TrafficTabViewModelTests {
         vm.UpdateFromStates(new Dictionary<string, ProcessState> {
             ["a.exe"] = MakeState("a.exe", "a", [10, 20, 30], [1, 2, 3]),
         });
-        Assert.Equal(new long[] { 10, 20, 30 }, vm.ChartData![0].Values);
+        AssertLiveSeries([10, 20, 30], vm.ChartData![0].Values);
 
         // Selecting a range pauses the live view — a fresh tick must not change
         // the frozen chart.
@@ -782,13 +810,13 @@ public class TrafficTabViewModelTests {
         vm.UpdateFromStates(new Dictionary<string, ProcessState> {
             ["a.exe"] = MakeState("a.exe", "a", [100, 200, 300], [5, 10, 15]),
         });
-        Assert.Equal(new long[] { 10, 20, 30 }, vm.ChartData![0].Values);
+        AssertLiveSeries([10, 20, 30], vm.ChartData![0].Values);
 
         // Resume lifts the pause and catches the chart up to the latest tick.
         vm.ResumeCommand.Execute(null);
 
         Assert.False(vm.IsSelectionActive);
-        Assert.Equal(new long[] { 100, 200, 300 }, vm.ChartData![0].Values);
+        AssertLiveSeries([100, 200, 300], vm.ChartData![0].Values);
     }
 
     [Fact]
@@ -872,8 +900,8 @@ public class TrafficTabViewModelTests {
         vm.UpdateFromStates(states);
 
         // The "All processes" chart shows only a.exe's samples.
-        Assert.Equal(new long[] { 10, 20, 30 }, vm.ChartData![0].Values);
-        Assert.Equal(new long[] { 1, 2, 3 }, vm.ChartData[1].Values);
+        AssertLiveSeries([10, 20, 30], vm.ChartData![0].Values);
+        AssertLiveSeries([1, 2, 3], vm.ChartData[1].Values);
     }
 
     [Fact]
@@ -891,13 +919,13 @@ public class TrafficTabViewModelTests {
             ["a.exe"] = MakeState("a.exe", "a", [10], [1]),
         };
         vm.UpdateFromStates(states);
-        Assert.Equal(new long[] { 1010 }, vm.ChartData![0].Values);
+        AssertLiveSeries([1010], vm.ChartData![0].Values);
 
         // Excluding the VPN mid-session immediately re-renders the live
         // chart and process list from the last known states.
         exclusions.SetExcludedPaths(["vpn.exe"]);
 
-        Assert.Equal(new long[] { 10 }, vm.ChartData![0].Values);
+        AssertLiveSeries([10], vm.ChartData![0].Values);
         Assert.DoesNotContain(vm.ProcessList, p => p.ProcessPath == "vpn.exe");
     }
 
