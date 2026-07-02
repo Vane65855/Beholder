@@ -263,6 +263,28 @@ public class SqliteTrafficStoreTests : IDisposable {
     }
 
     [Fact]
+    public async Task GetDestinationsAsync_SmallWindowDaysBack_ServedFromCoveringTier() {
+        // ADR 017: a 30-minute selection window three days ago yields a ~6s
+        // pseudo-resolution, which previously routed to traffic_raw — whose
+        // 10-minute retention guaranteed an empty result. Retention-aware
+        // tier selection serves it from _10s, the finest tier that still
+        // covers the window's age.
+        var factory = new ConnectionFactory(Path.Combine(_tempDir, "beholder.db"), pooling: false);
+        await InsertDirectAsync(factory, "traffic_buckets_10s",
+            bucketStart: BaseTime.AddDays(-3).AddMinutes(10), bucketSeconds: 10,
+            bytesIn: 700, bytesOut: 70);
+
+        var query = new DestinationsQuery(
+            null, BaseTime.AddDays(-3), BaseTime.AddDays(-3).AddMinutes(30), null, 0);
+        var destinations = await _store.GetDestinationsAsync(query, CancellationToken.None);
+
+        var destination = Assert.Single(destinations);
+        Assert.Equal("93.184.216.34", destination.RemoteAddress);
+        Assert.Equal(700, destination.TotalBytesIn);
+        Assert.Equal(70, destination.TotalBytesOut);
+    }
+
+    [Fact]
     public async Task GetProcessTimelineAsync_GapBetweenBuckets_ZeroFilled() {
         // Traffic at 0s and 4s with an idle gap between. Extent = 4s, so the
         // effective resolution floors at 1s; the output must be 5 contiguous

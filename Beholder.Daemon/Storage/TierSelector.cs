@@ -10,26 +10,30 @@ namespace Beholder.Daemon.Storage;
 internal static class TierSelector {
     /// <summary>
     /// Picks the coarsest tier whose <see cref="RollupTier.BucketSeconds"/> is
-    /// less than or equal to the requested <paramref name="resolution"/>. Ties
-    /// broken toward the coarser tier (fewer rows scanned).
+    /// less than or equal to the requested <paramref name="resolution"/>,
+    /// considering only tiers whose retention still covers
+    /// <paramref name="from"/>. Ties broken toward the coarser tier (fewer
+    /// rows scanned).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Retention is NOT used to filter tiers. A tier's retention cap limits how
-    /// far back that tier has data — but <c>WHERE bucket_start_ms &gt;= from</c>
-    /// naturally returns only the rows that actually exist, so querying a
-    /// shorter-retention tier for a longer range just yields whatever data the
-    /// tier has (typically the most recent portion of the range at full
-    /// fidelity). This is strictly better than falling back to a coarser tier
-    /// that happens to have infinite retention: the user wants the finest
-    /// granularity available for whatever data the daemon has, not the coarsest
-    /// guaranteed-complete tier.
+    /// Retention gates eligibility: a tier whose retention window starts after
+    /// <paramref name="from"/> has already pruned (part of) the requested
+    /// range, so serving from it silently drops the range's older portion.
+    /// That was tolerable when every caller's range ended at <em>now</em> (the
+    /// preset views), but the chart-selection feature (ADR 017) issues small
+    /// windows anywhere in history — a 30-minute window three days ago must
+    /// not be served from <c>traffic_raw</c>'s 10-minute retention, which
+    /// would return a guaranteed-empty result while <c>_10s</c> holds the
+    /// data. Null retention means infinite and always covers.
     /// </para>
     /// <para>
-    /// Fallback when no tier has <c>BucketSeconds ≤ resolution</c> (very fine
-    /// resolution asked against only-coarse tiers): return the finest tier
-    /// (first in the list). The caller receives data at the tier's native
-    /// bucket size, not at the requested resolution.
+    /// Fallback when no eligible tier has <c>BucketSeconds ≤ resolution</c>:
+    /// the finest eligible tier — data at coarser-than-requested granularity
+    /// beats a guaranteed-empty finer tier. If no tier covers
+    /// <paramref name="from"/> at all (only possible if the terminal tier has
+    /// finite retention), the terminal tier, mirroring
+    /// <see cref="SelectTierForAge"/>'s defensive fallback.
     /// </para>
     /// </remarks>
     public static RollupTier Select(
@@ -42,15 +46,18 @@ internal static class TierSelector {
         if (tiers.Count == 0) throw new ArgumentException("Tier list cannot be empty.", nameof(tiers));
 
         RollupTier? best = null;
+        RollupTier? finestEligible = null;
         foreach (var tier in tiers) {
+            var covers = tier.Retention is null || now - tier.Retention.Value <= from;
+            if (!covers) continue;
+            finestEligible ??= tier;
             if (tier.BucketSeconds > resolution.TotalSeconds) continue;
             if (best is null || tier.BucketSeconds > best.BucketSeconds) best = tier;
         }
         if (best is not null) return best;
+        if (finestEligible is not null) return finestEligible;
 
-        // Requested resolution is finer than any tier's bucket size. Return
-        // the finest tier available; caller gets data at that tier's granularity.
-        return tiers[0];
+        return tiers[^1];
     }
 
     /// <summary>

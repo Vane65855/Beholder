@@ -81,30 +81,31 @@ public class TierSelectionTests {
     }
 
     [Fact]
-    public void Select_VeryFineResolutionLongRange_PicksRaw() {
-        // Resolution = 1s picks the tier with bucket ≤ 1s regardless of range.
-        // The SQL WHERE clause naturally returns only rows that exist, so the
-        // caller gets raw-resolution data for whatever recent portion of the
-        // range the raw tier retains (10 min under Balanced), and empty rows
-        // for the older portion. This is strictly better than returning _1h
-        // (coarse) just because retention covers the whole range.
+    public void Select_VeryFineResolutionLongRange_PicksFinestCoveringTier() {
+        // A 2-year range asked at 1s resolution. Raw (10 min retention) has
+        // pruned virtually all of the range — serving it would return only
+        // the last 10 minutes and silently drop two years (ADR 017). The
+        // finest tier whose retention covers `from` is _1h (null = infinite);
+        // the summary sums are identical wherever tiers overlap (rollup
+        // invariant), so completeness costs nothing.
         var tier = TierSelector.Select(
             BalancedTiers,
             from: Now.AddYears(-2),
             resolution: TimeSpan.FromSeconds(1),
             now: Now);
-        Assert.Equal("traffic_raw", tier.TableName);
+        Assert.Equal("traffic_buckets_1h", tier.TableName);
     }
 
     [Fact]
-    public void Select_FineResolutionMidRange_PicksRaw() {
-        // Same rule as above: resolution=1s picks raw, independent of range.
+    public void Select_FineResolutionMidRange_PicksFinestCoveringTier() {
+        // 60 days back at 1s resolution: raw/_10s/_1m have all pruned the
+        // range's start; _10m (365 d) is the finest tier that still covers it.
         var tier = TierSelector.Select(
             BalancedTiers,
             from: Now.AddDays(-60),
             resolution: TimeSpan.FromSeconds(1),
             now: Now);
-        Assert.Equal("traffic_raw", tier.TableName);
+        Assert.Equal("traffic_buckets_10m", tier.TableName);
     }
 
     // --- SelectTierForAge tests (used by stitched multi-tier queries) ---
@@ -147,18 +148,55 @@ public class TierSelectionTests {
     }
 
     [Fact]
-    public void Select_AllTimeCoarseResolution_PicksFinerTierWhenAvailable() {
-        // "All Time" with a 56-year range and 10-minute resolution. Under the
-        // old retention-gated rule, only _1h (∞ retention) qualified. Under the
-        // new rule, _10m (bucket=600s ≤ 600s resolution) is the coarsest match
-        // and wins. This is the fix for "All Time shows different chart shape
-        // than Last 30 Days" — both views now use the same tier for the data
-        // they actually share.
+    public void Select_AllTimeCoarseResolution_PicksCoveringTerminalTier() {
+        // "All Time" (from = epoch) at 10-minute resolution. _10m matches the
+        // resolution but its 365-day retention has pruned everything older —
+        // an "All Time" summary served from it would silently omit year-2+
+        // history. Only _1h (∞ retention) covers the range, and the rollup
+        // invariant makes its sums identical to _10m's over the shared year,
+        // so the coarser tier is pure completeness gain. (Chart-shape
+        // consistency across ranges is the stitched timeline path's job, not
+        // this selector's — timelines stopped using Select in Phase 4.6b.)
         var tier = TierSelector.Select(
             BalancedTiers,
             from: DateTimeOffset.UnixEpoch,
             resolution: TimeSpan.FromMinutes(10),
             now: Now);
-        Assert.Equal("traffic_buckets_10m", tier.TableName);
+        Assert.Equal("traffic_buckets_1h", tier.TableName);
+    }
+
+    // --- ADR 017: small windows anywhere in history (chart selection) ---
+
+    [Fact]
+    public void Select_SmallWindowThreeDaysBack_Picks10s() {
+        // A 30-minute selection window on a 7-day chart: pseudo-resolution is
+        // ~6s, which only raw satisfies — but raw pruned the window days ago.
+        // The finest tier still covering the window's age is _10s.
+        var tier = TierSelector.Select(
+            BalancedTiers,
+            from: Now.AddDays(-3),
+            resolution: TimeSpan.FromSeconds(6),
+            now: Now);
+        Assert.Equal("traffic_buckets_10s", tier.TableName);
+    }
+
+    [Fact]
+    public void Select_SmallWindowTenDaysBack_Picks1m() {
+        var tier = TierSelector.Select(
+            BalancedTiers,
+            from: Now.AddDays(-10),
+            resolution: TimeSpan.FromSeconds(6),
+            now: Now);
+        Assert.Equal("traffic_buckets_1m", tier.TableName);
+    }
+
+    [Fact]
+    public void Select_SmallWindowBeyondAllFiniteRetentions_PicksTerminal() {
+        var tier = TierSelector.Select(
+            BalancedTiers,
+            from: Now.AddYears(-5),
+            resolution: TimeSpan.FromSeconds(6),
+            now: Now);
+        Assert.Equal("traffic_buckets_1h", tier.TableName);
     }
 }

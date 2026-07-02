@@ -371,10 +371,11 @@ All five tiers share an identical column schema — tier selection is just a tab
 
 *Single-tier queries* (`GetProcessDestinationsAsync`, `GetCountryBreakdownAsync`, `GetProcessSummariesAsync`) — queries that return an aggregate summary over a range, not a timeline. These delegate to `TierSelector.Select(tiers, from, resolution, now)`:
 
-1. Find the coarsest tier whose `BucketSeconds ≤ resolution.TotalSeconds` (fewer rows scanned).
-2. If no tier matches, fall back to the finest tier (first in the list). The caller receives data at the tier's native bucket size.
+1. A tier is **eligible** only if its retention still covers `from` (`Retention is null` = infinite = always covers). A tier that has already pruned part of the range would silently drop the range's older portion.
+2. Among eligible tiers, pick the coarsest whose `BucketSeconds ≤ resolution.TotalSeconds` (fewer rows scanned).
+3. If no eligible tier matches the resolution, pick the **finest eligible** tier — data at coarser-than-requested granularity beats a guaranteed-empty finer tier. If nothing is eligible (only possible with a finite-retention terminal tier), fall back to the terminal tier.
 
-Retention is **not** a filter here. A tier's retention cap limits how far back that tier has data, but `WHERE bucket_start_ms >= from` naturally returns only the rows that actually exist, so querying a shorter-retention tier for a longer range just yields whatever data the tier has (typically the most recent portion of the range at full fidelity). This is strictly better than falling back to a coarser tier that happens to have infinite retention — the user wants the finest granularity available for whatever data exists, not the coarsest guaranteed-complete tier.
+Retention gating was added in ADR 017. The original rule ignored retention on the theory that ranges always end at *now*, so a short-retention tier still held "the most recent portion of the range at full fidelity" — but the chart-selection feature issues small windows *anywhere* in history (a 30-minute window three days ago maps to a ~6 s pseudo-resolution), and serving those from `traffic_raw`'s 10-minute retention returned guaranteed-empty results while `_10s` held the data. For aggregate summaries the coarser covering tier costs nothing: the rollup invariant makes sums identical wherever tiers overlap.
 
 Queries without a resolution parameter (`GetProcessDestinationsAsync`, `GetCountryBreakdownAsync`, `GetProcessSummariesAsync`) use a pseudo-resolution of `(to - from) / 300` with a 1-second floor, so tier choice stays consistent with timeline queries over the same range.
 
