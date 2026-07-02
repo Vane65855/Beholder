@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media;
@@ -27,7 +29,21 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     private readonly ProcessStateService _processStateService;
     private readonly IDispatcher _dispatcher;
     private readonly TotalsExclusionUiState _totalsExclusions;
+    private readonly IShellOpener _shellOpener;
+    private readonly IClipboardWriter _clipboardWriter;
+    private readonly Func<string, Task>? _navigateToFirewallRule;
+    private readonly Func<string, bool> _fileExists;
     private readonly ProcessListCoordinator _processList;
+
+    /// <summary>
+    /// The process row the open context menu acts on, captured by the view's
+    /// ContextRequested handler. Deliberately separate from
+    /// <see cref="SelectedProcess"/> so the commands are immune to the 1 Hz
+    /// live re-sort racing the click (the ListBox also selects the row on
+    /// right-click, but that's presentation — actions key off this capture).
+    /// Null when no menu is open (or the target row was the all-row).
+    /// </summary>
+    private ProcessListItem? _menuTarget;
     private readonly HistoricalQueryOrchestrator _historicalQueries;
     private TrafficColsViewModel? _colsVm;
     private IReadOnlyDictionary<string, ProcessState>? _lastStates;
@@ -148,6 +164,29 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     [ObservableProperty]
     private string _selectionWindowLabel = string.Empty;
 
+    /// <summary>
+    /// True when the context-menu target's path is a real, still-existing
+    /// file — gates "Open file location". False for sentinel paths
+    /// ("System", "unknown") and uninstalled binaries.
+    /// </summary>
+    [ObservableProperty]
+    private bool _menuTargetCanOpenLocation;
+
+    /// <summary>
+    /// True when the target's path is rooted — gates "Open in Firewall"
+    /// (the Firewall tab filters sentinel pseudo-processes, so deep-linking
+    /// them would dead-end).
+    /// </summary>
+    [ObservableProperty]
+    private bool _menuTargetCanOpenFirewall;
+
+    /// <summary>"Exclude from totals" / "Include in totals" by the target's current state.</summary>
+    [ObservableProperty]
+    private string _menuTargetExcludeHeader = ExcludeFromTotalsHeader;
+
+    private const string ExcludeFromTotalsHeader = "Exclude from totals";
+    private const string IncludeInTotalsHeader = "Include in totals";
+
     // Absolute window the active selection resolves to, captured when the
     // selection is made. The destinations fetch targets this range.
     private DateTimeOffset _selectionFrom;
@@ -256,16 +295,26 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         ProcessStateService processStateService,
         HistoricalChartLoader historicalChartLoader,
         IDispatcher dispatcher,
-        TotalsExclusionUiState totalsExclusions) {
+        TotalsExclusionUiState totalsExclusions,
+        IShellOpener shellOpener,
+        IClipboardWriter clipboardWriter,
+        Func<string, Task>? navigateToFirewallRule = null,
+        Func<string, bool>? fileExistsCheck = null) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(historicalChartLoader);
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(totalsExclusions);
+        ArgumentNullException.ThrowIfNull(shellOpener);
+        ArgumentNullException.ThrowIfNull(clipboardWriter);
         _daemonClient = daemonClient;
         _processStateService = processStateService;
         _dispatcher = dispatcher;
         _totalsExclusions = totalsExclusions;
+        _shellOpener = shellOpener;
+        _clipboardWriter = clipboardWriter;
+        _navigateToFirewallRule = navigateToFirewallRule;
+        _fileExists = fileExistsCheck ?? File.Exists;
         _processList = new ProcessListCoordinator(totalsExclusions);
         _historicalQueries = new HistoricalQueryOrchestrator(historicalChartLoader);
 
@@ -413,6 +462,94 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         return f.Date == t.Date
             ? FormattableString.Invariant($"{f:HH:mm:ss} – {t:HH:mm:ss}")
             : FormattableString.Invariant($"{f:MMM d, HH:mm} – {t:MMM d, HH:mm}");
+    }
+
+    /// <summary>
+    /// Captures the row a context menu is opening on and computes the menu's
+    /// gating in one pass (including a single File.Exists stat — cheap on a
+    /// right-click). Called by the view's ContextRequested handler; returns
+    /// false when no menu should open (no row / the all-row), so the handler
+    /// can suppress it.
+    /// </summary>
+    internal bool SetProcessMenuTarget(ProcessListItem? item) {
+        _menuTarget = item is { IsAll: false } ? item : null;
+        if (_menuTarget is null) {
+            MenuTargetCanOpenLocation = false;
+            MenuTargetCanOpenFirewall = false;
+            MenuTargetExcludeHeader = ExcludeFromTotalsHeader;
+            return false;
+        }
+
+        var path = _menuTarget.ProcessPath;
+        var isRooted = Path.IsPathRooted(path);
+        MenuTargetCanOpenLocation = isRooted && _fileExists(path);
+        MenuTargetCanOpenFirewall = isRooted;
+        MenuTargetExcludeHeader = _totalsExclusions.IsExcluded(path)
+            ? IncludeInTotalsHeader
+            : ExcludeFromTotalsHeader;
+        return true;
+    }
+
+    [RelayCommand]
+    private void OpenProcessFileLocation() {
+        if (_menuTarget is null) return;
+        try {
+            _shellOpener.RevealInFolder(_menuTarget.ProcessPath);
+        } catch (Exception ex) {
+            HasError = true;
+            ErrorMessage = $"Couldn't open file location: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task CopyProcessPath() {
+        if (_menuTarget is null) return;
+        await _clipboardWriter.WriteTextAsync(_menuTarget.ProcessPath, CancellationToken.None);
+    }
+
+    [RelayCommand]
+    private void OpenProcessInFirewall() {
+        if (_menuTarget is null || _navigateToFirewallRule is null) return;
+        // Fire-and-forget matching the Alerts tab's deep-link usage — the
+        // delegate switches tabs and highlights; nothing here awaits it.
+        _ = _navigateToFirewallRule(_menuTarget.ProcessPath);
+    }
+
+    /// <summary>
+    /// Flips the target's totals-exclusion state via the same whole-list
+    /// SetTotalsSettings round-trip the Settings card uses. On success the
+    /// echoed list lands in the shared mirror, whose Changed event re-renders
+    /// every live view (and resyncs the Settings card).
+    /// </summary>
+    [RelayCommand]
+    private async Task ToggleProcessTotalsExclusion() {
+        if (_menuTarget is null) return;
+        var path = _menuTarget.ProcessPath;
+        var current = _totalsExclusions.ExcludedProcessPaths;
+        List<string> desired = _totalsExclusions.IsExcluded(path)
+            ? current.Where(p => !string.Equals(p, path, StringComparison.OrdinalIgnoreCase)).ToList()
+            : [.. current, path];
+
+        try {
+            var values = new TotalsSettingsValues();
+            values.ExcludedProcessPaths.AddRange(desired);
+            var response = await _daemonClient.SetTotalsSettingsAsync(
+                new SetTotalsSettingsRequest { Values = values }, CancellationToken.None);
+            if (response.Success && response.Values is not null) {
+                _totalsExclusions.SetExcludedPaths([.. response.Values.ExcludedProcessPaths]);
+            } else {
+                HasError = true;
+                ErrorMessage = string.IsNullOrEmpty(response.Message)
+                    ? "Failed to update totals exclusions."
+                    : response.Message;
+            }
+        } catch (RpcException ex) {
+            HasError = true;
+            ErrorMessage = $"Failed to update totals exclusions: {ex.Status.Detail}";
+        } catch (Exception ex) {
+            HasError = true;
+            ErrorMessage = $"Failed to update totals exclusions: {ex.Message}";
+        }
     }
 
     [RelayCommand]

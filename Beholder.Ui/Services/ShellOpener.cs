@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 
 namespace Beholder.Ui.Services;
 
@@ -18,5 +19,26 @@ internal sealed class ShellOpener : IShellOpener {
             FileName = target,
             UseShellExecute = true,
         });
+    }
+
+    public void RevealInFolder(string filePath) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        if (OperatingSystem.IsWindows()) {
+            // Explorer's /select verb opens the containing folder with the
+            // file highlighted. Windows paths cannot contain quotes, so the
+            // literal quoting is safe.
+            Process.Start(new ProcessStartInfo {
+                FileName = "explorer.exe",
+                Arguments = $"/select,\"{filePath}\"",
+                UseShellExecute = true,
+            });
+        } else {
+            // No portable select-in-explorer verb off Windows — opening the
+            // containing folder is the graceful degradation.
+            var directory = Path.GetDirectoryName(filePath);
+            if (string.IsNullOrEmpty(directory))
+                throw new ArgumentException($"'{filePath}' has no containing folder.", nameof(filePath));
+            Open(directory);
+        }
     }
 }

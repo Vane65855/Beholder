@@ -11,11 +11,18 @@ namespace Beholder.Tests;
 /// </summary>
 internal sealed class FakeShellOpener : IShellOpener {
     public List<string> OpenedTargets { get; } = new();
+    public List<string> RevealedPaths { get; } = new();
     public Exception? Exception { get; set; }
 
     public void Open(string target) {
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
         OpenedTargets.Add(target);
+        if (Exception is not null) throw Exception;
+    }
+
+    public void RevealInFolder(string filePath) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        RevealedPaths.Add(filePath);
         if (Exception is not null) throw Exception;
     }
 }

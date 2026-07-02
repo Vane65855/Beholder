@@ -19,7 +19,7 @@ public class TrafficTabViewModelTests {
             NullLogger<DaemonStreamSubscriber>.Instance);
         var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
         var loader = new HistoricalChartLoader(fakeClient);
-        return new TrafficTabViewModel(fakeClient, service, loader, new SyncDispatcher(), new TotalsExclusionUiState());
+        return new TrafficTabViewModel(fakeClient, service, loader, new SyncDispatcher(), new TotalsExclusionUiState(), new FakeShellOpener(), new FakeClipboardWriter());
     }
 
     private static ProcessState MakeState(
@@ -376,7 +376,7 @@ public class TrafficTabViewModelTests {
             NullLogger<DaemonStreamSubscriber>.Instance);
         var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
         var loader = new HistoricalChartLoader(fakeClient);
-        var vm = new TrafficTabViewModel(fakeClient, service, loader, new SyncDispatcher(), new TotalsExclusionUiState());
+        var vm = new TrafficTabViewModel(fakeClient, service, loader, new SyncDispatcher(), new TotalsExclusionUiState(), new FakeShellOpener(), new FakeClipboardWriter());
         return (vm, fakeClient);
     }
 
@@ -879,6 +879,170 @@ public class TrafficTabViewModelTests {
         Assert.Equal("All processes", vm.SelectionAppLabel);
     }
 
+    // ---- Process-row context menu ----
+
+    private sealed record MenuHarness(
+        TrafficTabViewModel Vm, FakeDaemonClient Client, FakeShellOpener Shell,
+        FakeClipboardWriter Clipboard, TotalsExclusionUiState Exclusions,
+        List<string> FirewallNavigations);
+
+    private static MenuHarness CreateMenuHarness(Func<string, bool>? fileExists = null) {
+        var fakeClient = new FakeDaemonClient();
+        var subscriber = new DaemonStreamSubscriber(
+            fakeClient, TimeProvider.System, NullLogger<DaemonStreamSubscriber>.Instance);
+        var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
+        var loader = new HistoricalChartLoader(fakeClient);
+        var shell = new FakeShellOpener();
+        var clipboard = new FakeClipboardWriter();
+        var exclusions = new TotalsExclusionUiState();
+        var navigations = new List<string>();
+        var vm = new TrafficTabViewModel(
+            fakeClient, service, loader, new SyncDispatcher(), exclusions, shell, clipboard,
+            navigateToFirewallRule: path => { navigations.Add(path); return Task.CompletedTask; },
+            fileExistsCheck: fileExists ?? (_ => true));
+        return new MenuHarness(vm, fakeClient, shell, clipboard, exclusions, navigations);
+    }
+
+    private static ProcessListItem RealProcessRow(string path = @"C:\bin\firefox.exe") =>
+        new(path, "firefox.exe");
+
+    [Fact]
+    public void SetProcessMenuTarget_AllRowOrNull_SuppressesMenu() {
+        var h = CreateMenuHarness();
+
+        Assert.False(h.Vm.SetProcessMenuTarget(null));
+        Assert.False(h.Vm.SetProcessMenuTarget(new ProcessListItem(string.Empty, "All processes", isAll: true)));
+        Assert.False(h.Vm.MenuTargetCanOpenLocation);
+    }
+
+    [Fact]
+    public void SetProcessMenuTarget_RootedExistingPath_EnablesEverything() {
+        var h = CreateMenuHarness();
+
+        Assert.True(h.Vm.SetProcessMenuTarget(RealProcessRow()));
+
+        Assert.True(h.Vm.MenuTargetCanOpenLocation);
+        Assert.True(h.Vm.MenuTargetCanOpenFirewall);
+        Assert.Equal("Exclude from totals", h.Vm.MenuTargetExcludeHeader);
+    }
+
+    [Fact]
+    public void SetProcessMenuTarget_MissingBinary_DisablesOpenLocationOnly() {
+        var h = CreateMenuHarness(fileExists: _ => false);
+
+        Assert.True(h.Vm.SetProcessMenuTarget(RealProcessRow()));
+
+        Assert.False(h.Vm.MenuTargetCanOpenLocation);
+        Assert.True(h.Vm.MenuTargetCanOpenFirewall);
+    }
+
+    [Fact]
+    public void SetProcessMenuTarget_SentinelPath_DisablesFileActionsButMenuOpens() {
+        var h = CreateMenuHarness();
+
+        // "System" (PID 4) reports the literal sentinel as its path — not
+        // rooted, so file/firewall actions disable, but exclusion still works.
+        Assert.True(h.Vm.SetProcessMenuTarget(new ProcessListItem("System", "System")));
+
+        Assert.False(h.Vm.MenuTargetCanOpenLocation);
+        Assert.False(h.Vm.MenuTargetCanOpenFirewall);
+    }
+
+    [Fact]
+    public void SetProcessMenuTarget_ExcludedTarget_HeaderFlipsToInclude() {
+        var h = CreateMenuHarness();
+        h.Exclusions.SetExcludedPaths([@"C:\bin\firefox.exe"]);
+
+        h.Vm.SetProcessMenuTarget(RealProcessRow());
+
+        Assert.Equal("Include in totals", h.Vm.MenuTargetExcludeHeader);
+    }
+
+    [Fact]
+    public void OpenProcessFileLocation_RevealsTargetPath() {
+        var h = CreateMenuHarness();
+        h.Vm.SetProcessMenuTarget(RealProcessRow());
+
+        h.Vm.OpenProcessFileLocationCommand.Execute(null);
+
+        Assert.Equal([@"C:\bin\firefox.exe"], h.Shell.RevealedPaths);
+        Assert.False(h.Vm.HasError);
+    }
+
+    [Fact]
+    public void OpenProcessFileLocation_ShellThrows_SurfacesErrorBanner() {
+        var h = CreateMenuHarness();
+        h.Shell.Exception = new InvalidOperationException("no explorer");
+        h.Vm.SetProcessMenuTarget(RealProcessRow());
+
+        h.Vm.OpenProcessFileLocationCommand.Execute(null);
+
+        Assert.True(h.Vm.HasError);
+        Assert.Contains("Couldn't open file location", h.Vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task CopyProcessPath_WritesPathToClipboard() {
+        var h = CreateMenuHarness();
+        h.Vm.SetProcessMenuTarget(RealProcessRow());
+
+        await h.Vm.CopyProcessPathCommand.ExecuteAsync(null);
+
+        Assert.Equal([@"C:\bin\firefox.exe"], h.Clipboard.Writes);
+    }
+
+    [Fact]
+    public void OpenProcessInFirewall_InvokesDeepLinkWithPath() {
+        var h = CreateMenuHarness();
+        h.Vm.SetProcessMenuTarget(RealProcessRow());
+
+        h.Vm.OpenProcessInFirewallCommand.Execute(null);
+
+        Assert.Equal([@"C:\bin\firefox.exe"], h.FirewallNavigations);
+    }
+
+    [Fact]
+    public async Task ToggleProcessTotalsExclusion_NotExcluded_AddsAndUpdatesMirror() {
+        var h = CreateMenuHarness();
+        h.Vm.SetProcessMenuTarget(RealProcessRow());
+
+        await h.Vm.ToggleProcessTotalsExclusionCommand.ExecuteAsync(null);
+
+        var call = Assert.Single(h.Client.SetTotalsSettingsCalls);
+        Assert.Equal([@"C:\bin\firefox.exe"], call.Values.ExcludedProcessPaths);
+        Assert.True(h.Exclusions.IsExcluded(@"C:\bin\firefox.exe"));
+    }
+
+    [Fact]
+    public async Task ToggleProcessTotalsExclusion_AlreadyExcluded_RemovesAndUpdatesMirror() {
+        var h = CreateMenuHarness();
+        h.Exclusions.SetExcludedPaths([@"C:\bin\firefox.exe", @"C:\vpn\wireguard.exe"]);
+        h.Vm.SetProcessMenuTarget(RealProcessRow());
+
+        await h.Vm.ToggleProcessTotalsExclusionCommand.ExecuteAsync(null);
+
+        var call = Assert.Single(h.Client.SetTotalsSettingsCalls);
+        Assert.Equal([@"C:\vpn\wireguard.exe"], call.Values.ExcludedProcessPaths);
+        Assert.False(h.Exclusions.IsExcluded(@"C:\bin\firefox.exe"));
+        Assert.True(h.Exclusions.IsExcluded(@"C:\vpn\wireguard.exe"));
+    }
+
+    [Fact]
+    public async Task ToggleProcessTotalsExclusion_SoftFailure_SurfacesErrorAndKeepsMirror() {
+        var h = CreateMenuHarness();
+        h.Client.SetTotalsSettingsResponder = _ => new SetTotalsSettingsResponse {
+            Success = false,
+            Message = "persistence failed",
+        };
+        h.Vm.SetProcessMenuTarget(RealProcessRow());
+
+        await h.Vm.ToggleProcessTotalsExclusionCommand.ExecuteAsync(null);
+
+        Assert.True(h.Vm.HasError);
+        Assert.Contains("persistence failed", h.Vm.ErrorMessage);
+        Assert.False(h.Exclusions.IsExcluded(@"C:\bin\firefox.exe"));
+    }
+
     // ---- Totals exclusions ("Exclude from totals") ----
 
     [Fact]
@@ -891,7 +1055,7 @@ public class TrafficTabViewModelTests {
         var exclusions = new TotalsExclusionUiState();
         exclusions.SetExcludedPaths(["vpn.exe"]);
         var vm = new TrafficTabViewModel(
-            fakeClient, service, loader, new SyncDispatcher(), exclusions);
+            fakeClient, service, loader, new SyncDispatcher(), exclusions, new FakeShellOpener(), new FakeClipboardWriter());
         var states = new Dictionary<string, ProcessState> {
             ["vpn.exe"] = MakeState("vpn.exe", "vpn", [1000, 2000, 3000], [900, 800, 700]),
             ["a.exe"] = MakeState("a.exe", "a", [10, 20, 30], [1, 2, 3]),
@@ -913,7 +1077,7 @@ public class TrafficTabViewModelTests {
         var loader = new HistoricalChartLoader(fakeClient);
         var exclusions = new TotalsExclusionUiState();
         var vm = new TrafficTabViewModel(
-            fakeClient, service, loader, new SyncDispatcher(), exclusions);
+            fakeClient, service, loader, new SyncDispatcher(), exclusions, new FakeShellOpener(), new FakeClipboardWriter());
         var states = new Dictionary<string, ProcessState> {
             ["vpn.exe"] = MakeState("vpn.exe", "vpn", [1000], [900]),
             ["a.exe"] = MakeState("a.exe", "a", [10], [1]),

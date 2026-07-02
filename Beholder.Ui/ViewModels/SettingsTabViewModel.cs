@@ -312,6 +312,11 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         // ActivateAsync's GetSettings re-syncs both).
         Totals.ShowExcluded = totalsExclusions.ShowExcluded;
         foreach (var path in totalsExclusions.ExcludedProcessPaths) Totals.ExcludedPaths.Add(path);
+        // The Traffic tab's row context menu is a second exclusions writer —
+        // resync this card whenever the mirror changes so its list can't go
+        // stale between activations. Marshal: Changed can fire off the UI
+        // thread (the connect-time seed).
+        _totalsExclusions.Changed += OnTotalsExclusionsChanged;
 
         // Auto-recover when the daemon transitions to Connected: if the tab
         // has previously been activated and is currently in an error state
@@ -338,6 +343,7 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         if (_disposed) return;
         _disposed = true;
         _daemonClient.StateChanged -= OnDaemonStateChanged;
+        _totalsExclusions.Changed -= OnTotalsExclusionsChanged;
         _activationCts?.Cancel();
         _activationCts?.Dispose();
         _verifyStatusCts?.Cancel();
@@ -475,6 +481,14 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         Totals.ExcludedPaths.Clear();
         foreach (var path in paths) Totals.ExcludedPaths.Add(path);
         _totalsExclusions.SetExcludedPaths(paths);
+    }
+
+    private void OnTotalsExclusionsChanged() {
+        _dispatcher.Post(() => {
+            var paths = _totalsExclusions.ExcludedProcessPaths;
+            Totals.ExcludedPaths.Clear();
+            foreach (var path in paths) Totals.ExcludedPaths.Add(path);
+        });
     }
 
     private void ApplyAppIdentityRules(ListAppIdentityRulesResponse response) {

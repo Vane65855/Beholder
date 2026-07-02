@@ -27,4 +27,13 @@ internal interface IShellOpener {
     /// default browser. Throws if the target is not openable.
     /// </summary>
     void Open(string target);
+
+    /// <summary>
+    /// Opens the folder containing <paramref name="filePath"/> in the file
+    /// explorer with that file pre-selected (Task Manager's "Open file
+    /// location" behavior). On platforms without a select-in-explorer verb
+    /// the containing folder opens without a selection. Throws if the
+    /// location is not openable.
+    /// </summary>
+    void RevealInFolder(string filePath);
 }

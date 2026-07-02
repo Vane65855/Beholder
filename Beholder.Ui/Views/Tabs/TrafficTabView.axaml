@@ -87,7 +87,34 @@
                          SelectedItem="{Binding SelectedProcess}"
                          Background="Transparent"
                          BorderThickness="0"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ContextRequested="OnProcessListContextRequested">
+                    <!-- Row context menu. Attached at ListBox level so it
+                         inherits the tab VM DataContext directly (popup
+                         ancestor lookups are unreliable in Avalonia — see
+                         UI_QUALITY_STANDARDS §10). The code-behind
+                         ContextRequested handler captures which row was
+                         right-clicked and suppresses the menu for the
+                         all-row / empty space. -->
+                    <ListBox.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="Open file location"
+                                      IsEnabled="{Binding MenuTargetCanOpenLocation}"
+                                      Command="{Binding OpenProcessFileLocationCommand}"
+                                      ToolTip.Tip="Open the folder containing this binary with the file selected." />
+                            <MenuItem Header="Copy path"
+                                      Command="{Binding CopyProcessPathCommand}" />
+                            <Separator />
+                            <MenuItem Header="Open in Firewall"
+                                      IsEnabled="{Binding MenuTargetCanOpenFirewall}"
+                                      Command="{Binding OpenProcessInFirewallCommand}"
+                                      ToolTip.Tip="Switch to the Firewall tab and highlight this process's rule row." />
+                            <Separator />
+                            <MenuItem Header="{Binding MenuTargetExcludeHeader}"
+                                      Command="{Binding ToggleProcessTotalsExclusionCommand}"
+                                      ToolTip.Tip="Excluded processes stay recorded and alertable — they're only removed from All-processes totals, charts, and breakdowns." />
+                        </ContextMenu>
+                    </ListBox.ContextMenu>
                     <ListBox.ItemsPanel>
                         <ItemsPanelTemplate>
                             <VirtualizingStackPanel />

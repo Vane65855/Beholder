@@ -92,8 +92,11 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         ArgumentNullException.ThrowIfNull(totalsExclusions);
         _daemonClient = daemonClient;
         _dispatcher = dispatcher;
+        // The Traffic tab's row context menu reuses the same Firewall
+        // deep-link delegate the Alerts tab gets ("Open in Firewall").
         _trafficTab = new TrafficTabViewModel(
-            daemonClient, processStateService, historicalChartLoader, dispatcher, totalsExclusions);
+            daemonClient, processStateService, historicalChartLoader, dispatcher, totalsExclusions,
+            shellOpener, clipboardWriter, NavigateToFirewallRuleAsync);
         _firewallTab = new FirewallTabViewModel(daemonClient, processStateService, streamSubscriber, dispatcher);
         // Pass NavigateToFirewallRule as the AlertsTabViewModel's deep-link
         // delegate so its ADD RULE button can switch tabs + highlight the

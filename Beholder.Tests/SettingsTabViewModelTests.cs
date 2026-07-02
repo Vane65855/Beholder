@@ -814,6 +814,19 @@ public class SettingsTabViewModelTests {
     }
 
     [Fact]
+    public void MirrorChanged_ResyncsTotalsRow() {
+        // The Traffic tab's row context menu is a second exclusions writer —
+        // when it updates the shared mirror, the Settings card's list must
+        // follow without a re-activate.
+        var (vm, _, _, _, exclusions) = CreateTotalsVm();
+        Assert.Empty(vm.Totals.ExcludedPaths);
+
+        exclusions.SetExcludedPaths([@"C:\vpn\wireguard.exe"]);
+
+        Assert.Equal([@"C:\vpn\wireguard.exe"], vm.Totals.ExcludedPaths);
+    }
+
+    [Fact]
     public async Task ApplySettings_TotalsBundle_SyncsRowAndSharedState() {
         var (vm, client, _, _, exclusions) = CreateTotalsVm();
         var totals = new TotalsSettingsValues();
