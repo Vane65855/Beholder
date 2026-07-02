@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Beholder.Core;
 using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Scanner;
@@ -58,6 +59,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
     private readonly IHostnameResolutionSettingsState _hostnameResolutionSettings;
     private readonly IAlertSettingsState _alertSettings;
     private readonly IScannerSettingsState _scannerSettings;
+    private readonly ITotalsExclusionState _totalsExclusions;
     private readonly ISettingsOverridesStore _settingsOverridesStore;
     private readonly IAppIdentityRuleStore _appIdentityRuleStore;
     private readonly TimeProvider _timeProvider;
@@ -82,6 +84,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         IHostnameResolutionSettingsState hostnameResolutionSettings,
         IAlertSettingsState alertSettings,
         IScannerSettingsState scannerSettings,
+        ITotalsExclusionState totalsExclusions,
         ISettingsOverridesStore settingsOverridesStore,
         IAppIdentityRuleStore appIdentityRuleStore,
         TimeProvider timeProvider,
@@ -105,6 +108,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         ArgumentNullException.ThrowIfNull(hostnameResolutionSettings);
         ArgumentNullException.ThrowIfNull(alertSettings);
         ArgumentNullException.ThrowIfNull(scannerSettings);
+        ArgumentNullException.ThrowIfNull(totalsExclusions);
         ArgumentNullException.ThrowIfNull(settingsOverridesStore);
         ArgumentNullException.ThrowIfNull(appIdentityRuleStore);
         ArgumentNullException.ThrowIfNull(timeProvider);
@@ -127,6 +131,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         _hostnameResolutionSettings = hostnameResolutionSettings;
         _alertSettings = alertSettings;
         _scannerSettings = scannerSettings;
+        _totalsExclusions = totalsExclusions;
         _settingsOverridesStore = settingsOverridesStore;
         _appIdentityRuleStore = appIdentityRuleStore;
         _timeProvider = timeProvider;
@@ -468,6 +473,7 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
                 EnableHashChangeDetection: _alertSettings.EnableHashChangeDetection,
                 EnableChainIntegrityMonitor: _alertSettings.EnableChainIntegrityMonitor).ToProto(),
             Scanner = new ScannerSettingsSnapshot(_scannerSettings.EnableHostnameResolution).ToProto(),
+            Totals = new TotalsExclusionSnapshot(_totalsExclusions.ExcludedProcessPaths).ToProto(),
         };
         return Task.FromResult(response);
     }, context);
@@ -743,6 +749,79 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
             Message = changed ? "Settings updated." : "Settings unchanged.",
             Values = new ScannerSettingsSnapshot(_scannerSettings.EnableHostnameResolution).ToProto(),
         };
+    }
+
+    /// <summary>
+    /// Atomically replaces the Traffic Totals exclusion list ("Exclude from
+    /// totals"). Whole-list set: the client sends its complete desired list;
+    /// the daemon normalizes (trim, drop empties, dedupe case-insensitively)
+    /// before applying. Same idempotency / persistence / chain-audit contract
+    /// as the other <c>Set*</c> handlers — the chain payload carries the full
+    /// post-change list so hiding a process from totals is itself auditable.
+    /// Takes effect live: aggregate queries and snapshot stamping read the
+    /// state per call.
+    /// </summary>
+    public override async Task<Local.SetTotalsSettingsResponse> SetTotalsSettings(
+        Local.SetTotalsSettingsRequest request, ServerCallContext context
+    ) {
+        if (request.Values is null) {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "values is required"));
+        }
+
+        var ct = context.CancellationToken;
+        var normalized = NormalizeExclusionPaths(request.Values.ExcludedProcessPaths);
+        var changed = _totalsExclusions.SetExcludedPaths(normalized);
+
+        if (changed) {
+            try {
+                await _settingsOverridesStore.UpsertAsync(
+                    SettingsKeys.TrafficExcludedProcessPaths,
+                    JsonSerializer.Serialize(normalized),
+                    ct).ConfigureAwait(false);
+            } catch (OperationCanceledException) {
+                throw;
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to persist Traffic Totals exclusion override; in-memory state is updated but the change will not survive restart");
+                return new Local.SetTotalsSettingsResponse {
+                    Success = false,
+                    Message = $"Failed to persist settings: {ex.Message}",
+                    Values = new TotalsExclusionSnapshot(_totalsExclusions.ExcludedProcessPaths).ToProto(),
+                };
+            }
+
+            try {
+                var payload = TotalsExclusionsPayloadEncoder.Encode(normalized, _timeProvider.GetUtcNow());
+                await _eventStore.AppendAsync(
+                    EventKind.TotalsExclusionsChanged, payload, ct).ConfigureAwait(false);
+            } catch (Exception ex) {
+                _logger.LogError(ex,
+                    "Failed to append Traffic Totals exclusion change to chain — change is applied but unaudited");
+            }
+            _logger.LogInformation(
+                "Traffic Totals exclusions updated ({Count} excluded)", normalized.Count);
+        }
+
+        return new Local.SetTotalsSettingsResponse {
+            Success = true,
+            Message = changed ? "Settings updated." : "Settings unchanged.",
+            Values = new TotalsExclusionSnapshot(_totalsExclusions.ExcludedProcessPaths).ToProto(),
+        };
+    }
+
+    /// <summary>
+    /// Trims entries, drops empties, and dedupes case-insensitively (Windows
+    /// paths) while preserving the client's list order for display echoes.
+    /// </summary>
+    private static List<string> NormalizeExclusionPaths(IEnumerable<string> paths) {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var normalized = new List<string>();
+        foreach (var path in paths) {
+            var trimmed = path?.Trim();
+            if (string.IsNullOrEmpty(trimmed)) continue;
+            if (seen.Add(trimmed)) normalized.Add(trimmed);
+        }
+        return normalized;
     }
 
     /// <summary>

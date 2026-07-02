@@ -26,4 +26,10 @@ public static class SettingsKeys {
     public const string AlertEnableChainIntegrityMonitor = "Alert.EnableChainIntegrityMonitor";
 
     public const string ScannerEnableHostnameResolution = "Scanner.EnableHostnameResolution";
+
+    /// <summary>
+    /// JSON string-array value (not a bool like the keys above): the ordered
+    /// list of process paths excluded from aggregate traffic views.
+    /// </summary>
+    public const string TrafficExcludedProcessPaths = "Traffic.ExcludedProcessPaths";
 }

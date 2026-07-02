@@ -261,6 +261,24 @@ internal static class ProtocolConverters {
     }
 
     /// <summary>
+    /// Maps a Traffic Totals exclusion snapshot onto its wire value message.
+    /// </summary>
+    public static Local.TotalsSettingsValues ToProto(this Core.TotalsExclusionSnapshot source) {
+        ArgumentNullException.ThrowIfNull(source);
+        var values = new Local.TotalsSettingsValues();
+        values.ExcludedProcessPaths.AddRange(source.ExcludedProcessPaths);
+        return values;
+    }
+
+    /// <summary>
+    /// Maps a wire Traffic Totals value message back to the domain snapshot.
+    /// </summary>
+    public static Core.TotalsExclusionSnapshot ToDomain(this Local.TotalsSettingsValues source) {
+        ArgumentNullException.ThrowIfNull(source);
+        return new Core.TotalsExclusionSnapshot([.. source.ExcludedProcessPaths]);
+    }
+
+    /// <summary>
     /// Maps a Hostname Resolution settings snapshot onto its wire value message.
     /// </summary>
     public static Local.HostnameResolutionSettingsValues ToProto(this Core.HostnameResolutionSettingsSnapshot source) {

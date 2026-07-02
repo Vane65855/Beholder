@@ -275,6 +275,7 @@ if (OperatingSystem.IsWindows()) {
     builder.Services.AddSingleton<IHostnameResolutionSettingsState, HostnameResolutionSettingsState>();
     builder.Services.AddSingleton<IAlertSettingsState, AlertSettingsState>();
     builder.Services.AddSingleton<IScannerSettingsState, ScannerSettingsState>();
+    builder.Services.AddSingleton<ITotalsExclusionState, TotalsExclusionState>();
     builder.Services.AddSingleton<ISettingsOverridesStore>(sp => new SqliteSettingsOverridesStore(
         sp.GetRequiredService<ConnectionFactory>(),
         sp.GetRequiredService<TimeProvider>()));

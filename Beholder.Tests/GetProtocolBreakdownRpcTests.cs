@@ -1,4 +1,4 @@
-﻿using Beholder.Daemon;
+using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
 using Beholder.Daemon.Storage;
@@ -50,6 +50,7 @@ public sealed class GetProtocolBreakdownRpcTests : IDisposable {
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
+            new TotalsExclusionState(),
             new FakeSettingsOverridesStore(),
             new FakeAppIdentityRuleStore(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);

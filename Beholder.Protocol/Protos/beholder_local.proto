@@ -491,6 +491,14 @@ message ScannerSettingsValues {
   bool enable_hostname_resolution = 1;
 }
 
+// Mirrors Beholder.Core.TotalsExclusionSnapshot. Shared across the get + set
+// surface for the Traffic Totals section ("Exclude from totals"). Excluded
+// processes stay recorded, alertable, and chain-audited; they are only
+// removed from all-processes aggregates. Matching is case-insensitive.
+message TotalsSettingsValues {
+  repeated string excluded_process_paths = 1;
+}
+
 message GetSettingsRequest {}
 
 // Bulk-read of every Settings section the UI renders. Future sub-phases
@@ -501,6 +509,7 @@ message GetSettingsResponse {
   HostnameResolutionSettingsValues hostname_resolution = 2;
   AlertSettingsValues alerts = 3;
   ScannerSettingsValues scanner = 4;
+  TotalsSettingsValues totals = 5;
 }
 
 message SetRecordingSettingsRequest {
@@ -546,6 +555,20 @@ message SetScannerSettingsResponse {
   bool success = 1;
   string message = 2;
   ScannerSettingsValues values = 3;
+}
+
+// Whole-list set for the Traffic Totals exclusion list — the client sends the
+// complete desired list (its add/remove UI recomputes it), the daemon
+// normalizes (trim, drop empties, dedupe case-insensitively) and applies it
+// atomically. One chain event per real change, carrying the full new list.
+message SetTotalsSettingsRequest {
+  TotalsSettingsValues values = 1;
+}
+
+message SetTotalsSettingsResponse {
+  bool success = 1;
+  string message = 2;
+  TotalsSettingsValues values = 3;
 }
 
 // ---- Application Identity Overrides (Phase 13.6) ----
@@ -682,6 +705,8 @@ service BeholderLocal {
   rpc SetAlertSettings(SetAlertSettingsRequest) returns (SetAlertSettingsResponse);
   // Phase 13.4 — Settings tab Scanner section
   rpc SetScannerSettings(SetScannerSettingsRequest) returns (SetScannerSettingsResponse);
+  // Traffic Totals — "Exclude from totals" exclusion list.
+  rpc SetTotalsSettings(SetTotalsSettingsRequest) returns (SetTotalsSettingsResponse);
   // Phase 13.6 — Settings tab Application Identity Overrides section (ADR 011)
   rpc AddAppIdentityRule(AddAppIdentityRuleRequest) returns (AddAppIdentityRuleResponse);
   rpc RemoveAppIdentityRule(RemoveAppIdentityRuleRequest) returns (RemoveAppIdentityRuleResponse);

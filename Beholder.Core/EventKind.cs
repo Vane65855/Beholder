@@ -93,4 +93,12 @@ public enum EventKind {
     /// <see cref="NewProcess"/> alerts again. Chain-audit kind only.
     /// </summary>
     AppIdentityRuleRemoved = 16,
+
+    /// <summary>
+    /// User changed the Settings tab's Traffic Totals exclusion list — the
+    /// processes excluded from aggregate traffic views ("Exclude from
+    /// totals"). The payload carries the full post-change list, so hiding a
+    /// process from totals is itself always auditable. Chain-audit kind only.
+    /// </summary>
+    TotalsExclusionsChanged = 17,
 }

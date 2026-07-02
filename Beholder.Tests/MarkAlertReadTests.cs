@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
@@ -53,6 +53,7 @@ public sealed class MarkAlertReadTests : IDisposable {
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
+            new TotalsExclusionState(),
             new FakeSettingsOverridesStore(),
             new FakeAppIdentityRuleStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);

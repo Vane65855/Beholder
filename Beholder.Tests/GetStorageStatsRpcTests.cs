@@ -1,4 +1,4 @@
-﻿using Beholder.Core;
+using Beholder.Core;
 using Beholder.Daemon;
 using Beholder.Daemon.Grpc;
 using Beholder.Daemon.Pipeline;
@@ -43,6 +43,7 @@ public sealed class GetStorageStatsRpcTests : IDisposable {
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
+            new TotalsExclusionState(),
             new FakeSettingsOverridesStore(),
             new FakeAppIdentityRuleStore(),
             _timeProvider, NullLogger<BeholderLocalService>.Instance);

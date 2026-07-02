@@ -21,6 +21,7 @@ public sealed class SettingsRpcTests : IDisposable {
     private readonly FakeHostnameResolutionSettingsState _hostnameState;
     private readonly FakeAlertSettingsState _alertState;
     private readonly FakeScannerSettingsState _scannerState;
+    private readonly TotalsExclusionState _totalsState;
     private readonly FakeSettingsOverridesStore _overridesStore;
     private readonly BroadcastService _broadcaster;
     private readonly BeholderLocalService _service;
@@ -37,6 +38,9 @@ public sealed class SettingsRpcTests : IDisposable {
         _hostnameState = new FakeHostnameResolutionSettingsState();
         _alertState = new FakeAlertSettingsState();
         _scannerState = new FakeScannerSettingsState();
+        // The real implementation — it is dependency-free (seeds empty), so a
+        // fake would add nothing.
+        _totalsState = new TotalsExclusionState();
         _overridesStore = new FakeSettingsOverridesStore();
         _broadcaster = new BroadcastService(
             new FakeSnapshotBatchSource(), timeProvider, NullLogger<BroadcastService>.Instance);
@@ -54,7 +58,7 @@ public sealed class SettingsRpcTests : IDisposable {
             _eventStore, new FakeTrafficStore(),
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeChainVerifier(), new FakeChainExporter(), new FakeStorageStatsProvider(),
-            _recordingState, _hostnameState, _alertState, _scannerState, _overridesStore, new FakeAppIdentityRuleStore(),
+            _recordingState, _hostnameState, _alertState, _scannerState, _totalsState, _overridesStore, new FakeAppIdentityRuleStore(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
     }
 
@@ -359,5 +363,92 @@ public sealed class SettingsRpcTests : IDisposable {
             () => _service.SetScannerSettings(new Local.SetScannerSettingsRequest(), context));
 
         Assert.Equal(StatusCode.InvalidArgument, ex.StatusCode);
+    }
+
+    // ---- Traffic Totals: "Exclude from totals" ----
+
+    private static Local.SetTotalsSettingsRequest TotalsRequest(params string[] paths) {
+        var values = new Local.TotalsSettingsValues();
+        values.ExcludedProcessPaths.AddRange(paths);
+        return new Local.SetTotalsSettingsRequest { Values = values };
+    }
+
+    [Fact]
+    public async Task GetSettings_IncludesTotalsBundle() {
+        _totalsState.SetExcludedPaths([@"C:\vpn\wireguard.exe"]);
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.GetSettings(new Local.GetSettingsRequest(), context);
+
+        Assert.NotNull(response.Totals);
+        Assert.Equal([@"C:\vpn\wireguard.exe"], response.Totals.ExcludedProcessPaths);
+    }
+
+    [Fact]
+    public async Task SetTotalsSettings_RealTransition_PersistsJsonArrayAndChainsOnce() {
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.SetTotalsSettings(
+            TotalsRequest(@"C:\vpn\wireguard.exe", @"C:\docker\backend.exe"), context);
+
+        Assert.True(response.Success);
+        Assert.Equal(
+            new[] { @"C:\vpn\wireguard.exe", @"C:\docker\backend.exe" },
+            response.Values.ExcludedProcessPaths);
+        Assert.True(_totalsState.IsExcluded(@"C:\VPN\WIREGUARD.EXE"));
+        Assert.Equal(1, _overridesStore.UpsertCallCount);
+        var persisted = await _overridesStore.GetAsync(
+            SettingsKeys.TrafficExcludedProcessPaths, CancellationToken.None);
+        Assert.Equal("""["C:\\vpn\\wireguard.exe","C:\\docker\\backend.exe"]""", persisted);
+        var verification = await _eventStore.VerifyAsync(CancellationToken.None);
+        Assert.Equal(1, verification.RowsVerified);
+    }
+
+    [Fact]
+    public async Task SetTotalsSettings_NormalizesWhitespaceEmptiesAndCaseDupes() {
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.SetTotalsSettings(
+            TotalsRequest(@"  C:\a.exe  ", "", "   ", @"C:\A.EXE", @"C:\b.exe"), context);
+
+        Assert.True(response.Success);
+        Assert.Equal(new[] { @"C:\a.exe", @"C:\b.exe" }, response.Values.ExcludedProcessPaths);
+    }
+
+    [Fact]
+    public async Task SetTotalsSettings_NoOp_SkipsPersistenceAndChain() {
+        _totalsState.SetExcludedPaths([@"C:\a.exe"]);
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.SetTotalsSettings(TotalsRequest(@"C:\A.EXE"), context);
+
+        Assert.True(response.Success);
+        Assert.Equal("Settings unchanged.", response.Message);
+        Assert.Equal(0, _overridesStore.UpsertCallCount);
+        var verification = await _eventStore.VerifyAsync(CancellationToken.None);
+        Assert.Equal(0, verification.RowsVerified);
+    }
+
+    [Fact]
+    public async Task SetTotalsSettings_NullValues_ThrowsInvalidArgument() {
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var ex = await Assert.ThrowsAsync<RpcException>(
+            () => _service.SetTotalsSettings(new Local.SetTotalsSettingsRequest(), context));
+
+        Assert.Equal(StatusCode.InvalidArgument, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task SetTotalsSettings_PersistenceFails_ReturnsSoftFailure() {
+        _overridesStore.ThrowOnUpsert = true;
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+
+        var response = await _service.SetTotalsSettings(TotalsRequest(@"C:\a.exe"), context);
+
+        // In-memory state was updated; persistence failed; soft-fail with message.
+        Assert.False(response.Success);
+        Assert.Contains("Failed to persist", response.Message);
+        Assert.True(_totalsState.IsExcluded(@"C:\a.exe"));
     }
 }

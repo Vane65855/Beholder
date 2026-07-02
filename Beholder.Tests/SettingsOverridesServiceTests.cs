@@ -1,4 +1,5 @@
 using Beholder.Core;
+using Beholder.Daemon;
 using Beholder.Daemon.Pipeline;
 using Beholder.Tests.TestDoubles;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -15,7 +16,7 @@ public class SettingsOverridesServiceTests {
             initialEnableReverseDnsFallback: true,
             initialEnableSniCapture: true);
         var service = new SettingsOverridesService(
-            store, recording, hostname, new FakeAlertSettingsState(), new FakeScannerSettingsState(), NullLogger<SettingsOverridesService>.Instance);
+            store, recording, hostname, new FakeAlertSettingsState(), new FakeScannerSettingsState(), new TotalsExclusionState(), NullLogger<SettingsOverridesService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
 
@@ -35,7 +36,7 @@ public class SettingsOverridesServiceTests {
         var recording = new FakeRecordingSettingsState(initialFilterSelfTraffic: true);
         var hostname = new FakeHostnameResolutionSettingsState();
         var service = new SettingsOverridesService(
-            store, recording, hostname, new FakeAlertSettingsState(), new FakeScannerSettingsState(), NullLogger<SettingsOverridesService>.Instance);
+            store, recording, hostname, new FakeAlertSettingsState(), new FakeScannerSettingsState(), new TotalsExclusionState(), NullLogger<SettingsOverridesService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
 
@@ -56,7 +57,7 @@ public class SettingsOverridesServiceTests {
             initialEnableReverseDnsFallback: true,
             initialEnableSniCapture: true);
         var service = new SettingsOverridesService(
-            store, recording, hostname, new FakeAlertSettingsState(), new FakeScannerSettingsState(), NullLogger<SettingsOverridesService>.Instance);
+            store, recording, hostname, new FakeAlertSettingsState(), new FakeScannerSettingsState(), new TotalsExclusionState(), NullLogger<SettingsOverridesService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
 
@@ -73,7 +74,7 @@ public class SettingsOverridesServiceTests {
         var recording = new FakeRecordingSettingsState(initialFilterSelfTraffic: true);
         var hostname = new FakeHostnameResolutionSettingsState();
         var service = new SettingsOverridesService(
-            store, recording, hostname, new FakeAlertSettingsState(), new FakeScannerSettingsState(), NullLogger<SettingsOverridesService>.Instance);
+            store, recording, hostname, new FakeAlertSettingsState(), new FakeScannerSettingsState(), new TotalsExclusionState(), NullLogger<SettingsOverridesService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
 
@@ -82,12 +83,43 @@ public class SettingsOverridesServiceTests {
     }
 
     [Fact]
+    public async Task StartAsync_PersistedExclusionList_AppliesToTotalsState() {
+        var store = new FakeSettingsOverridesStore();
+        store.Seed(SettingsKeys.TrafficExcludedProcessPaths, """["C:\\vpn\\wireguard.exe","C:\\b.exe"]""");
+        var totals = new TotalsExclusionState();
+        var service = new SettingsOverridesService(
+            store, new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeAlertSettingsState(), new FakeScannerSettingsState(), totals,
+            NullLogger<SettingsOverridesService>.Instance);
+
+        await service.StartAsync(CancellationToken.None);
+
+        Assert.Equal([@"C:\vpn\wireguard.exe", @"C:\b.exe"], totals.ExcludedProcessPaths);
+        Assert.True(totals.IsExcluded(@"c:\VPN\wireguard.exe"));
+    }
+
+    [Fact]
+    public async Task StartAsync_MalformedExclusionList_StaysEmpty() {
+        var store = new FakeSettingsOverridesStore();
+        store.Seed(SettingsKeys.TrafficExcludedProcessPaths, "{broken");
+        var totals = new TotalsExclusionState();
+        var service = new SettingsOverridesService(
+            store, new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
+            new FakeAlertSettingsState(), new FakeScannerSettingsState(), totals,
+            NullLogger<SettingsOverridesService>.Instance);
+
+        await service.StartAsync(CancellationToken.None);
+
+        Assert.Empty(totals.ExcludedProcessPaths);
+    }
+
+    [Fact]
     public async Task StartAsync_ListAllThrows_DoesNotPropagateException() {
         var store = new ThrowingOverridesStore();
         var recording = new FakeRecordingSettingsState();
         var hostname = new FakeHostnameResolutionSettingsState();
         var service = new SettingsOverridesService(
-            store, recording, hostname, new FakeAlertSettingsState(), new FakeScannerSettingsState(), NullLogger<SettingsOverridesService>.Instance);
+            store, recording, hostname, new FakeAlertSettingsState(), new FakeScannerSettingsState(), new TotalsExclusionState(), NullLogger<SettingsOverridesService>.Instance);
 
         // StartAsync must not throw — daemon startup proceeds with defaults.
         await service.StartAsync(CancellationToken.None);

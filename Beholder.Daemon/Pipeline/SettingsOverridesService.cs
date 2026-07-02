@@ -30,6 +30,7 @@ internal sealed class SettingsOverridesService : IHostedService {
     private readonly IHostnameResolutionSettingsState _hostnameResolutionState;
     private readonly IAlertSettingsState _alertState;
     private readonly IScannerSettingsState _scannerState;
+    private readonly ITotalsExclusionState _totalsExclusionState;
     private readonly ILogger<SettingsOverridesService> _logger;
 
     public SettingsOverridesService(
@@ -38,6 +39,7 @@ internal sealed class SettingsOverridesService : IHostedService {
         IHostnameResolutionSettingsState hostnameResolutionState,
         IAlertSettingsState alertState,
         IScannerSettingsState scannerState,
+        ITotalsExclusionState totalsExclusionState,
         ILogger<SettingsOverridesService> logger
     ) {
         ArgumentNullException.ThrowIfNull(store);
@@ -45,12 +47,14 @@ internal sealed class SettingsOverridesService : IHostedService {
         ArgumentNullException.ThrowIfNull(hostnameResolutionState);
         ArgumentNullException.ThrowIfNull(alertState);
         ArgumentNullException.ThrowIfNull(scannerState);
+        ArgumentNullException.ThrowIfNull(totalsExclusionState);
         ArgumentNullException.ThrowIfNull(logger);
         _store = store;
         _recordingState = recordingState;
         _hostnameResolutionState = hostnameResolutionState;
         _alertState = alertState;
         _scannerState = scannerState;
+        _totalsExclusionState = totalsExclusionState;
         _logger = logger;
     }
 
@@ -100,6 +104,12 @@ internal sealed class SettingsOverridesService : IHostedService {
             overrides, SettingsKeys.ScannerEnableHostnameResolution, _scannerState.EnableHostnameResolution);
         _scannerState.SetSettings(enableHostnameResolution);
 
+        // Apply the Traffic Totals exclusion list (a JSON string array, not a
+        // bool like the sections above).
+        var excludedPaths = ReadStringListOverride(
+            overrides, SettingsKeys.TrafficExcludedProcessPaths, _totalsExclusionState.ExcludedProcessPaths);
+        _totalsExclusionState.SetExcludedPaths(excludedPaths);
+
         _logger.LogInformation(
             "Applied {Count} settings overrides at startup", overrides.Count);
     }
@@ -117,6 +127,25 @@ internal sealed class SettingsOverridesService : IHostedService {
             _logger.LogWarning(ex,
                 "Settings override {Key} has malformed JSON ({ValueJson}); falling back to default {Default}",
                 key, valueJson, defaultValue);
+            return defaultValue;
+        }
+    }
+
+    private IReadOnlyList<string> ReadStringListOverride(
+        IReadOnlyDictionary<string, string> overrides, string key, IReadOnlyList<string> defaultValue
+    ) {
+        if (!overrides.TryGetValue(key, out var valueJson)) return defaultValue;
+        try {
+            var parsed = JsonSerializer.Deserialize<List<string>>(valueJson);
+            if (parsed is null) return defaultValue;
+            // Null entries can only come from hand-edited JSON; drop them
+            // rather than letting a null poison downstream set lookups.
+            parsed.RemoveAll(string.IsNullOrWhiteSpace);
+            return parsed;
+        } catch (JsonException ex) {
+            _logger.LogWarning(ex,
+                "Settings override {Key} has malformed JSON ({ValueJson}); falling back to default",
+                key, valueJson);
             return defaultValue;
         }
     }
