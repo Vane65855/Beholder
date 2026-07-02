@@ -168,13 +168,26 @@ public class TrafficEngineTests {
     }
 
     [Fact]
-    public async Task EmptyTick_ProducesNoBatch() {
+    public async Task EmptyTick_ProducesEmptyHeartbeatBatch() {
         await using var fixture = Fixture.Start();
 
-        fixture.FakeTime.Advance(FlushInterval);
-        await Task.Delay(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken);
+        // No flow events are written, so nothing wakes the engine loop until
+        // an Advance lands after its delay timer is registered — advance and
+        // poll rather than using DriveTickAsync's signal handshake.
+        var deadline = DateTime.UtcNow + TestTimeout;
+        while (true) {
+            lock (fixture.ReceivedBatches) {
+                if (fixture.ReceivedBatches.Count > 0) break;
+            }
+            Assert.True(DateTime.UtcNow < deadline,
+                "Timed out waiting for the idle-tick heartbeat batch.");
+            fixture.FakeTime.Advance(FlushInterval);
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
 
-        Assert.Empty(fixture.ReceivedBatches);
+        lock (fixture.ReceivedBatches) {
+            Assert.All(fixture.ReceivedBatches, batch => Assert.Empty(batch));
+        }
     }
 
     [Fact]
@@ -486,13 +499,20 @@ public class TrafficEngineTests {
                 _pendingBatchTcs = batchTcs;
             }
 
+            // Install the wait signal BEFORE writing events. Writes wake the
+            // engine loop, and if it drained and re-parked before a
+            // late-installed signal existed, nothing would ever fire it —
+            // the pre-signal park is fine because the loop re-parks (firing
+            // the signal) after draining, and an Advance racing the drain
+            // just makes the next park's delay elapse immediately.
+            var waitSignal = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            Engine.SetWaitSignal(waitSignal);
+
             foreach (var flowEvent in events) {
                 Assert.True(_channel.Writer.TryWrite(flowEvent));
             }
 
-            var waitSignal = new TaskCompletionSource(
-                TaskCreationOptions.RunContinuationsAsynchronously);
-            Engine.SetWaitSignal(waitSignal);
             await waitSignal.Task.WaitAsync(TestTimeout);
 
             var settleSignal = new TaskCompletionSource(

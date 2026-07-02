@@ -68,8 +68,11 @@ internal sealed class TrafficEngine {
     }
 
     /// <summary>
-    /// Fires once per tick with the batch of snapshots for processes that had activity
-    /// during the tick. Not fired when the tick would produce an empty batch.
+    /// Fires once per tick with the batch of snapshots for processes that had
+    /// activity during the tick. Fires even when the batch is empty: the
+    /// empty batch is the UI's per-second clock — subscribers advance their
+    /// sample buffers on every tick so the live chart's time axis stays 1:1
+    /// with wall-clock seconds (see ADR 017).
     /// </summary>
     public event Action<IReadOnlyList<CounterSnapshot>>? OnSnapshotBatch;
 
@@ -200,7 +203,7 @@ internal sealed class TrafficEngine {
     private async Task FlushTickAndRawAsync(DateTimeOffset timestamp, CancellationToken cancellationToken) {
         List<TrafficBucket>? rawBuckets = null;
         List<(string Address, string Hostname)>? dnsEntries = null;
-        IReadOnlyList<CounterSnapshot>? snapshots;
+        IReadOnlyList<CounterSnapshot> snapshots;
 
         await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try {
@@ -245,7 +248,7 @@ internal sealed class TrafficEngine {
             _lock.Release();
         }
 
-        if (snapshots is not null) OnSnapshotBatch?.Invoke(snapshots);
+        OnSnapshotBatch?.Invoke(snapshots);
 
         if (rawBuckets is not null) {
             await _trafficStore.WriteRawBucketsAsync(rawBuckets, cancellationToken).ConfigureAwait(false);
@@ -257,7 +260,7 @@ internal sealed class TrafficEngine {
         }
     }
 
-    private List<CounterSnapshot>? BuildSnapshotsForActiveProcesses(DateTimeOffset timestamp) {
+    private IReadOnlyList<CounterSnapshot> BuildSnapshotsForActiveProcesses(DateTimeOffset timestamp) {
         // Group destinations by process, summing tick deltas
         var processDeltas = new Dictionary<string, (
             long DeltaIn, long DeltaOut,
@@ -283,7 +286,7 @@ internal sealed class TrafficEngine {
             processDeltas[dest.ProcessPath] = pd;
         }
 
-        if (processDeltas.Count == 0) return null;
+        if (processDeltas.Count == 0) return Array.Empty<CounterSnapshot>();
 
         var batch = new List<CounterSnapshot>(processDeltas.Count);
         foreach (var (processPath, pd) in processDeltas) {

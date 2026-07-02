@@ -63,6 +63,37 @@ public class BroadcastServiceTests {
     }
 
     [Fact]
+    public async Task SubscribeAsync_EmptyHeartbeatBatch_ReachesSubscriberWithTickTimestamp() {
+        // Idle-tick heartbeat (ADR 017): an empty snapshot list still fans out
+        // as a CounterBatch so UI clients can advance their per-second sample
+        // buffers — the batch's tick timestamp is the clock signal.
+        var ct = TestContext.Current.CancellationToken;
+        var source = new FakeSnapshotBatchSource();
+        var broadcaster = new BroadcastService(
+            source,
+            new FakeTimeProvider(FixedTimestamp),
+            NullLogger<BroadcastService>.Instance);
+        await broadcaster.StartAsync(ct);
+
+        await using var enumerator = broadcaster.SubscribeAsync(TestContext.Current.CancellationToken).GetAsyncEnumerator(TestContext.Current.CancellationToken);
+        var move = enumerator.MoveNextAsync().AsTask();
+        await WaitForAsync(() => broadcaster.ActiveSubscriberCount == 1, "subscriber registered", ct);
+
+        source.Fire(Array.Empty<CounterSnapshot>());
+
+        Assert.True(await move.WaitAsync(WaitTimeout, ct));
+        var daemonEvent = enumerator.Current;
+        Assert.Equal(Local.DaemonEvent.PayloadOneofCase.CounterBatch, daemonEvent.PayloadCase);
+        Assert.Empty(daemonEvent.CounterBatch.Snapshots);
+        Assert.Equal(
+            FixedTimestamp.ToUnixTimeMilliseconds() * 1_000_000,
+            daemonEvent.CounterBatch.TickTimestampUnixNs);
+
+        await broadcaster.StopAsync(ct);
+        broadcaster.Dispose();
+    }
+
+    [Fact]
     public async Task SubscribeAsync_MultipleSubscribers_AllReceiveBatch() {
         var ct = TestContext.Current.CancellationToken;
         var source = new FakeSnapshotBatchSource();

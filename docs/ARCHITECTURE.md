@@ -77,7 +77,10 @@ OS kernel event (ETW / netlink)
             → Two output cadences from the same event stream:
               1. Every 1 second:  Aggregate destinations by process →
                  build CounterSnapshot per process → fire OnSnapshotBatch →
-                 BroadcastService → IPC subscribers (UI clients)
+                 BroadcastService → IPC subscribers (UI clients).
+                 Fires EVERY tick, even when no process moved a byte — the
+                 empty batch is the UI's per-second clock, keeping live
+                 sample buffers 1:1 with wall-clock seconds (ADR 017).
               2. Every 10 seconds: Build TrafficBucket per destination with
                  bucket bytes > 0 → join hostname via IDnsCache.Resolve() →
                  ITrafficStore.WriteBucketsAsync() + IDnsCacheStore.UpsertBatchAsync()
