@@ -319,6 +319,13 @@ internal sealed class DaemonClient : IDaemonClient {
         return await client.SetScannerSettingsAsync(request, cancellationToken: cancellationToken);
     }
 
+    public async Task<SetTotalsSettingsResponse> SetTotalsSettingsAsync(
+        SetTotalsSettingsRequest request, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(request);
+        var client = GetConnectedClient();
+        return await client.SetTotalsSettingsAsync(request, cancellationToken: cancellationToken);
+    }
+
     public async Task<AddAppIdentityRuleResponse> AddAppIdentityRuleAsync(
         AddAppIdentityRuleRequest request, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(request);

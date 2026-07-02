@@ -56,7 +56,7 @@
             <DockPanel>
                 <!-- Header row — columns mirror the item template for alignment -->
                 <Grid DockPanel.Dock="Top"
-                      ColumnDefinitions="14,*,Auto,Auto"
+                      ColumnDefinitions="14,*,Auto,Auto,Auto"
                       Margin="12,10,12,6">
                     <TextBlock Grid.Column="1"
                                Text="PROCESS"
@@ -64,13 +64,13 @@
                                LetterSpacing="1"
                                Foreground="{DynamicResource TextMuted}"
                                Margin="6,0,8,0" />
-                    <TextBlock Grid.Column="2"
+                    <TextBlock Grid.Column="3"
                                Text="IN"
                                FontSize="{DynamicResource FontSizeCaption}"
                                LetterSpacing="1"
                                Foreground="{DynamicResource TextMuted}"
                                Margin="0,0,8,0" />
-                    <TextBlock Grid.Column="3"
+                    <TextBlock Grid.Column="4"
                                Text="OUT"
                                FontSize="{DynamicResource FontSizeCaption}"
                                LetterSpacing="1"
@@ -108,7 +108,7 @@
                     </ListBox.Styles>
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="models:ProcessListItem">
-                            <Grid ColumnDefinitions="14,*,Auto,Auto" Height="24">
+                            <Grid ColumnDefinitions="14,*,Auto,Auto,Auto" Height="24">
                                 <!-- Colored series dot -->
                                 <Ellipse Grid.Column="0"
                                          Width="8" Height="8"
@@ -124,10 +124,22 @@
                                            TextTrimming="CharacterEllipsis"
                                            Margin="6,0,8,0" />
 
+                                <!-- "Excluded from totals" marker — rendered only
+                                     when the show-excluded preference lists the
+                                     row at all. -->
+                                <TextBlock Grid.Column="2"
+                                           Text="⊘"
+                                           IsVisible="{Binding IsExcludedFromTotals}"
+                                           FontSize="{DynamicResource FontSizeSubheading}"
+                                           Foreground="{DynamicResource TextMuted}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0"
+                                           ToolTip.Tip="Excluded from totals — not counted in All-processes views. Manage in Settings → Traffic Totals." />
+
                                 <!-- IN: teal arrow + recent-window bytes in.
                                      ChartOutboundStroke token is semantically the
                                      download/teal color (name is legacy — see DarkTheme.axaml). -->
-                                <StackPanel Grid.Column="2"
+                                <StackPanel Grid.Column="3"
                                             Orientation="Horizontal"
                                             VerticalAlignment="Center"
                                             Margin="0,0,8,0">
@@ -142,7 +154,7 @@
                                 <!-- OUT: purple arrow + recent-window bytes out.
                                      ChartInboundStroke token is semantically the
                                      upload/purple color (name is legacy). -->
-                                <StackPanel Grid.Column="3"
+                                <StackPanel Grid.Column="4"
                                             Orientation="Horizontal"
                                             VerticalAlignment="Center">
                                     <TextBlock Text="▲ "

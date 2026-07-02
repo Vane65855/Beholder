@@ -74,7 +74,8 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         IFilePicker filePicker,
         IFileWriter fileWriter,
         IUiPreferencesStore uiPreferencesStore,
-        BuildVersion buildVersion) {
+        BuildVersion buildVersion,
+        TotalsExclusionUiState totalsExclusions) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(streamSubscriber);
@@ -88,9 +89,11 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         ArgumentNullException.ThrowIfNull(fileWriter);
         ArgumentNullException.ThrowIfNull(uiPreferencesStore);
         ArgumentNullException.ThrowIfNull(buildVersion);
+        ArgumentNullException.ThrowIfNull(totalsExclusions);
         _daemonClient = daemonClient;
         _dispatcher = dispatcher;
-        _trafficTab = new TrafficTabViewModel(daemonClient, processStateService, historicalChartLoader, dispatcher);
+        _trafficTab = new TrafficTabViewModel(
+            daemonClient, processStateService, historicalChartLoader, dispatcher, totalsExclusions);
         _firewallTab = new FirewallTabViewModel(daemonClient, processStateService, streamSubscriber, dispatcher);
         // Pass NavigateToFirewallRule as the AlertsTabViewModel's deep-link
         // delegate so its ADD RULE button can switch tabs + highlight the
@@ -110,7 +113,7 @@ internal partial class MainWindowViewModel : ViewModelBase, INavigationService, 
         // filename).
         _settingsTab = new SettingsTabViewModel(
             daemonClient, dispatcher, shellOpener, clipboardWriter, filePicker, fileWriter,
-            uiPreferencesStore, TimeProvider.System);
+            uiPreferencesStore, TimeProvider.System, totalsExclusions);
         StatusStripVm = statusStripVm;
         VersionLabel = $"v{buildVersion.DisplayVersion}";
         ActiveTabContent = _trafficTab;

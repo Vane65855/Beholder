@@ -20,7 +20,8 @@ public class SettingsTabViewModelTests {
         var time = new FakeTimeProvider(FixedTimestamp);
         var vm = new SettingsTabViewModel(
             client, new SyncDispatcher(), shell, clipboard,
-            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), time);
+            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), time,
+            new TotalsExclusionUiState());
         return (vm, client, shell, clipboard, time);
     }
 
@@ -67,56 +68,58 @@ public class SettingsTabViewModelTests {
     public void Constructor_NullDaemonClient_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             null!, new SyncDispatcher(), new FakeShellOpener(), new FakeClipboardWriter(),
-            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp), new TotalsExclusionUiState()));
 
     [Fact]
     public void Constructor_NullDispatcher_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), null!, new FakeShellOpener(), new FakeClipboardWriter(),
-            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp), new TotalsExclusionUiState()));
 
     [Fact]
     public void Constructor_NullShellOpener_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), null!, new FakeClipboardWriter(),
-            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp), new TotalsExclusionUiState()));
 
     [Fact]
     public void Constructor_NullClipboardWriter_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(), null!,
-            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp), new TotalsExclusionUiState()));
 
     [Fact]
     public void Constructor_NullFilePicker_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
-            new FakeClipboardWriter(), null!, new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeClipboardWriter(), null!, new FakeFileWriter(), new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp), new TotalsExclusionUiState()));
 
     [Fact]
     public void Constructor_NullFileWriter_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
-            new FakeClipboardWriter(), new FakeFilePicker(), null!, new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp)));
+            new FakeClipboardWriter(), new FakeFilePicker(), null!, new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp), new TotalsExclusionUiState()));
 
     [Fact]
     public void Constructor_NullUiPreferencesStore_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
-            new FakeClipboardWriter(), new FakeFilePicker(), new FakeFileWriter(), null!, new FakeTimeProvider(FixedTimestamp)));
+            new FakeClipboardWriter(), new FakeFilePicker(), new FakeFileWriter(), null!, new FakeTimeProvider(FixedTimestamp), new TotalsExclusionUiState()));
 
     [Fact]
     public void Constructor_NullTimeProvider_Throws() =>
         Assert.Throws<ArgumentNullException>(() => new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(),
-            new FakeClipboardWriter(), new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), null!));
+            new FakeClipboardWriter(), new FakeFilePicker(), new FakeFileWriter(), new FakeUiPreferencesStore(), null!,
+            new TotalsExclusionUiState()));
 
     [Fact]
     public void ToggleCloseToTray_FlipsAndPersistsToTheStore() {
         var store = new FakeUiPreferencesStore();   // defaults CloseToTray = true
         var vm = new SettingsTabViewModel(
             new FakeDaemonClient(), new SyncDispatcher(), new FakeShellOpener(), new FakeClipboardWriter(),
-            new FakeFilePicker(), new FakeFileWriter(), store, new FakeTimeProvider(FixedTimestamp));
+            new FakeFilePicker(), new FakeFileWriter(), store, new FakeTimeProvider(FixedTimestamp),
+            new TotalsExclusionUiState());
 
         Assert.True(vm.Application.CloseToTray);    // seeded from the store on construction
 
@@ -485,7 +488,8 @@ public class SettingsTabViewModelTests {
         var writer = new FakeFileWriter();
         var vm = new SettingsTabViewModel(
             client, new SyncDispatcher(), new FakeShellOpener(), new FakeClipboardWriter(),
-            picker, writer, new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp));
+            picker, writer, new FakeUiPreferencesStore(), new FakeTimeProvider(FixedTimestamp),
+            new TotalsExclusionUiState());
         return (vm, client, picker, writer);
     }
 
@@ -716,6 +720,114 @@ public class SettingsTabViewModelTests {
         var start = new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero);
         var now = start - TimeSpan.FromMinutes(5);
         Assert.Equal("0s", SettingsTabViewModel.FormatUptime(start, now));
+    }
+
+    // ---- Traffic Totals: "Exclude from totals" ----
+
+    private static (SettingsTabViewModel Vm, FakeDaemonClient Client, FakeFilePicker Picker,
+        FakeUiPreferencesStore Prefs, TotalsExclusionUiState Exclusions) CreateTotalsVm() {
+        var client = new FakeDaemonClient();
+        var picker = new FakeFilePicker();
+        var prefs = new FakeUiPreferencesStore();
+        var exclusions = new TotalsExclusionUiState();
+        var vm = new SettingsTabViewModel(
+            client, new SyncDispatcher(), new FakeShellOpener(), new FakeClipboardWriter(),
+            picker, new FakeFileWriter(), prefs, new FakeTimeProvider(FixedTimestamp), exclusions);
+        return (vm, client, picker, prefs, exclusions);
+    }
+
+    [Fact]
+    public async Task AddTotalsExclusion_PickedFile_SendsWholeListAndAppliesEcho() {
+        var (vm, client, picker, _, exclusions) = CreateTotalsVm();
+        picker.PickedPath = @"C:\vpn\wireguard.exe";
+
+        await vm.AddTotalsExclusionCommand.ExecuteAsync(null);
+
+        var call = Assert.Single(client.SetTotalsSettingsCalls);
+        Assert.Equal([@"C:\vpn\wireguard.exe"], call.Values.ExcludedProcessPaths);
+        Assert.Equal([@"C:\vpn\wireguard.exe"], vm.Totals.ExcludedPaths);
+        Assert.True(exclusions.IsExcluded(@"C:\vpn\wireguard.exe"));
+        Assert.False(vm.Totals.IsSaving);
+    }
+
+    [Fact]
+    public async Task AddTotalsExclusion_UserCancels_NoRpc() {
+        var (vm, client, picker, _, _) = CreateTotalsVm();
+        picker.PickedPath = null;
+
+        await vm.AddTotalsExclusionCommand.ExecuteAsync(null);
+
+        Assert.Empty(client.SetTotalsSettingsCalls);
+    }
+
+    [Fact]
+    public async Task AddTotalsExclusion_AlreadyExcluded_NoRpc() {
+        var (vm, client, picker, _, _) = CreateTotalsVm();
+        vm.Totals.ExcludedPaths.Add(@"C:\vpn\wireguard.exe");
+        picker.PickedPath = @"C:\VPN\WIREGUARD.EXE";
+
+        await vm.AddTotalsExclusionCommand.ExecuteAsync(null);
+
+        Assert.Empty(client.SetTotalsSettingsCalls);
+    }
+
+    [Fact]
+    public async Task RemoveTotalsExclusion_SendsListWithoutPath() {
+        var (vm, client, _, _, exclusions) = CreateTotalsVm();
+        vm.Totals.ExcludedPaths.Add(@"C:\vpn\wireguard.exe");
+        vm.Totals.ExcludedPaths.Add(@"C:\docker\backend.exe");
+
+        await vm.RemoveTotalsExclusionCommand.ExecuteAsync(@"C:\vpn\wireguard.exe");
+
+        var call = Assert.Single(client.SetTotalsSettingsCalls);
+        Assert.Equal([@"C:\docker\backend.exe"], call.Values.ExcludedProcessPaths);
+        Assert.Equal([@"C:\docker\backend.exe"], vm.Totals.ExcludedPaths);
+        Assert.False(exclusions.IsExcluded(@"C:\vpn\wireguard.exe"));
+    }
+
+    [Fact]
+    public async Task SaveTotalsExclusions_SoftFailure_SurfacesErrorAndKeepsRowList() {
+        var (vm, client, picker, _, _) = CreateTotalsVm();
+        picker.PickedPath = @"C:\vpn\wireguard.exe";
+        client.SetTotalsSettingsResponder = _ => new SetTotalsSettingsResponse {
+            Success = false,
+            Message = "persistence failed",
+        };
+
+        await vm.AddTotalsExclusionCommand.ExecuteAsync(null);
+
+        Assert.True(vm.HasError);
+        Assert.Contains("persistence failed", vm.ErrorMessage);
+        Assert.Empty(vm.Totals.ExcludedPaths);   // echo not applied on failure
+    }
+
+    [Fact]
+    public void ToggleShowExcludedProcesses_FlipsRowPrefsAndSharedState() {
+        var (vm, _, _, prefs, exclusions) = CreateTotalsVm();
+        Assert.False(vm.Totals.ShowExcluded);
+
+        vm.ToggleShowExcludedProcessesCommand.Execute(null);
+
+        Assert.True(vm.Totals.ShowExcluded);
+        Assert.True(prefs.Load().ShowExcludedProcesses);
+        Assert.True(exclusions.ShowExcluded);
+    }
+
+    [Fact]
+    public async Task ApplySettings_TotalsBundle_SyncsRowAndSharedState() {
+        var (vm, client, _, _, exclusions) = CreateTotalsVm();
+        var totals = new TotalsSettingsValues();
+        totals.ExcludedProcessPaths.Add(@"C:\vpn\wireguard.exe");
+        client.GetSettingsResponder = _ => new GetSettingsResponse { Totals = totals };
+        client.GetStorageStatsResponder = _ => new GetStorageStatsResponse {
+            DatabasePath = "/tmp/test.db",
+            DatabaseBytesTotal = 1024,
+        };
+
+        await vm.ActivateAsync(CancellationToken.None);
+
+        Assert.Equal([@"C:\vpn\wireguard.exe"], vm.Totals.ExcludedPaths);
+        Assert.True(exclusions.IsExcluded(@"C:\vpn\wireguard.exe"));
     }
 
     // ---- Dispose ----

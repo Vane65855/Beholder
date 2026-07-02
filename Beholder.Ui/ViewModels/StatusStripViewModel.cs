@@ -13,6 +13,7 @@ internal sealed partial class StatusStripViewModel : ViewModelBase, IDisposable 
 
     private readonly ProcessStateService _processStateService;
     private readonly IDispatcher _dispatcher;
+    private readonly TotalsExclusionUiState _totalsExclusions;
 
     [ObservableProperty]
     private string _outboundTotalLabel = "0 B";
@@ -41,12 +42,15 @@ internal sealed partial class StatusStripViewModel : ViewModelBase, IDisposable 
     public double InboundRatio => 1.0 - OutboundRatio;
 
     public StatusStripViewModel(
-        ProcessStateService processStateService, IDispatcher dispatcher, BuildVersion buildVersion) {
+        ProcessStateService processStateService, IDispatcher dispatcher, BuildVersion buildVersion,
+        TotalsExclusionUiState totalsExclusions) {
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(buildVersion);
+        ArgumentNullException.ThrowIfNull(totalsExclusions);
         _processStateService = processStateService;
         _dispatcher = dispatcher;
+        _totalsExclusions = totalsExclusions;
         _deviceIdLabel = buildVersion.DeviceLabel;
         _processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
     }
@@ -64,6 +68,9 @@ internal sealed partial class StatusStripViewModel : ViewModelBase, IDisposable 
         long totalDeltaIn = 0, totalDeltaOut = 0;
 
         foreach (var state in states.Values) {
+            // "Exclude from totals": skipped from every strip figure. The
+            // per-process data still exists — this is a display aggregation.
+            if (_totalsExclusions.IsExcluded(state.ProcessPath)) continue;
             totalIn += state.TotalBytesIn;
             totalOut += state.TotalBytesOut;
             totalDeltaIn += state.DeltaBytesIn;

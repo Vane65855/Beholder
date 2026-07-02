@@ -26,6 +26,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     private readonly IDaemonClient _daemonClient;
     private readonly ProcessStateService _processStateService;
     private readonly IDispatcher _dispatcher;
+    private readonly TotalsExclusionUiState _totalsExclusions;
     private readonly ProcessListCoordinator _processList;
     private readonly HistoricalQueryOrchestrator _historicalQueries;
     private TrafficColsViewModel? _colsVm;
@@ -253,26 +254,31 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
         IDaemonClient daemonClient,
         ProcessStateService processStateService,
         HistoricalChartLoader historicalChartLoader,
-        IDispatcher dispatcher) {
+        IDispatcher dispatcher,
+        TotalsExclusionUiState totalsExclusions) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(processStateService);
         ArgumentNullException.ThrowIfNull(historicalChartLoader);
         ArgumentNullException.ThrowIfNull(dispatcher);
+        ArgumentNullException.ThrowIfNull(totalsExclusions);
         _daemonClient = daemonClient;
         _processStateService = processStateService;
         _dispatcher = dispatcher;
-        _processList = new ProcessListCoordinator();
+        _totalsExclusions = totalsExclusions;
+        _processList = new ProcessListCoordinator(totalsExclusions);
         _historicalQueries = new HistoricalQueryOrchestrator(historicalChartLoader);
 
         SelectedProcess = _processList.AllProcessesItem;
 
         _processStateService.ProcessStatesUpdated += OnProcessStatesUpdated;
         _daemonClient.StateChanged += OnDaemonStateChanged;
+        _totalsExclusions.Changed += OnTotalsExclusionsChanged;
     }
 
     public void Dispose() {
         _processStateService.ProcessStatesUpdated -= OnProcessStatesUpdated;
         _daemonClient.StateChanged -= OnDaemonStateChanged;
+        _totalsExclusions.Changed -= OnTotalsExclusionsChanged;
         _historicalQueries.Dispose();
         _colsVm?.Dispose();
         _mapCts?.Cancel();
@@ -445,6 +451,28 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             // owns the UI state.
             return Task.CompletedTask;
         }
+    }
+
+    /// <summary>
+    /// The exclusion list or the show-excluded preference changed (Settings
+    /// tab edit, or the connect-time seed). Re-render every view that
+    /// aggregates or lists processes: live views rebuild from the last known
+    /// states; historical mode re-queries so the daemon-side exclusion takes
+    /// effect; an active chart selection is cleared (its destinations were
+    /// fetched under the old list). May fire off the UI thread — marshal.
+    /// </summary>
+    private void OnTotalsExclusionsChanged() {
+        _dispatcher.Post(() => {
+            ChartSelection = null;
+            _topDestCache.Clear();
+            if (SelectedTimeRange.IsLive) {
+                if (_lastStates is not null) UpdateFromStates(_lastStates);
+            } else {
+                _ = LoadHistoricalRangeAsync(SelectedTimeRange);
+            }
+            if (ViewMode == TrafficViewMode.Cols) _ = RefreshColsAsync();
+            if (ViewMode == TrafficViewMode.Map) _ = RefreshMapAsync();
+        });
     }
 
     private void OnDaemonStateChanged(DaemonStatusInfo status) {
@@ -944,9 +972,10 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             destination[i] = source[i];
     }
 
-    private static int ComputeMaxLength(IReadOnlyDictionary<string, ProcessState> states) {
+    private int ComputeMaxLength(IReadOnlyDictionary<string, ProcessState> states) {
         var max = 0;
         foreach (var s in states.Values) {
+            if (_totalsExclusions.IsExcluded(s.ProcessPath)) continue;
             if (s.RecentDeltaIn.Count > max) max = s.RecentDeltaIn.Count;
             if (s.RecentDeltaOut.Count > max) max = s.RecentDeltaOut.Count;
         }
@@ -959,11 +988,14 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     /// Buffers must be pre-cleared and of length <paramref name="length"/>;
     /// right-aligns each process's samples so processes with shorter histories
     /// contribute zeros at the front of the window rather than being stretched.
+    /// Totals-excluded processes are skipped — the "All processes" chart shows
+    /// the same population as the totals it accompanies.
     /// </summary>
-    private static void AggregateAllInto(
+    private void AggregateAllInto(
         IReadOnlyDictionary<string, ProcessState> states,
         long[] download, long[] upload, int length) {
         foreach (var s in states.Values) {
+            if (_totalsExclusions.IsExcluded(s.ProcessPath)) continue;
             var inBuf = s.RecentDeltaIn;
             var outBuf = s.RecentDeltaOut;
             var inOffset = length - inBuf.Count;

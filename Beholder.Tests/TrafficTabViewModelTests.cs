@@ -19,7 +19,7 @@ public class TrafficTabViewModelTests {
             NullLogger<DaemonStreamSubscriber>.Instance);
         var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
         var loader = new HistoricalChartLoader(fakeClient);
-        return new TrafficTabViewModel(fakeClient, service, loader, new SyncDispatcher());
+        return new TrafficTabViewModel(fakeClient, service, loader, new SyncDispatcher(), new TotalsExclusionUiState());
     }
 
     private static ProcessState MakeState(
@@ -348,7 +348,7 @@ public class TrafficTabViewModelTests {
             NullLogger<DaemonStreamSubscriber>.Instance);
         var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
         var loader = new HistoricalChartLoader(fakeClient);
-        var vm = new TrafficTabViewModel(fakeClient, service, loader, new SyncDispatcher());
+        var vm = new TrafficTabViewModel(fakeClient, service, loader, new SyncDispatcher(), new TotalsExclusionUiState());
         return (vm, fakeClient);
     }
 
@@ -849,6 +849,56 @@ public class TrafficTabViewModelTests {
         vm.ChartSelection = new ChartSelectionRange(0.1, 0.4);
 
         Assert.Equal("All processes", vm.SelectionAppLabel);
+    }
+
+    // ---- Totals exclusions ("Exclude from totals") ----
+
+    [Fact]
+    public void UpdateFromStates_TotalsExcludedProcess_SkippedFromAllChart() {
+        var fakeClient = new FakeDaemonClient();
+        var subscriber = new DaemonStreamSubscriber(
+            fakeClient, TimeProvider.System, NullLogger<DaemonStreamSubscriber>.Instance);
+        var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
+        var loader = new HistoricalChartLoader(fakeClient);
+        var exclusions = new TotalsExclusionUiState();
+        exclusions.SetExcludedPaths(["vpn.exe"]);
+        var vm = new TrafficTabViewModel(
+            fakeClient, service, loader, new SyncDispatcher(), exclusions);
+        var states = new Dictionary<string, ProcessState> {
+            ["vpn.exe"] = MakeState("vpn.exe", "vpn", [1000, 2000, 3000], [900, 800, 700]),
+            ["a.exe"] = MakeState("a.exe", "a", [10, 20, 30], [1, 2, 3]),
+        };
+
+        vm.UpdateFromStates(states);
+
+        // The "All processes" chart shows only a.exe's samples.
+        Assert.Equal(new long[] { 10, 20, 30 }, vm.ChartData![0].Values);
+        Assert.Equal(new long[] { 1, 2, 3 }, vm.ChartData[1].Values);
+    }
+
+    [Fact]
+    public void ExclusionsChanged_LiveMode_RerendersFromLastStates() {
+        var fakeClient = new FakeDaemonClient();
+        var subscriber = new DaemonStreamSubscriber(
+            fakeClient, TimeProvider.System, NullLogger<DaemonStreamSubscriber>.Instance);
+        var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
+        var loader = new HistoricalChartLoader(fakeClient);
+        var exclusions = new TotalsExclusionUiState();
+        var vm = new TrafficTabViewModel(
+            fakeClient, service, loader, new SyncDispatcher(), exclusions);
+        var states = new Dictionary<string, ProcessState> {
+            ["vpn.exe"] = MakeState("vpn.exe", "vpn", [1000], [900]),
+            ["a.exe"] = MakeState("a.exe", "a", [10], [1]),
+        };
+        vm.UpdateFromStates(states);
+        Assert.Equal(new long[] { 1010 }, vm.ChartData![0].Values);
+
+        // Excluding the VPN mid-session immediately re-renders the live
+        // chart and process list from the last known states.
+        exclusions.SetExcludedPaths(["vpn.exe"]);
+
+        Assert.Equal(new long[] { 10 }, vm.ChartData![0].Values);
+        Assert.DoesNotContain(vm.ProcessList, p => p.ProcessPath == "vpn.exe");
     }
 
     [Fact]

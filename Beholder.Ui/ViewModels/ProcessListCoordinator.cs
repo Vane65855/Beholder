@@ -25,6 +25,7 @@ namespace Beholder.Ui.ViewModels;
 internal sealed class ProcessListCoordinator {
     private readonly Dictionary<string, ProcessListItem> _lookup =
         new(StringComparer.Ordinal);
+    private readonly TotalsExclusionUiState _totalsExclusions;
 
     /// <summary>
     /// Observable process list, bound to the sidebar ListBox.
@@ -39,7 +40,9 @@ internal sealed class ProcessListCoordinator {
     /// </summary>
     public ProcessListItem AllProcessesItem { get; }
 
-    public ProcessListCoordinator() {
+    public ProcessListCoordinator(TotalsExclusionUiState totalsExclusions) {
+        ArgumentNullException.ThrowIfNull(totalsExclusions);
+        _totalsExclusions = totalsExclusions;
         AllProcessesItem = new ProcessListItem(string.Empty, "All processes", isAll: true);
         List.Add(AllProcessesItem);
     }
@@ -56,7 +59,7 @@ internal sealed class ProcessListCoordinator {
         long allRecentIn = 0;
         long allRecentOut = 0;
         foreach (var kvp in states) {
-            if (IsExcludedProcess(kvp.Key)) continue;
+            if (IsPseudoProcess(kvp.Key)) continue;
 
             var state = kvp.Value;
             long recentIn = 0;
@@ -66,8 +69,16 @@ internal sealed class ProcessListCoordinator {
             for (var i = 0; i < state.RecentDeltaOut.Count; i++)
                 recentOut += state.RecentDeltaOut[i];
 
-            allRecentIn += recentIn;
-            allRecentOut += recentOut;
+            // Totals-excluded processes never count toward the all-row; their
+            // row is hidden unless the show-excluded preference is on.
+            var excludedFromTotals = _totalsExclusions.IsExcluded(kvp.Key);
+            if (!excludedFromTotals) {
+                allRecentIn += recentIn;
+                allRecentOut += recentOut;
+            } else if (!_totalsExclusions.ShowExcluded) {
+                Remove(kvp.Key);
+                continue;
+            }
 
             if (recentIn + recentOut == 0) {
                 Remove(kvp.Key);
@@ -80,6 +91,7 @@ internal sealed class ProcessListCoordinator {
                 List.Add(item);
             }
             item.UpdateTraffic(recentIn, recentOut);
+            item.IsExcludedFromTotals = excludedFromTotals;
         }
 
         AllProcessesItem.UpdateTraffic(allRecentIn, allRecentOut);
@@ -134,12 +146,19 @@ internal sealed class ProcessListCoordinator {
         long allHistIn = 0;
         long allHistOut = 0;
         foreach (var summary in summaries) {
-            if (IsExcludedProcess(summary.ProcessPath)) continue;
+            if (IsPseudoProcess(summary.ProcessPath)) continue;
 
-            allHistIn += summary.TotalBytesIn;
-            allHistOut += summary.TotalBytesOut;
+            var excludedFromTotals = _totalsExclusions.IsExcluded(summary.ProcessPath);
+            if (!excludedFromTotals) {
+                allHistIn += summary.TotalBytesIn;
+                allHistOut += summary.TotalBytesOut;
+            } else if (!_totalsExclusions.ShowExcluded) {
+                continue;
+            }
+
             var item = new ProcessListItem(summary.ProcessPath, summary.ProcessName);
             item.UpdateTraffic(summary.TotalBytesIn, summary.TotalBytesOut);
+            item.IsExcludedFromTotals = excludedFromTotals;
             _lookup[summary.ProcessPath] = item;
             List.Add(item);
         }
@@ -160,7 +179,9 @@ internal sealed class ProcessListCoordinator {
     /// <c>Beholder.Daemon.Windows</c> when a PID has already exited or its
     /// <c>MainModule</c> can't be read; aggregating those rows produces a
     /// single non-attributable byte-bucket that's visually noisy without
-    /// being actionable.
+    /// being actionable. Distinct from user-configured totals exclusions
+    /// (<see cref="TotalsExclusionUiState"/>), which keep their per-process
+    /// data and may render with a marker.
     /// </summary>
     /// <remarks>
     /// Unlike <c>FirewallTabViewModel.IsExcludedProcess</c>, this filter
@@ -171,6 +192,6 @@ internal sealed class ProcessListCoordinator {
     /// because that tab is a rule surface where non-rule-able rows are
     /// pure noise.
     /// </remarks>
-    private static bool IsExcludedProcess(string processPath) =>
+    private static bool IsPseudoProcess(string processPath) =>
         string.Equals(processPath, "unknown", StringComparison.Ordinal);
 }

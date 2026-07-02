@@ -36,6 +36,7 @@ internal interface IDaemonClient : IAsyncDisposable {
     Task<SetHostnameResolutionSettingsResponse> SetHostnameResolutionSettingsAsync(SetHostnameResolutionSettingsRequest request, CancellationToken cancellationToken);
     Task<SetAlertSettingsResponse> SetAlertSettingsAsync(SetAlertSettingsRequest request, CancellationToken cancellationToken);
     Task<SetScannerSettingsResponse> SetScannerSettingsAsync(SetScannerSettingsRequest request, CancellationToken cancellationToken);
+    Task<SetTotalsSettingsResponse> SetTotalsSettingsAsync(SetTotalsSettingsRequest request, CancellationToken cancellationToken);
     Task<AddAppIdentityRuleResponse> AddAppIdentityRuleAsync(AddAppIdentityRuleRequest request, CancellationToken cancellationToken);
     Task<RemoveAppIdentityRuleResponse> RemoveAppIdentityRuleAsync(RemoveAppIdentityRuleRequest request, CancellationToken cancellationToken);
     Task<ListAppIdentityRulesResponse> ListAppIdentityRulesAsync(ListAppIdentityRulesRequest request, CancellationToken cancellationToken);

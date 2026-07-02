@@ -42,6 +42,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Exception? SetHostnameResolutionSettingsException { get; set; }
     public Exception? SetAlertSettingsException { get; set; }
     public Exception? SetScannerSettingsException { get; set; }
+    public Exception? SetTotalsSettingsException { get; set; }
     public Exception? AddAppIdentityRuleException { get; set; }
     public Exception? RemoveAppIdentityRuleException { get; set; }
     public Exception? ListAppIdentityRulesException { get; set; }
@@ -109,6 +110,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public Func<SetHostnameResolutionSettingsRequest, SetHostnameResolutionSettingsResponse>? SetHostnameResolutionSettingsResponder { get; set; }
     public Func<SetAlertSettingsRequest, SetAlertSettingsResponse>? SetAlertSettingsResponder { get; set; }
     public Func<SetScannerSettingsRequest, SetScannerSettingsResponse>? SetScannerSettingsResponder { get; set; }
+    public Func<SetTotalsSettingsRequest, SetTotalsSettingsResponse>? SetTotalsSettingsResponder { get; set; }
     public Func<AddAppIdentityRuleRequest, AddAppIdentityRuleResponse>? AddAppIdentityRuleResponder { get; set; }
     public Func<RemoveAppIdentityRuleRequest, RemoveAppIdentityRuleResponse>? RemoveAppIdentityRuleResponder { get; set; }
     public Func<ListAppIdentityRulesRequest, ListAppIdentityRulesResponse>? ListAppIdentityRulesResponder { get; set; }
@@ -133,6 +135,7 @@ internal sealed class FakeDaemonClient : IDaemonClient {
     public List<ListAppIdentityRulesRequest> ListAppIdentityRulesCalls { get; } = new();
     public List<SetAlertSettingsRequest> SetAlertSettingsCalls { get; } = new();
     public List<SetScannerSettingsRequest> SetScannerSettingsCalls { get; } = new();
+    public List<SetTotalsSettingsRequest> SetTotalsSettingsCalls { get; } = new();
     // Responder variant for tests that need the CancellationToken the VM
     // passed (e.g., cancellation-plumbing tests). Takes precedence over
     // AggregateTimelineResponse when set.
@@ -352,6 +355,17 @@ internal sealed class FakeDaemonClient : IDaemonClient {
             ?? new SetScannerSettingsResponse {
                 Success = true,
                 Values = request.Values ?? new ScannerSettingsValues(),
+            });
+    }
+
+    public Task<SetTotalsSettingsResponse> SetTotalsSettingsAsync(
+        SetTotalsSettingsRequest request, CancellationToken cancellationToken) {
+        SetTotalsSettingsCalls.Add(request);
+        if (SetTotalsSettingsException is not null) throw SetTotalsSettingsException;
+        return Task.FromResult(SetTotalsSettingsResponder?.Invoke(request)
+            ?? new SetTotalsSettingsResponse {
+                Success = true,
+                Values = request.Values ?? new TotalsSettingsValues(),
             });
     }
 

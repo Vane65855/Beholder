@@ -1,5 +1,6 @@
 using Beholder.Protocol.Local;
 using Beholder.Tests.TestDoubles;
+using Beholder.Ui.Services;
 using Beholder.Ui.ViewModels;
 using Grpc.Core;
 using Microsoft.Extensions.Time.Testing;
@@ -33,7 +34,8 @@ public class SettingsTabViewModelTestsPhase132 {
             new FakeFilePicker(),
             new FakeFileWriter(),
             new FakeUiPreferencesStore(),
-            new FakeTimeProvider(FixedTimestamp));
+            new FakeTimeProvider(FixedTimestamp),
+            new TotalsExclusionUiState());
         return (vm, client);
     }
 

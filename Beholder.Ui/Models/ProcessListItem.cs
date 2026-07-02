@@ -32,6 +32,14 @@ internal sealed partial class ProcessListItem : ObservableObject {
     private string _recentOutLabel = "0 B";
 
     /// <summary>
+    /// True when this process is on the "Exclude from totals" list. Drives
+    /// the row's ⊘ marker; the row is only rendered at all when the
+    /// show-excluded preference is on.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isExcludedFromTotals;
+
+    /// <summary>
     /// Combined recent in+out traffic — used as the sort key for the process list.
     /// Derived, not observable; callers read it after <see cref="UpdateTraffic"/>.
     /// </summary>

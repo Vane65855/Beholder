@@ -69,6 +69,7 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
     private readonly IFileWriter _fileWriter;
     private readonly IUiPreferencesStore _uiPreferencesStore;
     private readonly TimeProvider _timeProvider;
+    private readonly TotalsExclusionUiState _totalsExclusions;
 
     private CancellationTokenSource? _activationCts;
     private CancellationTokenSource? _verifyStatusCts;
@@ -152,6 +153,14 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
 
     /// <summary>Phase 13.4: Scanner section state.</summary>
     public ScannerSettingsRow Scanner { get; } = new();
+
+    /// <summary>
+    /// Traffic Totals section state — the "Exclude from totals" list (daemon
+    /// setting, chain-audited) + the show-excluded display preference
+    /// (UI-local). Commands live on this VM (<c>AddTotalsExclusion</c>,
+    /// <c>RemoveTotalsExclusion</c>, <c>ToggleShowExcludedProcesses</c>).
+    /// </summary>
+    public TotalsSettingsRow Totals { get; } = new();
 
     /// <summary>
     /// Phase 13.6: Application Identity Overrides section state. Holds the
@@ -272,7 +281,8 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         IFilePicker filePicker,
         IFileWriter fileWriter,
         IUiPreferencesStore uiPreferencesStore,
-        TimeProvider timeProvider
+        TimeProvider timeProvider,
+        TotalsExclusionUiState totalsExclusions
     ) {
         ArgumentNullException.ThrowIfNull(daemonClient);
         ArgumentNullException.ThrowIfNull(dispatcher);
@@ -282,6 +292,7 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         ArgumentNullException.ThrowIfNull(fileWriter);
         ArgumentNullException.ThrowIfNull(uiPreferencesStore);
         ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(totalsExclusions);
         _daemonClient = daemonClient;
         _dispatcher = dispatcher;
         _shellOpener = shellOpener;
@@ -290,11 +301,17 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         _fileWriter = fileWriter;
         _uiPreferencesStore = uiPreferencesStore;
         _timeProvider = timeProvider;
+        _totalsExclusions = totalsExclusions;
 
         ChainStatus = ChainStatusRow.FromProto(null, timeProvider);
         AboutInfo = AboutInfo.FromRunningAssembly();
         // Seed the UI-local Application section from the persisted preference.
         Application.CloseToTray = uiPreferencesStore.Load().CloseToTray;
+        // Seed the Traffic Totals section: the show-preference from local
+        // prefs, the list from the shared mirror (refreshed on daemon connect;
+        // ActivateAsync's GetSettings re-syncs both).
+        Totals.ShowExcluded = totalsExclusions.ShowExcluded;
+        foreach (var path in totalsExclusions.ExcludedProcessPaths) Totals.ExcludedPaths.Add(path);
 
         // Auto-recover when the daemon transitions to Connected: if the tab
         // has previously been activated and is currently in an error state
@@ -445,6 +462,19 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         if (response.Scanner is not null) {
             Scanner.EnableHostnameResolution = response.Scanner.EnableHostnameResolution;
         }
+        if (response.Totals is not null) {
+            ApplyTotalsExclusions(response.Totals.ExcludedProcessPaths);
+        }
+    }
+
+    /// <summary>
+    /// Applies a daemon-echoed exclusion list to both the section row and the
+    /// shared UI mirror (which live views consult and react to).
+    /// </summary>
+    private void ApplyTotalsExclusions(IReadOnlyList<string> paths) {
+        Totals.ExcludedPaths.Clear();
+        foreach (var path in paths) Totals.ExcludedPaths.Add(path);
+        _totalsExclusions.SetExcludedPaths(paths);
     }
 
     private void ApplyAppIdentityRules(ListAppIdentityRulesResponse response) {
@@ -803,6 +833,89 @@ internal sealed partial class SettingsTabViewModel : ViewModelBase, IDisposable 
         } finally {
             Scanner.IsSavingHostnameResolution = false;
         }
+    }
+
+    // ---- Traffic Totals: "Exclude from totals" ----
+
+    /// <summary>
+    /// Opens the OS file picker and adds the chosen binary to the exclusion
+    /// list via a whole-list <c>SetTotalsSettings</c>. Already-excluded picks
+    /// and user cancels are silent no-ops.
+    /// </summary>
+    [RelayCommand]
+    private async Task AddTotalsExclusion() {
+        if (Totals.IsSaving) return;
+        string? path;
+        try {
+            path = await _filePicker.PickFileAsync(
+                "Pick the process to exclude from totals",
+                CancellationToken.None);
+        } catch (Exception ex) {
+            HasError = true;
+            ErrorMessage = $"Failed to pick file: {ex.Message}";
+            return;
+        }
+        if (string.IsNullOrEmpty(path)) return;  // user cancelled
+
+        var next = new List<string>(Totals.ExcludedPaths);
+        if (next.Contains(path, StringComparer.OrdinalIgnoreCase)) return;  // already excluded
+        next.Add(path);
+        await SaveTotalsExclusionsAsync(next);
+    }
+
+    /// <summary>Removes one path from the exclusion list (whole-list set).</summary>
+    [RelayCommand]
+    private async Task RemoveTotalsExclusion(string path) {
+        if (Totals.IsSaving || string.IsNullOrEmpty(path)) return;
+        var next = new List<string>(Totals.ExcludedPaths);
+        next.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+        await SaveTotalsExclusionsAsync(next);
+    }
+
+    /// <summary>
+    /// Sends the full desired list to the daemon and applies the echoed
+    /// result to the row + the shared mirror. No optimistic flip: unlike a
+    /// toggle pill, a stale list rendered for the RPC round-trip is harmless,
+    /// and applying only the echo keeps one code path for success.
+    /// </summary>
+    private async Task SaveTotalsExclusionsAsync(IReadOnlyList<string> desiredPaths) {
+        Totals.IsSaving = true;
+        try {
+            var values = new TotalsSettingsValues();
+            values.ExcludedProcessPaths.AddRange(desiredPaths);
+            var response = await _daemonClient.SetTotalsSettingsAsync(
+                new SetTotalsSettingsRequest { Values = values },
+                CancellationToken.None);
+            if (response.Success && response.Values is not null) {
+                ApplyTotalsExclusions(response.Values.ExcludedProcessPaths);
+            } else {
+                HasError = true;
+                ErrorMessage = string.IsNullOrEmpty(response.Message)
+                    ? "Failed to save Traffic Totals settings."
+                    : response.Message;
+            }
+        } catch (RpcException ex) {
+            HasError = true;
+            ErrorMessage = $"Failed to save Traffic Totals settings: {ex.Status.Detail}";
+        } catch (Exception ex) {
+            HasError = true;
+            ErrorMessage = $"Failed to save Traffic Totals settings: {ex.Message}";
+        } finally {
+            Totals.IsSaving = false;
+        }
+    }
+
+    /// <summary>
+    /// Flips the UI-local show-excluded display preference. Same instant
+    /// local-persistence shape as <see cref="ToggleCloseToTray"/> — no RPC;
+    /// the shared mirror's Changed event re-renders the Traffic tab.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleShowExcludedProcesses() {
+        Totals.ShowExcluded = !Totals.ShowExcluded;
+        var prefs = _uiPreferencesStore.Load();
+        _uiPreferencesStore.Save(prefs with { ShowExcludedProcesses = Totals.ShowExcluded });
+        _totalsExclusions.SetShowExcluded(Totals.ShowExcluded);
     }
 
     // ---- Phase 13.6: Application Identity Overrides ----

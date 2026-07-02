@@ -25,7 +25,7 @@ public sealed class TrafficTabViewModelMapTests {
             NullLogger<DaemonStreamSubscriber>.Instance);
         var service = new ProcessStateService(subscriber, fakeClient, TimeProvider.System);
         var loader = new HistoricalChartLoader(fakeClient);
-        var vm = new TrafficTabViewModel(fakeClient, service, loader, new SyncDispatcher());
+        var vm = new TrafficTabViewModel(fakeClient, service, loader, new SyncDispatcher(), new TotalsExclusionUiState());
         return (vm, fakeClient);
     }
 

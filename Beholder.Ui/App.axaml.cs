@@ -49,7 +49,24 @@ public partial class App : Application {
 
             _processStateService = new ProcessStateService(
                 _streamSubscriber, _daemonClient, TimeProvider.System);
-            _streamSubscriber.OnConnected = ct => _processStateService.SeedAsync(ct);
+
+            // UI-local preferences (close-to-tray, show-excluded, etc.) — the
+            // only client-side persistence the UI has, deliberately NOT a
+            // daemon setting (ADR 010).
+            var uiPreferencesStore = new JsonUiPreferencesStore(
+                loggerFactory.CreateLogger<JsonUiPreferencesStore>());
+
+            // Shared mirror of the daemon's "Exclude from totals" list + the
+            // local show-excluded preference. Seeded from GetSettings on every
+            // daemon connect (before the process-state seed, so the first list
+            // render already honors exclusions); the Settings tab keeps it in
+            // sync with each edit.
+            var totalsExclusions = new TotalsExclusionUiState();
+            totalsExclusions.SetShowExcluded(uiPreferencesStore.Load().ShowExcludedProcesses);
+            _streamSubscriber.OnConnected = async ct => {
+                await totalsExclusions.RefreshFromDaemonAsync(_daemonClient, ct);
+                await _processStateService.SeedAsync(ct);
+            };
 
             // Single AvaloniaDispatcher instance shared by every VM that
             // marshals event-handler callbacks from background threads to the
@@ -75,7 +92,8 @@ public partial class App : Application {
 #endif
 
             var buildVersion = BuildVersion.FromRunningAssembly();
-            var statusStripVm = new StatusStripViewModel(_processStateService, dispatcher, buildVersion);
+            var statusStripVm = new StatusStripViewModel(
+                _processStateService, dispatcher, buildVersion, totalsExclusions);
             var historicalChartLoader = new HistoricalChartLoader(_daemonClient);
 
             var shellOpener = new ShellOpener();
@@ -94,16 +112,12 @@ public partial class App : Application {
             // Phase 11.3: file writer persists the signed chain-export bytes
             // to the user-chosen path (Settings → Maintenance → Export chain).
             var fileWriter = new FileWriter();
-            // UI-local preferences (close-to-tray, etc.) — the only client-side
-            // persistence the UI has, deliberately NOT a daemon setting (ADR 010).
-            var uiPreferencesStore = new JsonUiPreferencesStore(
-                loggerFactory.CreateLogger<JsonUiPreferencesStore>());
 
             _mainWindowVm = new MainWindowViewModel(
                 _daemonClient, _processStateService, _streamSubscriber,
                 statusStripVm, historicalChartLoader, dispatcher, _notifications,
                 shellOpener, clipboardWriter, filePicker, fileWriter, uiPreferencesStore,
-                buildVersion);
+                buildVersion, totalsExclusions);
             var mainWindow = new MainWindow { DataContext = _mainWindowVm };
             mainWindowRef = mainWindow;
             desktop.MainWindow = mainWindow;

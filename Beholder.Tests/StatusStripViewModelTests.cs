@@ -30,7 +30,8 @@ public class StatusStripViewModelTests {
         var service = CreateService();
         // SyncDispatcher runs IDispatcher.Post actions immediately on the
         // calling thread — production handlers run synchronously under test.
-        var vm = new StatusStripViewModel(service, new SyncDispatcher(), SampleBuild);
+        var vm = new StatusStripViewModel(
+            service, new SyncDispatcher(), SampleBuild, new TotalsExclusionUiState());
         return (vm, service);
     }
 
@@ -72,12 +73,14 @@ public class StatusStripViewModelTests {
     [Fact]
     public void Ctor_NullService_Throws() =>
         Assert.Throws<ArgumentNullException>("processStateService",
-            () => new StatusStripViewModel(null!, new SyncDispatcher(), SampleBuild));
+            () => new StatusStripViewModel(
+                null!, new SyncDispatcher(), SampleBuild, new TotalsExclusionUiState()));
 
     [Fact]
     public void Ctor_NullBuildVersion_Throws() =>
         Assert.Throws<ArgumentNullException>("buildVersion",
-            () => new StatusStripViewModel(CreateService(), new SyncDispatcher(), null!));
+            () => new StatusStripViewModel(
+                CreateService(), new SyncDispatcher(), null!, new TotalsExclusionUiState()));
 
     [Fact]
     public void UpdateFromStates_AggregatesAcrossProcesses_UpdatesTotals() {
@@ -224,6 +227,27 @@ public class StatusStripViewModelTests {
         Assert.Equal("0 B", vm.OutboundTotalLabel);
         Assert.Equal("0 B/s", vm.InboundRateLabel);
         Assert.Equal("0 B/s", vm.OutboundRateLabel);
+    }
+
+    [Fact]
+    public void UpdateFromStates_TotalsExcludedProcess_SkippedFromEveryFigure() {
+        var exclusions = new TotalsExclusionUiState();
+        exclusions.SetExcludedPaths([@"fake/wireguard.exe"]);
+        var service = CreateService();
+        var vm = new StatusStripViewModel(
+            service, new SyncDispatcher(), SampleBuild, exclusions);
+        var states = MakeStates(
+            ("fake/wireguard.exe", "wireguard", 9_000, 9_000, 900, 900),
+            ("fake/firefox.exe", "firefox.exe", 1000, 2000, 100, 200));
+
+        RaiseProcessStatesUpdated(service, states);
+
+        // Only firefox counts: totals, rates, and the WAN sum.
+        Assert.Equal("2.0 KB", vm.OutboundTotalLabel);
+        Assert.Equal("1000 B", vm.InboundTotalLabel);
+        Assert.Equal("200 B/s", vm.OutboundRateLabel);
+        Assert.Equal("100 B/s", vm.InboundRateLabel);
+        Assert.Equal("2.9 KB", vm.WanTotalLabel);
     }
 
     [Fact]

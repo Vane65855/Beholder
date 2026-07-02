@@ -636,6 +636,82 @@
                             </Grid>
                         </Border>
 
+                        <!-- ──────────  TRAFFIC TOTALS ("Exclude from totals")  ────────── -->
+                        <Border x:Name="TrafficTotalsCard" Classes="sectionCard">
+                            <Grid>
+                                <Border Classes="accentStripe cyan" />
+                                <StackPanel Orientation="Vertical" Spacing="16">
+                                    <TextBlock Classes="sectionTitle" Text="TRAFFIC TOTALS" />
+                                    <TextBlock Text="Exclude processes (e.g. a VPN client that re-counts every app's traffic) from the All-processes totals, chart, and breakdowns. Excluded processes stay fully recorded, alertable, and chain-audited — and every list change is chain-audited too."
+                                               FontSize="{DynamicResource FontSizeCaption}"
+                                               Foreground="{DynamicResource TextMuted}"
+                                               TextWrapping="Wrap" />
+
+                                    <StackPanel Orientation="Vertical" Spacing="12">
+                                        <Button Classes="actionButton"
+                                                Content="+ EXCLUDE PROCESS…"
+                                                HorizontalAlignment="Left"
+                                                IsEnabled="{Binding !Totals.IsSaving}"
+                                                Command="{Binding AddTotalsExclusionCommand}"
+                                                ToolTip.Tip="Pick a binary whose traffic should not count toward the All-processes views." />
+
+                                        <!-- Empty state -->
+                                        <TextBlock Text="No processes are excluded from totals."
+                                                   FontSize="{DynamicResource FontSizeCaption}"
+                                                   Foreground="{DynamicResource TextMuted}"
+                                                   FontStyle="Italic"
+                                                   IsVisible="{Binding !Totals.ExcludedPaths.Count}" />
+
+                                        <!-- Exclusion list -->
+                                        <ItemsControl ItemsSource="{Binding Totals.ExcludedPaths}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="x:String">
+                                                    <Border Background="{DynamicResource BackgroundPanel}"
+                                                            BorderBrush="{DynamicResource BorderSubtle}"
+                                                            BorderThickness="0,1,0,0"
+                                                            Padding="0,10">
+                                                        <Grid ColumnDefinitions="*,Auto">
+                                                            <TextBlock Grid.Column="0"
+                                                                       Text="{Binding}"
+                                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                                       FontFamily="Cascadia Code, Consolas, monospace"
+                                                                       Foreground="{DynamicResource TextPrimary}"
+                                                                       VerticalAlignment="Center"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                            <Button Grid.Column="1"
+                                                                    Classes="actionButton"
+                                                                    Content="REMOVE"
+                                                                    MinWidth="80"
+                                                                    VerticalAlignment="Center"
+                                                                    Command="{Binding $parent[ItemsControl].((vm:SettingsTabViewModel)DataContext).RemoveTotalsExclusionCommand}"
+                                                                    CommandParameter="{Binding}" />
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="Show excluded processes in the list"
+                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <TextBlock Text="Display only: when on, excluded processes stay in the Traffic tab's process list with a ⊘ marker; when off their rows are hidden. They stay out of the totals either way."
+                                                       FontSize="{DynamicResource FontSizeCaption}"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <controls:SettingsTogglePill Grid.Column="1"
+                                                                     IsOn="{Binding Totals.ShowExcluded}"
+                                                                     Command="{Binding ToggleShowExcludedProcessesCommand}"
+                                                                     VerticalAlignment="Center" />
+                                    </Grid>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
                         <!-- ──────────  APPLICATION IDENTITY OVERRIDES (Phase 13.6, ADR 011)  ────────── -->
                         <Border x:Name="AppIdentityCard" Classes="sectionCard">
                             <Grid>
