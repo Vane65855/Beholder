@@ -1268,4 +1268,147 @@ public class SqliteTrafficStoreTests : IDisposable {
         Assert.Equal("2.2.2.2", destinations[1].RemoteAddress);
         Assert.Equal("1.1.1.1", destinations[2].RemoteAddress);
     }
+
+    // ---- Totals exclusions ("Exclude from totals") ----
+
+    private const string VpnPath = "C:/vpn/wireguard.exe";
+    private const string AppPath = "C:/app/firefox.exe";
+
+    private async Task SeedVpnAndAppAsync() {
+        await _store.WriteRawBucketsAsync([
+            CreateBucket(processPath: AppPath, processName: "firefox.exe",
+                remoteAddress: "1.1.1.1", countryAlpha2: "US", bytesIn: 100, bytesOut: 50),
+            CreateBucket(processPath: VpnPath, processName: "wireguard.exe",
+                remoteAddress: "9.9.9.9", remotePort: 51820, countryAlpha2: "DE",
+                bytesIn: 1000, bytesOut: 900),
+        ], CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task GetAggregateTimelineAsync_ExcludedProcess_RemovedFromAggregate() {
+        await SeedVpnAndAppAsync();
+
+        var timeline = await _store.GetAggregateTimelineAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), TimeSpan.FromSeconds(1),
+            CancellationToken.None, excludedProcessPaths: [VpnPath]);
+
+        var point = Assert.Single(timeline);
+        Assert.Equal(100, point.BytesIn);
+        Assert.Equal(50, point.BytesOut);
+    }
+
+    [Fact]
+    public async Task GetAggregateTimelineAsync_ExclusionMatchesCaseInsensitively() {
+        await SeedVpnAndAppAsync();
+
+        var timeline = await _store.GetAggregateTimelineAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), TimeSpan.FromSeconds(1),
+            CancellationToken.None, excludedProcessPaths: ["c:/VPN/WIREGUARD.EXE"]);
+
+        var point = Assert.Single(timeline);
+        Assert.Equal(100, point.BytesIn);
+    }
+
+    [Fact]
+    public async Task GetAggregateTimelineAsync_AllDataExcluded_ReturnsEmpty() {
+        await SeedVpnAndAppAsync();
+
+        var timeline = await _store.GetAggregateTimelineAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), TimeSpan.FromSeconds(1),
+            CancellationToken.None, excludedProcessPaths: [VpnPath, AppPath]);
+
+        Assert.Empty(timeline);
+    }
+
+    [Fact]
+    public async Task GetAggregateTimelineAsync_EmptyExclusionList_BehavesLikeNoExclusion() {
+        await SeedVpnAndAppAsync();
+
+        var withEmpty = await _store.GetAggregateTimelineAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), TimeSpan.FromSeconds(1),
+            CancellationToken.None, excludedProcessPaths: []);
+
+        var point = Assert.Single(withEmpty);
+        Assert.Equal(1100, point.BytesIn);
+        Assert.Equal(950, point.BytesOut);
+    }
+
+    [Fact]
+    public async Task GetDestinationsAsync_AllProcessesMode_ExcludedProcessRemoved() {
+        await SeedVpnAndAppAsync();
+
+        var query = new DestinationsQuery(null, BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), null, 0) {
+            ExcludedProcessPaths = [VpnPath],
+        };
+        var destinations = await _store.GetDestinationsAsync(query, CancellationToken.None);
+
+        var destination = Assert.Single(destinations);
+        Assert.Equal("1.1.1.1", destination.RemoteAddress);
+    }
+
+    [Fact]
+    public async Task GetDestinationsAsync_ExplicitProcess_IgnoresExclusion() {
+        await SeedVpnAndAppAsync();
+
+        // The VPN is on the exclusion list AND explicitly selected — explicit
+        // selection wins, so its destinations still return.
+        var query = new DestinationsQuery(VpnPath, BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), null, 0) {
+            ExcludedProcessPaths = [VpnPath],
+        };
+        var destinations = await _store.GetDestinationsAsync(query, CancellationToken.None);
+
+        var destination = Assert.Single(destinations);
+        Assert.Equal("9.9.9.9", destination.RemoteAddress);
+    }
+
+    [Fact]
+    public async Task GetCountryBreakdownAsync_AllProcessesMode_ExcludedProcessRemoved() {
+        await SeedVpnAndAppAsync();
+
+        var breakdown = await _store.GetCountryBreakdownAsync(
+            null, BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            CancellationToken.None, excludedProcessPaths: [VpnPath]);
+
+        var entry = Assert.Single(breakdown);
+        Assert.Equal("US", entry.Country.ToString());
+        Assert.Equal(100, entry.TotalBytesIn);
+    }
+
+    [Fact]
+    public async Task GetCountryBreakdownAsync_ExplicitProcess_IgnoresExclusion() {
+        await SeedVpnAndAppAsync();
+
+        var breakdown = await _store.GetCountryBreakdownAsync(
+            VpnPath, BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            CancellationToken.None, excludedProcessPaths: [VpnPath]);
+
+        var entry = Assert.Single(breakdown);
+        Assert.Equal("DE", entry.Country.ToString());
+    }
+
+    [Fact]
+    public async Task GetProtocolBreakdownAsync_AllProcessesMode_ExcludedProcessRemoved() {
+        await SeedVpnAndAppAsync();
+
+        var breakdown = await _store.GetProtocolBreakdownAsync(
+            null, BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            CancellationToken.None, excludedProcessPaths: [VpnPath]);
+
+        var entry = Assert.Single(breakdown);
+        Assert.Equal(100, entry.TotalBytesIn);
+        Assert.Equal(50, entry.TotalBytesOut);
+    }
+
+    [Fact]
+    public async Task GetProcessSummariesAsync_ExcludedProcessStillListed() {
+        // The per-process list deliberately keeps excluded processes — the UI
+        // hides or marks their rows; only aggregates drop them.
+        await SeedVpnAndAppAsync();
+
+        var summaries = await _store.GetProcessSummariesAsync(
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11), CancellationToken.None);
+
+        Assert.Equal(2, summaries.Count);
+        Assert.Contains(summaries, s => s.ProcessPath == VpnPath);
+    }
 }

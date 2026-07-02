@@ -991,7 +991,9 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         // specific alpha-2 to get per-country top-N).
         var processPath = string.IsNullOrWhiteSpace(request.ProcessPath) ? null : request.ProcessPath;
         var country = string.IsNullOrWhiteSpace(request.Country) ? null : request.Country;
-        var query = new DestinationsQuery(processPath, from, to, country, request.Limit);
+        var query = new DestinationsQuery(processPath, from, to, country, request.Limit) {
+            ExcludedProcessPaths = _totalsExclusions.ExcludedProcessPaths,
+        };
 
         var destinations = await _trafficStore.GetDestinationsAsync(query, cancellationToken)
             .ConfigureAwait(false);
@@ -1017,7 +1019,8 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
                 : request.RemoteAddress;
 
             var points = await _trafficStore.GetAggregateTimelineAsync(
-                from, to, resolution, cancellationToken, remoteAddress)
+                from, to, resolution, cancellationToken, remoteAddress,
+                _totalsExclusions.ExcludedProcessPaths)
                 .ConfigureAwait(false);
 
             var response = new Local.GetAggregateTimelineResponse();
@@ -1034,7 +1037,8 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         var processPath = string.IsNullOrWhiteSpace(request.ProcessPath) ? null : request.ProcessPath;
 
         var breakdown = await _trafficStore.GetCountryBreakdownAsync(
-            processPath, from, to, cancellationToken)
+            processPath, from, to, cancellationToken,
+            _totalsExclusions.ExcludedProcessPaths)
             .ConfigureAwait(false);
 
         var response = new Local.GetCountryBreakdownResponse();
@@ -1050,7 +1054,8 @@ internal sealed class BeholderLocalService : Local.BeholderLocal.BeholderLocalBa
         var processPath = string.IsNullOrWhiteSpace(request.ProcessPath) ? null : request.ProcessPath;
 
         var breakdown = await _trafficStore.GetProtocolBreakdownAsync(
-            processPath, from, to, cancellationToken)
+            processPath, from, to, cancellationToken,
+            _totalsExclusions.ExcludedProcessPaths)
             .ConfigureAwait(false);
 
         var response = new Local.GetProtocolBreakdownResponse();

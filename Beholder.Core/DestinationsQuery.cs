@@ -32,4 +32,13 @@ public sealed record DestinationsQuery(
     DateTimeOffset From,
     DateTimeOffset To,
     string? Country,
-    int Limit);
+    int Limit) {
+    /// <summary>
+    /// Totals-excluded process paths to remove from the aggregation. Applied
+    /// only in all-processes mode (<see cref="ProcessPath"/> null) — a view
+    /// explicitly scoped to one process always includes it. Null or empty =
+    /// no exclusion. Init-only (not positional) so existing five-argument
+    /// constructions stay valid.
+    /// </summary>
+    public IReadOnlyList<string>? ExcludedProcessPaths { get; init; }
+}

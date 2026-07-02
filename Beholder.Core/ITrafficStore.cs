@@ -74,12 +74,17 @@ public interface ITrafficStore {
     /// (null/empty = no filter) — restricts the aggregate timeline to traffic
     /// exchanged with the given IP.
     /// </summary>
+    /// <param name="excludedProcessPaths">
+    /// Totals-excluded process paths ("Exclude from totals") removed from the
+    /// aggregation, matched case-insensitively. Null or empty = no exclusion.
+    /// </param>
     Task<IReadOnlyList<TrafficTimePoint>> GetAggregateTimelineAsync(
         DateTimeOffset from,
         DateTimeOffset to,
         TimeSpan resolution,
         CancellationToken cancellationToken,
-        string? remoteAddress = null);
+        string? remoteAddress = null,
+        IReadOnlyList<string>? excludedProcessPaths = null);
 
     /// <summary>
     /// Returns all distinct processes with traffic in the given time range,
@@ -106,11 +111,18 @@ public interface ITrafficStore {
     /// that single process; when null, totals aggregate across every process
     /// in the range. Tier selection is retention-only.
     /// </summary>
+    /// <param name="excludedProcessPaths">
+    /// Totals-excluded process paths removed from the aggregation. Applied
+    /// only in all-processes mode (<paramref name="processPath"/> null) — a
+    /// view explicitly scoped to one process always includes it. Null or
+    /// empty = no exclusion.
+    /// </param>
     Task<IReadOnlyList<CountryTrafficSummary>> GetCountryBreakdownAsync(
         string? processPath,
         DateTimeOffset from,
         DateTimeOffset to,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? excludedProcessPaths = null);
 
     /// <summary>
     /// Returns per-protocol traffic totals for a time range, derived from
@@ -119,9 +131,14 @@ public interface ITrafficStore {
     /// that single process; when null, totals aggregate across every process
     /// in the range. Tier selection is retention-only.
     /// </summary>
+    /// <param name="excludedProcessPaths">
+    /// Same exclusion semantics as <see cref="GetCountryBreakdownAsync"/>:
+    /// applied only when <paramref name="processPath"/> is null.
+    /// </param>
     Task<IReadOnlyList<ProtocolBreakdownSummary>> GetProtocolBreakdownAsync(
         string? processPath,
         DateTimeOffset from,
         DateTimeOffset to,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? excludedProcessPaths = null);
 }

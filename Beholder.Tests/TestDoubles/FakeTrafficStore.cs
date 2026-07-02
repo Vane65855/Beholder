@@ -22,7 +22,8 @@ internal sealed class FakeTrafficStore : ITrafficStore {
 
     public Task<IReadOnlyList<TrafficTimePoint>> GetAggregateTimelineAsync(
         DateTimeOffset from, DateTimeOffset to, TimeSpan resolution,
-        CancellationToken cancellationToken, string? remoteAddress = null)
+        CancellationToken cancellationToken, string? remoteAddress = null,
+        IReadOnlyList<string>? excludedProcessPaths = null)
         => Task.FromResult<IReadOnlyList<TrafficTimePoint>>([]);
 
     public Task<IReadOnlyList<ProcessTrafficSummary>> GetProcessSummariesAsync(
@@ -32,11 +33,13 @@ internal sealed class FakeTrafficStore : ITrafficStore {
 
     public Task<IReadOnlyList<CountryTrafficSummary>> GetCountryBreakdownAsync(
         string? processPath, DateTimeOffset from, DateTimeOffset to,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? excludedProcessPaths = null)
         => Task.FromResult<IReadOnlyList<CountryTrafficSummary>>([]);
 
     public Task<IReadOnlyList<ProtocolBreakdownSummary>> GetProtocolBreakdownAsync(
         string? processPath, DateTimeOffset from, DateTimeOffset to,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? excludedProcessPaths = null)
         => Task.FromResult<IReadOnlyList<ProtocolBreakdownSummary>>([]);
 }

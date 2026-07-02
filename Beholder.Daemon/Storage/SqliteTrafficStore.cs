@@ -186,6 +186,11 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
 
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
+        // Totals exclusions apply only in all-processes mode — a view
+        // explicitly scoped to one process always includes it.
+        var exclusionFilter = query.ProcessPath is null
+            ? ProcessExclusionSqlFilter.BindNotInClause(command, query.ExcludedProcessPaths)
+            : string.Empty;
         command.CommandText = $"""
             SELECT remote_address,
                    MAX(hostname),
@@ -198,6 +203,7 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
               AND bucket_start_ms < $toMs
               {processFilter}
               {countryFilter}
+              {exclusionFilter}
             GROUP BY remote_address
             ORDER BY SUM(bytes_in) + SUM(bytes_out) DESC
             {limitClause};
@@ -237,7 +243,8 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
         DateTimeOffset to,
         TimeSpan resolution,
         CancellationToken cancellationToken,
-        string? remoteAddress = null
+        string? remoteAddress = null,
+        IReadOnlyList<string>? excludedProcessPaths = null
     ) {
         ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
 
@@ -248,7 +255,7 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
         return await TimelineStitcher.StitchAsync(
             connection, _options.CurrentValue.Tiers,
             from, to, SnapNowMsToMinute(), processPath: null, cancellationToken,
-            remoteAddress).ConfigureAwait(false);
+            remoteAddress, excludedProcessPaths).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -313,7 +320,8 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
         string? processPath,
         DateTimeOffset from,
         DateTimeOffset to,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? excludedProcessPaths = null
     ) {
         if (processPath is not null) ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
         ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
@@ -322,12 +330,17 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
 
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
+        // Totals exclusions apply only in all-processes mode.
+        var exclusionFilter = processPath is null
+            ? ProcessExclusionSqlFilter.BindNotInClause(command, excludedProcessPaths)
+            : string.Empty;
         command.CommandText = $"""
             SELECT country, SUM(bytes_in), SUM(bytes_out)
             FROM {tier.TableName}
             WHERE bucket_start_ms >= $fromMs
               AND bucket_start_ms < $toMs
               {processFilter}
+              {exclusionFilter}
             GROUP BY country
             ORDER BY SUM(bytes_in) + SUM(bytes_out) DESC;
             """;
@@ -351,7 +364,8 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
         string? processPath,
         DateTimeOffset from,
         DateTimeOffset to,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? excludedProcessPaths = null
     ) {
         if (processPath is not null) ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
         ArgumentOutOfRangeException.ThrowIfLessThan(to, from);
@@ -360,6 +374,10 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
 
         using var connection = _connectionFactory.CreateConnection();
         using var command = connection.CreateCommand();
+        // Totals exclusions apply only in all-processes mode.
+        var exclusionFilter = processPath is null
+            ? ProcessExclusionSqlFilter.BindNotInClause(command, excludedProcessPaths)
+            : string.Empty;
         // GROUP BY remote_port first (SQL-side) — the port→name classification
         // happens client-side so all rows with the same name merge into a
         // single entry. Transport is hard-coded TCP until we capture UDP.
@@ -369,6 +387,7 @@ internal sealed class SqliteTrafficStore : ITrafficStore, IDnsHostnameBackfill {
             WHERE bucket_start_ms >= $fromMs
               AND bucket_start_ms < $toMs
               {processFilter}
+              {exclusionFilter}
             GROUP BY remote_port;
             """;
         if (processPath is not null) command.Parameters.AddWithValue("$processPath", processPath);

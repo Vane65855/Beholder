@@ -82,6 +82,13 @@ internal static class TimelineStitcher {
     /// <paramref name="processPath"/> when both are set. Backs the Scanner
     /// → Traffic cross-link's chart-update path.
     /// </param>
+    /// <param name="excludedProcessPaths">
+    /// Totals-excluded process paths removed from the aggregation (null or
+    /// empty = no exclusion). Only the aggregate caller passes this — a
+    /// per-process timeline always includes its explicitly selected process.
+    /// Applied to the data-extent scan too, so a range whose only traffic is
+    /// excluded correctly yields an empty timeline.
+    /// </param>
     public static async Task<IReadOnlyList<TrafficTimePoint>> StitchAsync(
         SqliteConnection connection,
         IReadOnlyList<RollupTier> tiers,
@@ -90,7 +97,8 @@ internal static class TimelineStitcher {
         long nowMs,
         string? processPath,
         CancellationToken cancellationToken,
-        string? remoteAddress = null
+        string? remoteAddress = null,
+        IReadOnlyList<string>? excludedProcessPaths = null
     ) {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(tiers);
@@ -147,7 +155,8 @@ internal static class TimelineStitcher {
         // (dataMinMs, dataMaxMs), compute the same effective resolution, align to
         // the same GROUP BY grid, and return the same array.
         var extent = await ComputeDataExtentAsync(
-            connection, slices, processPath, cancellationToken, remoteAddress).ConfigureAwait(false);
+            connection, slices, processPath, cancellationToken, remoteAddress,
+            excludedProcessPaths).ConfigureAwait(false);
         if (extent is null) {
             // No data in any tier for the range → empty result. Short-circuit to
             // avoid running the per-tier GROUP BY queries we know will be empty.
@@ -175,6 +184,7 @@ internal static class TimelineStitcher {
         foreach (var (tier, sliceFromMs, sliceToMs) in slices) {
             using var command = connection.CreateCommand();
             var whereProcess = processPath is null ? "" : "AND process_path = $processPath";
+            var whereExcluded = ProcessExclusionSqlFilter.BindNotInClause(command, excludedProcessPaths);
             command.CommandText = $"""
                 SELECT (bucket_start_ms / $resolutionMs) * $resolutionMs AS ts,
                        SUM(bytes_in), SUM(bytes_out)
@@ -183,6 +193,7 @@ internal static class TimelineStitcher {
                   AND bucket_start_ms < $toMs
                   {whereProcess}
                   {whereAddress}
+                  {whereExcluded}
                 GROUP BY ts
                 ORDER BY ts;
                 """;
@@ -233,7 +244,8 @@ internal static class TimelineStitcher {
         IReadOnlyList<(RollupTier Tier, long SliceFromMs, long SliceToMs)> slices,
         string? processPath,
         CancellationToken cancellationToken,
-        string? remoteAddress = null
+        string? remoteAddress = null,
+        IReadOnlyList<string>? excludedProcessPaths = null
     ) {
         long? overallMin = null;
         long? overallMax = null;
@@ -244,13 +256,15 @@ internal static class TimelineStitcher {
         foreach (var (tier, sliceFromMs, sliceToMs) in slices) {
             using var command = connection.CreateCommand();
             var whereProcess = processPath is null ? "" : "AND process_path = $processPath";
+            var whereExcluded = ProcessExclusionSqlFilter.BindNotInClause(command, excludedProcessPaths);
             command.CommandText = $"""
                 SELECT MIN(bucket_start_ms), MAX(bucket_start_ms)
                 FROM {tier.TableName}
                 WHERE bucket_start_ms >= $fromMs
                   AND bucket_start_ms < $toMs
                   {whereProcess}
-                  {whereAddress};
+                  {whereAddress}
+                  {whereExcluded};
                 """;
             command.Parameters.AddWithValue("$fromMs", sliceFromMs);
             command.Parameters.AddWithValue("$toMs", sliceToMs);

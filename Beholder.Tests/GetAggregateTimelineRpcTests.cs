@@ -17,6 +17,8 @@ public sealed class GetAggregateTimelineRpcTests : IDisposable {
     private readonly string _tempDir;
     private readonly BroadcastService _broadcaster;
     private readonly BeholderLocalService _service;
+    private readonly SqliteTrafficStore _trafficStore;
+    private readonly TotalsExclusionState _totalsState = new();
 
     public GetAggregateTimelineRpcTests() {
         _tempDir = Path.Combine(Path.GetTempPath(), "beholder-tests", Guid.NewGuid().ToString());
@@ -28,7 +30,7 @@ public sealed class GetAggregateTimelineRpcTests : IDisposable {
         var eventStore = new SqliteEventStore(connectionFactory, timeProvider);
         var firewallStore = new SqliteFirewallRuleStore(connectionFactory);
         var alertStore = new SqliteAlertStore(connectionFactory, NullLogger<SqliteAlertStore>.Instance);
-        var trafficStore = new SqliteTrafficStore(
+        _trafficStore = new SqliteTrafficStore(
             connectionFactory,
             new FakeOptionsMonitor<RollupOptions>(new RollupOptions()),
             timeProvider);
@@ -44,13 +46,13 @@ public sealed class GetAggregateTimelineRpcTests : IDisposable {
         _service = new BeholderLocalService(
             _broadcaster, pipeline, firewallStore, alertStore,
             new FakeFirewallController(), new FakeFirewallEnforcementState(),
-            eventStore, trafficStore,
+            eventStore, _trafficStore,
             new FakeLanDeviceStore(), TestServiceFactory.CreateInactiveLanScannerService(),
             new FakeChainStatusCache(), new FakeChainVerifier(), new FakeChainExporter(), new FakeStorageStatsProvider(),
             new FakeRecordingSettingsState(), new FakeHostnameResolutionSettingsState(),
             new FakeAlertSettingsState(),
             new FakeScannerSettingsState(),
-            new TotalsExclusionState(),
+            _totalsState,
             new FakeSettingsOverridesStore(),
             new FakeAppIdentityRuleStore(),
             timeProvider, NullLogger<BeholderLocalService>.Instance);
@@ -80,5 +82,32 @@ public sealed class GetAggregateTimelineRpcTests : IDisposable {
             () => _service.GetAggregateTimeline(request, context));
 
         Assert.Equal(StatusCode.InvalidArgument, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetAggregateTimeline_TotalsExclusionActive_ExcludedProcessRemoved() {
+        // End-to-end through the RPC handler: the daemon threads the state
+        // singleton's exclusion list into the store's aggregate query.
+        await _trafficStore.WriteRawBucketsAsync([
+            new Beholder.Core.TrafficBucket(0, "C:/app/firefox.exe", "firefox.exe",
+                "1.1.1.1", 443, "example.com", Beholder.Core.CountryCode.FromAlpha2("US"),
+                bytesIn: 100, bytesOut: 50, FixedTimestamp, 1),
+            new Beholder.Core.TrafficBucket(0, "C:/vpn/wireguard.exe", "wireguard.exe",
+                "9.9.9.9", 51820, null, Beholder.Core.CountryCode.FromAlpha2("DE"),
+                bytesIn: 1000, bytesOut: 900, FixedTimestamp, 1),
+        ], TestContext.Current.CancellationToken);
+        _totalsState.SetExcludedPaths(["C:/vpn/wireguard.exe"]);
+        var context = new FakeServerCallContext(TestContext.Current.CancellationToken);
+        var request = new Local.GetAggregateTimelineRequest {
+            FromUnixNs = FixedTimestamp.AddSeconds(-1).ToUnixTimeMilliseconds() * 1_000_000,
+            ToUnixNs = FixedTimestamp.AddSeconds(11).ToUnixTimeMilliseconds() * 1_000_000,
+            ResolutionMs = 1000,
+        };
+
+        var response = await _service.GetAggregateTimeline(request, context);
+
+        var point = Assert.Single(response.Points);
+        Assert.Equal(100, point.BytesIn);
+        Assert.Equal(50, point.BytesOut);
     }
 }
