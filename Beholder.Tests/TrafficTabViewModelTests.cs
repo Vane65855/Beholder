@@ -879,6 +879,125 @@ public class TrafficTabViewModelTests {
         Assert.Equal("All processes", vm.SelectionAppLabel);
     }
 
+    // ---- ADR 017: selection maps onto the drawn time domain ----
+
+    private static GetAggregateTimelineResponse BuildTimelineGrid(
+        DateTimeOffset firstBucket, long stepMs, int count) {
+        var response = new GetAggregateTimelineResponse();
+        var firstMs = firstBucket.ToUnixTimeMilliseconds();
+        for (var i = 0; i < count; i++) {
+            response.Points.Add(new TrafficTimePoint {
+                TimestampUnixNs = (firstMs + i * stepMs) * 1_000_000,
+                BytesIn = 100 + i,
+                BytesOut = 10,
+            });
+        }
+        return response;
+    }
+
+    [Fact]
+    public async Task ChartSelection_Historical_MapsFractionsOntoDrawnDomainNotRequestedRange() {
+        // An All Time request starts at the Unix epoch, but the chart draws
+        // only the data extent. Fractions must map onto the drawn domain —
+        // under the old requested-range mapping any selection here would
+        // land decades before the data and always fetch 0 destinations.
+        var (vm, client) = CreateViewModelWithClient();
+        var firstBucket = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        const long stepMs = 60_000;
+        client.AggregateTimelineResponder = (_, _) => BuildTimelineGrid(firstBucket, stepMs, 11);
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.AllTime);
+
+        GetProcessDestinationsRequest? captured = null;
+        client.ProcessDestinationsResponder = req => { captured = req; return new GetProcessDestinationsResponse(); };
+        vm.ChartSelection = new ChartSelectionRange(0.0, 0.5);
+        for (var i = 0; i < 10 && captured is null; i++) await Task.Yield();
+
+        // Drawn domain = [first, first+10min]; fraction 0.5 = first+5min.
+        // The end extends one bucket past its floored grid line so a band
+        // edge sitting on a drawn peak still includes that bucket.
+        Assert.NotNull(captured);
+        var firstMs = firstBucket.ToUnixTimeMilliseconds();
+        Assert.Equal(firstMs * 1_000_000, captured.FromUnixNs);
+        Assert.Equal((firstMs + 5 * stepMs + stepMs) * 1_000_000, captured.ToUnixNs);
+    }
+
+    [Fact]
+    public async Task ChartSelection_Historical_AlignsWindowOutwardToBucketGrid() {
+        // Fractions landing mid-bucket must widen outward: floor the start
+        // to its bucket, extend the end past its bucket close.
+        var (vm, client) = CreateViewModelWithClient();
+        var firstBucket = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        const long stepMs = 60_000;
+        client.AggregateTimelineResponder = (_, _) => BuildTimelineGrid(firstBucket, stepMs, 11);
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last7Days);
+
+        GetProcessDestinationsRequest? captured = null;
+        client.ProcessDestinationsResponder = req => { captured = req; return new GetProcessDestinationsResponse(); };
+        // 0.15 of 10min = 90s into the domain (mid-bucket-1); 0.35 = 210s (mid-bucket-3).
+        vm.ChartSelection = new ChartSelectionRange(0.15, 0.35);
+        for (var i = 0; i < 10 && captured is null; i++) await Task.Yield();
+
+        Assert.NotNull(captured);
+        var firstMs = firstBucket.ToUnixTimeMilliseconds();
+        Assert.Equal((firstMs + 1 * stepMs) * 1_000_000, captured.FromUnixNs);  // floor(90s) = bucket 1
+        Assert.Equal((firstMs + 4 * stepMs) * 1_000_000, captured.ToUnixNs);    // floor(210s) + 1 bucket
+    }
+
+    [Fact]
+    public async Task ChartSelection_Live_AlignsWindowToWholeSeconds() {
+        // Live buffers are 1-second buckets; the fetch window must sit on
+        // whole-second boundaries and span at least one bucket.
+        var (vm, client) = CreateViewModelWithClient();
+        GetProcessDestinationsRequest? captured = null;
+        client.ProcessDestinationsResponder = req => { captured = req; return new GetProcessDestinationsResponse(); };
+
+        vm.ChartSelection = new ChartSelectionRange(0.2, 0.8);
+        for (var i = 0; i < 10 && captured is null; i++) await Task.Yield();
+
+        Assert.NotNull(captured);
+        Assert.Equal(0, captured.FromUnixNs % 1_000_000_000);
+        Assert.Equal(0, captured.ToUnixNs % 1_000_000_000);
+        Assert.True(captured.ToUnixNs - captured.FromUnixNs >= 1_000_000_000);
+    }
+
+    [Fact]
+    public async Task ChartSelection_HistoricalSinglePointChart_MapsWithinPaddedSpan() {
+        // A lone bucket renders via the 11-sample spike layout; a selection
+        // over it must not throw and must fetch a window wrapping the bucket.
+        var (vm, client) = CreateViewModelWithClient();
+        var bucket = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        client.AggregateTimelineResponder = (_, _) => BuildTimelineGrid(bucket, 60_000, 1);
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last7Days);
+
+        GetProcessDestinationsRequest? captured = null;
+        client.ProcessDestinationsResponder = req => { captured = req; return new GetProcessDestinationsResponse(); };
+        vm.ChartSelection = new ChartSelectionRange(0.0, 1.0);
+        for (var i = 0; i < 10 && captured is null; i++) await Task.Yield();
+
+        Assert.NotNull(captured);
+        var bucketNs = bucket.ToUnixTimeMilliseconds() * 1_000_000;
+        Assert.True(captured.FromUnixNs <= bucketNs);
+        Assert.True(captured.ToUnixNs > bucketNs);
+    }
+
+    [Fact]
+    public void ChartSelection_HistoricalWithNoDrawnChart_DropsTheGesture() {
+        // No drawn historical chart (empty range) → nothing to anchor the
+        // fractions to; the gesture is dropped instead of fetching a window
+        // computed against a stale or meaningless domain.
+        var (vm, client) = CreateViewModelWithClient();
+        client.AggregateTimelineResponder = (_, _) => new GetAggregateTimelineResponse();
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last7Days);
+
+        var fetchFired = false;
+        client.ProcessDestinationsResponder = _ => { fetchFired = true; return new GetProcessDestinationsResponse(); };
+        vm.ChartSelection = new ChartSelectionRange(0.1, 0.4);
+
+        Assert.Null(vm.ChartSelection);
+        Assert.False(vm.IsSelectionActive);
+        Assert.False(fetchFired);
+    }
+
     // ---- Process-row context menu ----
 
     private sealed record MenuHarness(

@@ -192,6 +192,18 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     private DateTimeOffset _selectionFrom;
     private DateTimeOffset _selectionTo;
 
+    // Wall-clock domain of the drawn historical chart: timestamps of the
+    // first and last rendered samples plus the grid step, captured when
+    // ApplyHistoricalChart runs. The selection overlay reports plot-width
+    // fractions; mapping them through this domain (instead of the requested
+    // range) anchors selections to what is actually drawn — an All Time
+    // request starts at the Unix epoch, but its chart starts at the first
+    // recorded bucket (ADR 017). Zero when no historical chart is drawn.
+    // Live mode doesn't use these: its drawn domain is always now−5min → now.
+    private long _chartDomainFromMs;
+    private long _chartDomainToMs;
+    private long _chartDomainResolutionMs;
+
     /// <summary>Destinations (host/IP + speed) reached in the selected window, fastest first.</summary>
     public ObservableCollection<SelectionDestinationRow> SelectionDestinations { get; } = [];
 
@@ -399,12 +411,39 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             return;
         }
 
-        // Map the plot-width fractions onto the chart's current window, captured
-        // now so a live window doesn't shift under the selection.
-        var window = SelectedTimeRange.Resolve();
-        var span = window.To - window.From;
-        _selectionFrom = window.From + span * value.Value.StartFraction;
-        _selectionTo = window.From + span * value.Value.EndFraction;
+        // Map the plot-width fractions onto the DRAWN time domain. Live mode:
+        // buffers are 1 sample = 1 second, right-aligned at now (heartbeat +
+        // gap-fill, ADR 017), so the domain is the resolved 5-minute window,
+        // captured now so it doesn't shift under the selection. Historical
+        // mode: the chart draws the zero-filled data extent, not the requested
+        // range, so fractions map through the domain ApplyHistoricalChart
+        // captured.
+        long resolutionMs;
+        DateTimeOffset domainFrom, domainTo;
+        if (SelectedTimeRange.IsLive) {
+            var window = SelectedTimeRange.Resolve();
+            domainFrom = window.From;
+            domainTo = window.To;
+            resolutionMs = 1_000;
+        } else if (_chartDomainToMs > _chartDomainFromMs && _chartDomainResolutionMs > 0) {
+            domainFrom = DateTimeOffset.FromUnixTimeMilliseconds(_chartDomainFromMs);
+            domainTo = DateTimeOffset.FromUnixTimeMilliseconds(_chartDomainToMs);
+            resolutionMs = _chartDomainResolutionMs;
+        } else {
+            // No drawn historical chart to anchor the fractions — drop the gesture.
+            ChartSelection = null;
+            return;
+        }
+
+        var span = domainTo - domainFrom;
+        var pointerFrom = domainFrom + span * value.Value.StartFraction;
+        var pointerTo = domainFrom + span * value.Value.EndFraction;
+        // Align outward to the drawn bucket grid: floor the start to its
+        // bucket, extend the end past its bucket. Buckets cover
+        // [start, start + res), so a band edge sitting on a drawn peak still
+        // includes that bucket's bytes.
+        _selectionFrom = FloorToGrid(pointerFrom, resolutionMs);
+        _selectionTo = FloorToGrid(pointerTo, resolutionMs).AddMilliseconds(resolutionMs);
         SelectionWindowLabel = FormatSelectionWindow(_selectionFrom, _selectionTo);
 
         var processPath = SelectedProcess is null || SelectedProcess.IsAll ? null : SelectedProcess.ProcessPath;
@@ -454,6 +493,17 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             SelectionLoading = false;
             SelectionFailed = true;
         }
+    }
+
+    private static DateTimeOffset FloorToGrid(DateTimeOffset value, long resolutionMs) {
+        var unixMs = value.ToUnixTimeMilliseconds();
+        return DateTimeOffset.FromUnixTimeMilliseconds(unixMs - unixMs % resolutionMs);
+    }
+
+    private void ResetChartDomain() {
+        _chartDomainFromMs = 0;
+        _chartDomainToMs = 0;
+        _chartDomainResolutionMs = 0;
     }
 
     private static string FormatSelectionWindow(DateTimeOffset from, DateTimeOffset to) {
@@ -676,6 +726,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             _historicalQueries.CancelInFlight();
             _processList.Clear();
             ChartDataSpan = null;
+            ResetChartDomain();
             if (_lastStates is not null) {
                 UpdateFromStates(_lastStates);
             }
@@ -742,6 +793,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
                 IsEmpty = true;
                 IsLoading = false;
                 ChartData = [];
+                ResetChartDomain();
                 return;
             }
 
@@ -810,6 +862,7 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
 
             if (result.Points.Count == 0) {
                 ChartData = [];
+                ResetChartDomain();
                 return;
             }
 
@@ -1030,6 +1083,24 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
     private void ApplyHistoricalChart(IReadOnlyList<TrafficTimePoint> points, long resolutionMs) {
         var (downloadValues, uploadValues, dataSpanMs) =
             BuildChartArrays(points, resolutionMs);
+
+        // Capture the drawn domain (first/last sample wall-clock + grid step)
+        // for the selection overlay's fraction → time mapping. The daemon's
+        // timeline is a contiguous zero-filled grid, so the step falls out of
+        // the endpoints; the single-point spike layout redistributes the lone
+        // bucket across ApplySinglePointPadding's 11-sample span instead.
+        var firstMs = points[0].TimestampUnixNs / 1_000_000;
+        var lastMs = points[^1].TimestampUnixNs / 1_000_000;
+        if (downloadValues.Length == points.Count && points.Count >= 2) {
+            _chartDomainFromMs = firstMs;
+            _chartDomainToMs = lastMs;
+            _chartDomainResolutionMs = (lastMs - firstMs) / (points.Count - 1);
+        } else {
+            var stepMs = Math.Max(dataSpanMs / 10, 1_000);
+            _chartDomainFromMs = firstMs - stepMs;
+            _chartDomainToMs = firstMs + 9 * stepMs;
+            _chartDomainResolutionMs = stepMs;
+        }
 
         ChartDataSpan = TimeSpan.FromMilliseconds(Math.Max(dataSpanMs, 1000));
 
