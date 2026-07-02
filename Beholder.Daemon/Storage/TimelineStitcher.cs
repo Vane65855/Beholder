@@ -7,8 +7,10 @@ namespace Beholder.Daemon.Storage;
 /// Pure static helper that composes a multi-tier timeline. Each time slice of
 /// the request range is served by the finest tier whose retention covers that
 /// slice's age — recent portions from raw 1-second data, older portions
-/// progressively coarser. Output is a uniform-bucket array aligned to an
-/// effective bucket width derived from actual data extent inside the range.
+/// progressively coarser. Output is a contiguous uniform-bucket array aligned
+/// to an effective bucket width derived from actual data extent inside the
+/// range: buckets with no traffic are zero-filled, never omitted, so index↔
+/// wall-clock stays linear across the whole array (ADR 017).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -220,13 +222,29 @@ internal static class TimelineStitcher {
             }
         }
 
-        // Sort by timestamp and convert to TrafficTimePoint list.
-        var results = new List<TrafficTimePoint>(merged.Count);
-        foreach (var kvp in merged.OrderBy(k => k.Key)) {
+        if (merged.Count == 0) return [];
+
+        // Expand the merged buckets onto the uniform grid from first to last
+        // bucket, zero-filling empty buckets. Gaps must render as flat zero
+        // lines, not be compressed away: the chart maps pixels to wall-clock
+        // linearly across the array, and the selection feature converts those
+        // pixels back into query windows (ADR 017). All tiers share the same
+        // GROUP BY alignment, so stepping by the resolution hits every key.
+        var gridStartMs = long.MaxValue;
+        var gridEndMs = long.MinValue;
+        foreach (var ts in merged.Keys) {
+            if (ts < gridStartMs) gridStartMs = ts;
+            if (ts > gridEndMs) gridEndMs = ts;
+        }
+
+        var bucketCount = (gridEndMs - gridStartMs) / effectiveResolutionMs + 1;
+        var results = new List<TrafficTimePoint>((int)bucketCount);
+        for (var ts = gridStartMs; ts <= gridEndMs; ts += effectiveResolutionMs) {
+            merged.TryGetValue(ts, out var bucketBytes);
             results.Add(new TrafficTimePoint(
-                timestamp: DateTimeOffset.FromUnixTimeMilliseconds(kvp.Key),
-                bytesIn: kvp.Value.BytesIn,
-                bytesOut: kvp.Value.BytesOut));
+                timestamp: DateTimeOffset.FromUnixTimeMilliseconds(ts),
+                bytesIn: bucketBytes.BytesIn,
+                bytesOut: bucketBytes.BytesOut));
         }
         return results;
     }

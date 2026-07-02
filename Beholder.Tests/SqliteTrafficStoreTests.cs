@@ -133,16 +133,13 @@ public class SqliteTrafficStoreTests : IDisposable {
 
     [Fact]
     public async Task GetProcessTimelineAsync_GroupsByResolution() {
-        // Write four raw buckets at 0s/2s/5s/2700s. Query at 9-second resolution.
-        // The store's adapter clamps effective resolution to min(requested,
-        // extent/300). Extent = 2700s, extent/300 = 9s, so effective stays at
-        // the requested 9s. SQL GROUP BY re-bucketizes into two 9-second output
-        // windows: [0-9s) covers the first three source rows, [2700-2709s)
-        // covers the fourth.
-        //
-        // BaseTime (2026-04-13 12:00 UTC) is exactly divisible by 9000 ms so
-        // bucket boundaries align to the row timestamps — keeps the assertions
-        // deterministic across runs.
+        // Write four raw buckets at 0s/2s/5s/2700s. Effective resolution is
+        // derived from data extent (the caller's 9s hint is advisory):
+        // extent = 2700s, target = 2700000/400 = 6750 ms, rounded up to the
+        // 10s NiceResolutionsMs entry. The first three source rows land in
+        // the [0-10s) output bucket, the fourth in [2700-2710s), and the
+        // 269 buckets between them are zero-filled (ADR 017) so the array
+        // spans the extent contiguously: 271 points at 10s spacing.
         var buckets = new[] {
             CreateBucket(bytesIn: 100, bytesOut: 50, bucketStart: BaseTime),
             CreateBucket(bytesIn: 200, bytesOut: 100, bucketStart: BaseTime.AddSeconds(2)),
@@ -157,11 +154,16 @@ public class SqliteTrafficStoreTests : IDisposable {
             TimeSpan.FromSeconds(9),
             CancellationToken.None);
 
-        Assert.Equal(2, timeline.Count);
+        Assert.Equal(271, timeline.Count);
         Assert.Equal(600, timeline[0].BytesIn);
         Assert.Equal(300, timeline[0].BytesOut);
-        Assert.Equal(400, timeline[1].BytesIn);
-        Assert.Equal(200, timeline[1].BytesOut);
+        Assert.Equal(400, timeline[^1].BytesIn);
+        Assert.Equal(200, timeline[^1].BytesOut);
+        for (var i = 1; i < timeline.Count - 1; i++) {
+            Assert.Equal(0, timeline[i].BytesIn);
+            Assert.Equal(0, timeline[i].BytesOut);
+            Assert.Equal(TimeSpan.FromSeconds(10), timeline[i].Timestamp - timeline[i - 1].Timestamp);
+        }
     }
 
     [Fact]
@@ -258,6 +260,37 @@ public class SqliteTrafficStoreTests : IDisposable {
         Assert.Single(timeline);
         Assert.Equal(300, timeline[0].BytesIn);
         Assert.Equal(150, timeline[0].BytesOut);
+    }
+
+    [Fact]
+    public async Task GetProcessTimelineAsync_GapBetweenBuckets_ZeroFilled() {
+        // Traffic at 0s and 4s with an idle gap between. Extent = 4s, so the
+        // effective resolution floors at 1s; the output must be 5 contiguous
+        // 1-second buckets with explicit zeros, never a compressed 2-point
+        // array — the chart and the selection feature map index ↔ wall-clock
+        // linearly across the array (ADR 017).
+        var buckets = new[] {
+            CreateBucket(bytesIn: 100, bytesOut: 10, bucketStart: BaseTime),
+            CreateBucket(bytesIn: 500, bytesOut: 50, bucketStart: BaseTime.AddSeconds(4)),
+        };
+        await _store.WriteRawBucketsAsync(buckets, CancellationToken.None);
+
+        var timeline = await _store.GetProcessTimelineAsync(
+            "C:/app/firefox.exe",
+            BaseTime.AddSeconds(-1), BaseTime.AddSeconds(11),
+            TimeSpan.FromSeconds(1),
+            CancellationToken.None);
+
+        Assert.Equal(5, timeline.Count);
+        Assert.Equal(BaseTime, timeline[0].Timestamp);
+        Assert.Equal(100, timeline[0].BytesIn);
+        for (var i = 1; i <= 3; i++) {
+            Assert.Equal(BaseTime.AddSeconds(i), timeline[i].Timestamp);
+            Assert.Equal(0, timeline[i].BytesIn);
+            Assert.Equal(0, timeline[i].BytesOut);
+        }
+        Assert.Equal(BaseTime.AddSeconds(4), timeline[4].Timestamp);
+        Assert.Equal(500, timeline[4].BytesIn);
     }
 
     [Fact]
@@ -922,15 +955,23 @@ public class SqliteTrafficStoreTests : IDisposable {
             TimeSpan.FromMinutes(1),
             CancellationToken.None);
 
-        Assert.Equal(5, timeline.Count);
+        // Zero-fill (ADR 017): the output is a contiguous 1-day grid from the
+        // oldest seeded bucket's day to the newest — 501 points spanning 500
+        // days, uniformly spaced, with zeros between the five seeded rows.
+        Assert.Equal(501, timeline.Count);
+        for (var i = 1; i < timeline.Count; i++) {
+            Assert.Equal(TimeSpan.FromDays(1), timeline[i].Timestamp - timeline[i - 1].Timestamp);
+        }
 
         // Ordered by timestamp (oldest → newest). Verify each tier's row came
         // from the correct tier by checking the byte values we seeded.
-        Assert.Equal(555, timeline[0].BytesIn);  Assert.Equal(55, timeline[0].BytesOut);  // _1h
-        Assert.Equal(444, timeline[1].BytesIn);  Assert.Equal(44, timeline[1].BytesOut);  // _10m
-        Assert.Equal(333, timeline[2].BytesIn);  Assert.Equal(33, timeline[2].BytesOut);  // _1m
-        Assert.Equal(222, timeline[3].BytesIn);  Assert.Equal(22, timeline[3].BytesOut);  // _10s
-        Assert.Equal(111, timeline[4].BytesIn);  Assert.Equal(11, timeline[4].BytesOut);  // raw
+        var nonZero = timeline.Where(p => p.BytesIn != 0 || p.BytesOut != 0).ToList();
+        Assert.Equal(5, nonZero.Count);
+        Assert.Equal(555, nonZero[0].BytesIn);  Assert.Equal(55, nonZero[0].BytesOut);  // _1h
+        Assert.Equal(444, nonZero[1].BytesIn);  Assert.Equal(44, nonZero[1].BytesOut);  // _10m
+        Assert.Equal(333, nonZero[2].BytesIn);  Assert.Equal(33, nonZero[2].BytesOut);  // _1m
+        Assert.Equal(222, nonZero[3].BytesIn);  Assert.Equal(22, nonZero[3].BytesOut);  // _10s
+        Assert.Equal(111, nonZero[4].BytesIn);  Assert.Equal(11, nonZero[4].BytesOut);  // raw
     }
 
     [Fact]
