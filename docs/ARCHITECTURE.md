@@ -140,6 +140,8 @@ The filter is bound via `IOptionsMonitor<RecordingOptions>` so a live reload tak
 
 The v1 filter is deliberately one switch. Future phases may add granular controls (per-path exclusion lists, localhost-only, port ranges) behind the same `Recording` config section.
 
+**Capture-time filtering vs. totals exclusion.** The user-facing "Exclude from totals" list (Settings → Traffic Totals, Phase 13.7) is deliberately NOT a capture-time filter: excluded processes stay fully recorded, alertable, and chain-audited, and are removed only from all-processes *aggregate* views (totals, aggregate timeline, breakdowns) at query/display time. A capture-time drop of a user-chosen process — e.g. the VPN binary every flow transits — would blind the alert pipeline to the one binary that matters most. See [ADR 016](decisions/016-exclude-from-totals.md).
+
 ### LAN Discovery (cold-path)
 
 The Phase 9 LAN scanner runs as a periodic background pass — not a hot-path stream. Every `ScannerOptions.ScanIntervalSeconds` (default 300; floor 30) the cross-platform `LanScannerService` (`Beholder.Daemon/Scanner/`) asks `ILanDeviceProbe.ScanAsync` for one batched scan of the local subnet, then processes the results:
@@ -480,8 +482,9 @@ service BeholderLocal {
     rpc SetFirewallEnabled (SetFirewallEnabledRequest) returns (SetFirewallEnabledResponse);
     // Alert management
     rpc MarkAlertRead (MarkAlertReadRequest) returns (MarkAlertReadResponse);
-    // Chain integrity
+    // Chain integrity (Phase 11)
     rpc VerifyChain (VerifyChainRequest) returns (VerifyChainResponse);
+    rpc ExportChain (ExportChainRequest) returns (ExportChainResponse);
     // Historical traffic queries (Phase 4.6a / 6.5 / 8)
     rpc GetProcessTimeline (GetProcessTimelineRequest) returns (GetProcessTimelineResponse);
     rpc GetProcessDestinations (GetProcessDestinationsRequest) returns (GetProcessDestinationsResponse);
@@ -497,6 +500,17 @@ service BeholderLocal {
     rpc SetLanDeviceLabel (SetLanDeviceLabelRequest) returns (SetLanDeviceLabelResponse);
     // Settings — Data Storage section (Phase 13.1)
     rpc GetStorageStats (GetStorageStatsRequest) returns (GetStorageStatsResponse);
+    // Settings — runtime-mutable sections (Phases 13.2–13.4, 13.7; ADR 010)
+    rpc GetSettings (GetSettingsRequest) returns (GetSettingsResponse);
+    rpc SetRecordingSettings (SetRecordingSettingsRequest) returns (SetRecordingSettingsResponse);
+    rpc SetHostnameResolutionSettings (SetHostnameResolutionSettingsRequest) returns (SetHostnameResolutionSettingsResponse);
+    rpc SetAlertSettings (SetAlertSettingsRequest) returns (SetAlertSettingsResponse);
+    rpc SetScannerSettings (SetScannerSettingsRequest) returns (SetScannerSettingsResponse);
+    rpc SetTotalsSettings (SetTotalsSettingsRequest) returns (SetTotalsSettingsResponse);
+    // Application Identity Overrides (Phase 13.6; ADR 011)
+    rpc AddAppIdentityRule (AddAppIdentityRuleRequest) returns (AddAppIdentityRuleResponse);
+    rpc RemoveAppIdentityRule (RemoveAppIdentityRuleRequest) returns (RemoveAppIdentityRuleResponse);
+    rpc ListAppIdentityRules (ListAppIdentityRulesRequest) returns (ListAppIdentityRulesResponse);
 }
 ```
 
@@ -512,7 +526,7 @@ LAN scanner chain events (`LanDeviceFirstSeen` / `LanDeviceMacChanged`) are push
 
 Phase 9.4 closes the user-facing loop: the Scanner tab UI (`Beholder.Ui/Views/Tabs/ScannerTabView.axaml` + `ScannerTabViewModel`) consumes the 9.3 IPC surface end-to-end. A master-detail layout (320-px-MinWidth device list on the left, full-context detail pane on the right) backed by `ListLanDevices` for the initial snapshot + `LanDeviceFirstSeenEvent` / `LanDeviceMacChangedEvent` for live updates. A "Scan now" button in the header drives `TriggerScan`; the structured `success / message / devices_observed` response renders as a transient warn/danger banner. Mirrors the `AlertsTabViewModel` precedent: single-tab state ownership (no cross-tab state service yet — abstraction deferred to a second-consumer phase), cold-start race handled via the `Task? _activationTask` field, all five required UI states (loading / empty / populated / error / extreme) implemented and tested. End-to-end loop: daemon discovers → store persists → chain audits → broadcast pushes → UI renders.
 
-Phase 13.1 opens the Settings tab with three read-only sections: Data Storage (per-table SQLite row counts + database file size), Maintenance (manual "Verify chain integrity now" button + "Open data folder" button + last-verified timestamp), and About (version + license + third-party attributions). All three are backed by one new RPC, `GetStorageStats`, plus the existing `VerifyChain` RPC for the manual-verify button. The daemon-side `IChainStatusCache` singleton (`Beholder.Daemon/Storage/ChainStatusCache.cs`) is shared between the periodic `ChainIntegrityMonitor` and the user-triggered `VerifyChain` RPC so both writers update the same Settings-tab-visible snapshot. Interactive settings sections (Storage retention preset, Recording, Hostname Resolution, Alerts, Scanner) ship in Phases 13.2–13.6, each adding its own runtime-mutable state singleton following the `FirewallEnforcementState` precedent.
+Phase 13.1 opens the Settings tab with three read-only sections: Data Storage (per-table SQLite row counts + database file size), Maintenance (manual "Verify chain integrity now" button + "Open data folder" button + last-verified timestamp), and About (version + license + third-party attributions). All three are backed by one new RPC, `GetStorageStats`, plus the existing `VerifyChain` RPC for the manual-verify button. The daemon-side `IChainStatusCache` singleton (`Beholder.Daemon/Storage/ChainStatusCache.cs`) is shared between the periodic `ChainIntegrityMonitor` and the user-triggered `VerifyChain` RPC so both writers update the same Settings-tab-visible snapshot. Interactive settings sections (Recording, Hostname Resolution, Alerts, Scanner, Application Identity Overrides, Traffic Totals) shipped in Phases 13.2–13.7, each adding its own runtime-mutable state singleton following the `FirewallEnforcementState` precedent; the Storage retention preset picker (13.5) remains deferred.
 
 ## Uplink Protocol (Daemon → Aggregator)
 
