@@ -2,6 +2,7 @@ using System.Reflection;
 using Beholder.Protocol.Local;
 using Beholder.Tests.TestDoubles;
 using Beholder.Ui.Controls;
+using Beholder.Ui.Helpers;
 using Beholder.Ui.Models;
 using Beholder.Ui.Services;
 using Beholder.Ui.ViewModels;
@@ -865,7 +866,8 @@ public class TrafficTabViewModelTests {
         Assert.Equal("one.example", row.DisplayName);
         Assert.Equal("1.1.1.1", row.RemoteAddress);
         Assert.True(row.ShowAddress);
-        Assert.NotEmpty(row.SpeedLabel);
+        Assert.NotEmpty(row.DownSpeedLabel);
+        Assert.NotEmpty(row.UpSpeedLabel);
         Assert.False(vm.SelectionLoading);
     }
 
@@ -941,6 +943,34 @@ public class TrafficTabViewModelTests {
         var firstMs = firstBucket.ToUnixTimeMilliseconds();
         Assert.Equal((firstMs + 1 * stepMs) * 1_000_000, captured.FromUnixNs);  // floor(90s) = bucket 1
         Assert.Equal((firstMs + 4 * stepMs) * 1_000_000, captured.ToUnixNs);    // floor(210s) + 1 bucket
+    }
+
+    [Fact]
+    public async Task ChartSelection_SpeedLabels_UsePerDirectionRates() {
+        // Each row's speeds are per-direction averages over the aligned
+        // window — rendered with the ▼ teal / ▲ purple traffic colors, so
+        // the numbers must actually be download and upload, not a combined
+        // figure. Historical mode gives a deterministic window: fractions
+        // 0.15–0.35 of a 10-minute drawn domain align to exactly 180 s.
+        var (vm, client) = CreateViewModelWithClient();
+        var firstBucket = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        client.AggregateTimelineResponder = (_, _) => BuildTimelineGrid(firstBucket, 60_000, 11);
+        vm.SelectedTimeRange = TimeRangeSelection.FromPreset(TimeRangePreset.Last7Days);
+
+        client.ProcessDestinationsResponder = _ => {
+            var response = new GetProcessDestinationsResponse();
+            response.Destinations.Add(new DestinationSummary {
+                RemoteAddress = "1.1.1.1", TotalBytesIn = 1800, TotalBytesOut = 360,
+            });
+            return response;
+        };
+        vm.ChartSelection = new ChartSelectionRange(0.15, 0.35);
+        for (var i = 0; i < 10 && vm.SelectionDestinations.Count == 0; i++) await Task.Yield();
+
+        var row = Assert.Single(vm.SelectionDestinations);
+        Assert.Equal(ByteFormatter.FormatRate(10), row.DownSpeedLabel);
+        Assert.Equal(ByteFormatter.FormatRate(2), row.UpSpeedLabel);
+        Assert.Equal(ByteFormatter.FormatBytes(2160), row.BytesLabel);
     }
 
     [Fact]

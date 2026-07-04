@@ -468,19 +468,20 @@ internal sealed partial class TrafficTabViewModel : ViewModelBase, IDisposable {
             var response = await _daemonClient.GetProcessDestinationsAsync(request, cancellationToken);
             if (cancellationToken.IsCancellationRequested) return;
 
-            // Average speed = total bytes over the window; with a shared window
-            // this preserves the daemon's fastest-first (bytes-desc) order.
+            // Average speeds = per-direction bytes over the window; with a
+            // shared window this preserves the daemon's fastest-first
+            // (combined-bytes-desc) order.
             var windowSeconds = Math.Max(1.0, (to - from).TotalSeconds);
             SelectionDestinations.Clear();
             foreach (var d in response.Destinations) {
                 var hasHost = !string.IsNullOrWhiteSpace(d.Hostname);
-                var total = d.TotalBytesIn + d.TotalBytesOut;
                 SelectionDestinations.Add(new SelectionDestinationRow(
                     DisplayName: hasHost ? d.Hostname : d.RemoteAddress,
                     RemoteAddress: d.RemoteAddress,
                     ShowAddress: hasHost,
-                    SpeedLabel: ByteFormatter.FormatRate((long)(total / windowSeconds)),
-                    BytesLabel: ByteFormatter.FormatBytes(total)));
+                    DownSpeedLabel: ByteFormatter.FormatRate((long)(d.TotalBytesIn / windowSeconds)),
+                    UpSpeedLabel: ByteFormatter.FormatRate((long)(d.TotalBytesOut / windowSeconds)),
+                    BytesLabel: ByteFormatter.FormatBytes(d.TotalBytesIn + d.TotalBytesOut)));
             }
             SelectionLoading = false;
             SelectionEmpty = SelectionDestinations.Count == 0;

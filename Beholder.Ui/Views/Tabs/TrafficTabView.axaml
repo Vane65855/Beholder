@@ -386,7 +386,13 @@
                                             </ItemsControl.ItemsPanel>
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="vm:SelectionDestinationRow">
-                                                    <Grid ColumnDefinitions="*,Auto,Auto" Height="24" Margin="0,0,0,2">
+                                                    <Grid Height="24" Margin="0,0,0,2">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" MinWidth="88" />
+                                                            <ColumnDefinition Width="Auto" MinWidth="88" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
                                                         <StackPanel Grid.Column="0"
                                                                     Orientation="Horizontal"
                                                                     Spacing="8"
@@ -403,13 +409,39 @@
                                                                        Foreground="{DynamicResource TextMuted}"
                                                                        VerticalAlignment="Center" />
                                                         </StackPanel>
-                                                        <TextBlock Grid.Column="1"
-                                                                   Text="{Binding SpeedLabel}"
-                                                                   Foreground="{DynamicResource AccentPrimary}"
-                                                                   FontSize="{DynamicResource FontSizeBody}"
-                                                                   VerticalAlignment="Center"
-                                                                   Margin="0,0,16,0" />
-                                                        <TextBlock Grid.Column="2"
+                                                        <!-- Per-direction average speeds in the app-wide
+                                                             traffic colors: the arrow glyph carries the
+                                                             semantics (▼ teal download / ▲ purple upload,
+                                                             the process-list idiom), the number stays
+                                                             neutral. ChartOutbound/InboundStroke token
+                                                             names are legacy — see DarkTheme.axaml. -->
+                                                        <StackPanel Grid.Column="1"
+                                                                    Orientation="Horizontal"
+                                                                    HorizontalAlignment="Right"
+                                                                    VerticalAlignment="Center"
+                                                                    Margin="0,0,16,0"
+                                                                    ToolTip.Tip="Average download speed over the selected window.">
+                                                            <TextBlock Text="▼ "
+                                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                                       Foreground="{DynamicResource ChartOutboundStroke}" />
+                                                            <TextBlock Text="{Binding DownSpeedLabel}"
+                                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                                       Foreground="{DynamicResource TextSecondary}" />
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="2"
+                                                                    Orientation="Horizontal"
+                                                                    HorizontalAlignment="Right"
+                                                                    VerticalAlignment="Center"
+                                                                    Margin="0,0,16,0"
+                                                                    ToolTip.Tip="Average upload speed over the selected window.">
+                                                            <TextBlock Text="▲ "
+                                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                                       Foreground="{DynamicResource ChartInboundStroke}" />
+                                                            <TextBlock Text="{Binding UpSpeedLabel}"
+                                                                       FontSize="{DynamicResource FontSizeBody}"
+                                                                       Foreground="{DynamicResource TextSecondary}" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="3"
                                                                    Text="{Binding BytesLabel}"
                                                                    Foreground="{DynamicResource TextSecondary}"
                                                                    FontSize="{DynamicResource FontSizeBody}"
